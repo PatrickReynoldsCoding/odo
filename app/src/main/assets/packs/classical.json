@@ -2,7 +2,7 @@
   "id": "classical",
   "name": "Classical",
   "order": 1,
-  "description": "Cello, violin and piano: the three instruments fitted to real recordings (solo Bach by two concert soloists; a Steinway B and a Bösendorfer). The best sounds in the app.",
+  "description": "Cello, violin and piano: the three instruments fitted to real recordings (solo Bach by two concert soloists; a Steinway B and a Bösendorfer). The best sounds in the app. Max Richter is the piano after his recordings (felt-dark, close, with the strings ringing on), fitted to two of his albums.",
   "source": "https://github.com/PatrickReynoldsCoding/faust-mpe-instruments",
   "groups": [
     {
@@ -17,7 +17,8 @@
       "id": "keys",
       "name": "Keys",
       "instruments": [
-        "keys/piano"
+        "keys/piano",
+        "keys/max-richter"
       ]
     }
   ]
