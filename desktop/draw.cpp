@@ -1,6 +1,10 @@
 #include "draw.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
+#include <unordered_map>
+#include "stb_truetype.h"
 
 namespace draw {
 
@@ -96,54 +100,264 @@ static void vgradient(SDL_Renderer* r, float x, float y, float w, float h, Color
     tris(r, {a, b, c, a, c, d});
 }
 
-// SDL's debug font is ASCII: sharps and flats become # and b.
-static std::string ascii(const std::string& s) {
-    std::string out;
+// ---- text ----------------------------------------------------------------------------------------
+// Roboto, the same files odo on Android draws with (ui/fonts, carried in the binary), with Noto Sans
+// Symbols for the few signs Roboto lacks (sharps and flats, arrows), as Android falls back to it.
+// Glyphs are rasterised by stb_truetype at the size they show on screen (points x render scale) into
+// an atlas texture per weight and size, and drawn as textured quads.
+
+}  // namespace draw
+
+namespace embedded {
+extern const unsigned char Roboto_Regular[], Roboto_Bold[], NotoSansSymbols_Regular_Subset[], NotoSansSymbols_Bold_Subset[];
+}
+
+namespace draw {
+
+namespace {
+
+struct Face {
+    stbtt_fontinfo info{};
+    bool ok = false;
+};
+
+// [bold]: Roboto, then the symbols.
+struct Fonts {
+    Face roboto[2], symbols[2];
+    Fonts() {
+        auto load = [](Face& f, const unsigned char* data) { f.ok = stbtt_InitFont(&f.info, data, stbtt_GetFontOffsetForIndex(data, 0)) != 0; };
+        load(roboto[0], embedded::Roboto_Regular);
+        load(roboto[1], embedded::Roboto_Bold);
+        load(symbols[0], embedded::NotoSansSymbols_Regular_Subset);
+        load(symbols[1], embedded::NotoSansSymbols_Bold_Subset);
+    }
+};
+
+Fonts& fonts() {
+    static Fonts f;
+    return f;
+}
+
+// A character's glyph: the face it comes from and its index there.
+struct Mapped {
+    const Face* face;
+    int glyph;
+};
+
+Mapped mapChar(uint32_t cp, bool bold) {
+    Fonts& f = fonts();
+    const Face& main = f.roboto[bold ? 1 : 0];
+    int g = main.ok ? stbtt_FindGlyphIndex(&main.info, int(cp)) : 0;
+    if (g) return {&main, g};
+    const Face& sym = f.symbols[bold ? 1 : 0];
+    if (sym.ok && (g = stbtt_FindGlyphIndex(&sym.info, int(cp)))) return {&sym, g};
+    return {&main, 0};   // Roboto's empty box
+}
+
+// The next character of a UTF-8 string; a broken sequence reads as U+FFFD.
+uint32_t nextChar(const std::string& s, size_t& i) {
+    unsigned char c = (unsigned char)s[i++];
+    if (c < 0x80) return c;
+    int more = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : -1;
+    if (more < 0 || c > 0xF4) return 0xFFFD;
+    uint32_t cp = c & (0x3Fu >> more);
+    for (int k = 0; k < more; k++) {
+        if (i >= s.size() || ((unsigned char)s[i] & 0xC0) != 0x80) return 0xFFFD;
+        cp = (cp << 6) | ((unsigned char)s[i++] & 0x3F);
+    }
+    return cp;
+}
+
+// A string as glyphs, each with how far the pen moves after it.
+struct Run {
+    Mapped m;
+    float advance;   // in pixels at `px`, with the kerning to the next glyph
+};
+
+std::vector<Run> shape(const std::string& s, bool bold, float px) {
+    std::vector<Run> out;
     for (size_t i = 0; i < s.size();) {
-        unsigned char c = (unsigned char)s[i];
-        if (c < 0x80) { out += char(c); i++; continue; }
-        if (!s.compare(i, 3, "\xE2\x99\xAF")) { out += '#'; i += 3; continue; }
-        if (!s.compare(i, 3, "\xE2\x99\xAD")) { out += 'b'; i += 3; continue; }
-        if (!s.compare(i, 3, "\xE2\x88\x92")) { out += '-'; i += 3; continue; }
-        out += '?';
-        i++;
-        while (i < s.size() && ((unsigned char)s[i] & 0xC0) == 0x80) i++;
+        Mapped m = mapChar(nextChar(s, i), bold);
+        if (!m.face->ok) continue;
+        int adv, lsb;
+        stbtt_GetGlyphHMetrics(&m.face->info, m.glyph, &adv, &lsb);
+        float scale = stbtt_ScaleForMappingEmToPixels(&m.face->info, px);
+        if (!out.empty() && out.back().m.face == m.face)
+            out.back().advance += float(stbtt_GetGlyphKernAdvance(&m.face->info, out.back().m.glyph, m.glyph)) * scale;
+        out.push_back({m, float(adv) * scale});
     }
     return out;
 }
 
-float textWidth(float size, const std::string& utf8) { return float(ascii(utf8).size()) * size; }
+float width(const std::vector<Run>& runs) {
+    float w = 0;
+    for (const Run& r : runs) w += r.advance;
+    return w;
+}
+
+// The glyphs of one weight at one size, packed in rows into a texture.
+struct Atlas {
+    struct Glyph {
+        int x = 0, y = 0, w = 0, h = 0;   // in the texture
+        int xoff = 0, yoff = 0;          // from the pen on the baseline to the bitmap's top left
+    };
+    SDL_Texture* tex = nullptr;
+    int dim = 0, rowX = 0, rowY = 0, rowH = 0;
+    uint64_t used = 0;
+    std::unordered_map<uint64_t, Glyph> glyphs;   // by face and glyph index
+};
+
+struct Cache {
+    SDL_Renderer* renderer = nullptr;
+    std::map<std::pair<int, bool>, Atlas> atlases;   // by size in half pixels, and weight
+    uint64_t clock = 0;
+};
+
+Cache& cache() {
+    static Cache c;
+    return c;
+}
+
+constexpr size_t kMaxAtlases = 24;
+
+Atlas* atlasFor(SDL_Renderer* r, int halfPx, bool bold) {
+    Cache& c = cache();
+    if (c.renderer != r) {              // a new renderer: the old one took its textures with it
+        c.atlases.clear();
+        c.renderer = r;
+    }
+    auto key = std::make_pair(halfPx, bold);
+    auto it = c.atlases.find(key);
+    if (it == c.atlases.end()) {
+        if (c.atlases.size() >= kMaxAtlases) {   // too many sizes: let the longest unused go
+            auto old = c.atlases.begin();
+            for (auto j = c.atlases.begin(); j != c.atlases.end(); ++j)
+                if (j->second.used < old->second.used) old = j;
+            if (old->second.tex) SDL_DestroyTexture(old->second.tex);
+            c.atlases.erase(old);
+        }
+        Atlas a;
+        float px = float(halfPx) / 2;
+        a.dim = 128;
+        while (a.dim < 2048 && float(a.dim) < px * 18) a.dim *= 2;   // room for a few hundred glyphs
+        a.tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, a.dim, a.dim);
+        if (!a.tex) return nullptr;
+        SDL_SetTextureBlendMode(a.tex, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(a.tex, SDL_SCALEMODE_LINEAR);
+        it = c.atlases.emplace(key, std::move(a)).first;
+    }
+    it->second.used = ++c.clock;
+    return &it->second;
+}
+
+// The glyph's place in the atlas, rasterising it the first time. False when the atlas is full: then
+// it has been emptied, and glyphs looked up before are gone.
+bool glyphIn(Atlas& a, const Mapped& m, float px, Atlas::Glyph& out) {
+    uint64_t key = (uint64_t(reinterpret_cast<uintptr_t>(m.face)) << 20) ^ uint64_t(m.glyph);
+    auto it = a.glyphs.find(key);
+    if (it != a.glyphs.end()) { out = it->second; return true; }
+    float scale = stbtt_ScaleForMappingEmToPixels(&m.face->info, px);
+    int x0, y0, x1, y1;
+    stbtt_GetGlyphBitmapBox(&m.face->info, m.glyph, scale, scale, &x0, &y0, &x1, &y1);
+    Atlas::Glyph g;
+    g.w = x1 - x0;
+    g.h = y1 - y0;
+    g.xoff = x0;
+    g.yoff = y0;
+    if (g.w > 0 && g.h > 0) {
+        const int pad = 1;
+        if (g.w + pad > a.dim || g.h + pad > a.dim) { a.glyphs[key] = Atlas::Glyph{}; out = {}; return true; }
+        if (a.rowX + g.w + pad > a.dim) { a.rowX = 0; a.rowY += a.rowH; a.rowH = 0; }
+        if (a.rowY + g.h + pad > a.dim) {            // full: start it again
+            a.glyphs.clear();
+            a.rowX = a.rowY = a.rowH = 0;
+            return false;
+        }
+        std::vector<unsigned char> alpha(size_t(g.w) * size_t(g.h));
+        stbtt_MakeGlyphBitmap(&m.face->info, alpha.data(), g.w, g.h, g.w, scale, scale, m.glyph);
+        std::vector<uint32_t> rgba(alpha.size());
+        for (size_t k = 0; k < alpha.size(); k++) {
+            const unsigned char px4[4] = {255, 255, 255, alpha[k]};
+            std::memcpy(&rgba[k], px4, 4);
+        }
+        g.x = a.rowX;
+        g.y = a.rowY;
+        SDL_Rect dst{g.x, g.y, g.w, g.h};
+        SDL_UpdateTexture(a.tex, &dst, rgba.data(), g.w * 4);
+        a.rowX += g.w + pad;
+        a.rowH = std::max(a.rowH, g.h + pad);
+    }
+    a.glyphs[key] = g;
+    out = g;
+    return true;
+}
+
+}  // namespace
+
+float textWidth(float size, const std::string& utf8, bool bold) {
+    return size > 0 ? width(shape(utf8, bold, size)) : 0;
+}
+
+std::string fit(const std::string& utf8, float size, float room, bool bold) {
+    if (textWidth(size, utf8, bold) <= room) return utf8;
+    const std::string dots = "\xE2\x80\xA6";   // …
+    // Whole characters only: cut at the start of one, and drop spaces left at the end.
+    std::vector<size_t> starts;
+    for (size_t i = 0; i < utf8.size();) { starts.push_back(i); nextChar(utf8, i); }
+    size_t lo = 0, hi = starts.size() - 1;   // the longest prefix (in characters) that fits with the dots
+    while (lo < hi) {
+        size_t mid = (lo + hi + 1) / 2;
+        if (textWidth(size, utf8.substr(0, starts[mid]) + dots, bold) <= room) lo = mid;
+        else hi = mid - 1;
+    }
+    std::string head = lo < starts.size() ? utf8.substr(0, starts[lo]) : utf8;
+    while (!head.empty() && head.back() == ' ') head.pop_back();
+    return head + dots;
+}
 
 void text(SDL_Renderer* r, float x, float y, float size, Color c, const std::string& utf8, int align, bool bold) {
-    std::string s = ascii(utf8);
-    if (s.empty() || c.a <= 0) return;
-    float scale = size / 8.f, w = float(s.size()) * size;
+    if (utf8.empty() || c.a <= 0 || size <= 0) return;
+    float sx = 1, sy = 1;
+    SDL_GetRenderScale(r, &sx, &sy);
+    if (sx <= 0) sx = 1;
+    // The glyphs are made at the size they show in pixels (to the half pixel, so a few sizes share them).
+    int halfPx = std::max(2, int(std::lround(size * sx * 2)));
+    float px = float(halfPx) / 2;
+    std::vector<Run> runs = shape(utf8, bold, px);
+    float w = width(runs) / sx;
     if (align == 1) x -= w / 2;
     else if (align == 2) x -= w;
-    y -= size;   // y is the baseline
-    // The debug font is scaled with the render scale, which also scales the viewport's place:
-    // so draw without the viewport, moved by its offset, and put both back after.
-    const bool hasViewport = SDL_RenderViewportSet(r);
+    Atlas* a = atlasFor(r, halfPx, bold);
+    if (!a) return;
+    // On whole pixels of the window (the viewport's place counts), so the glyphs stay sharp.
     SDL_Rect vp{0, 0, 0, 0};
-    if (hasViewport) SDL_GetRenderViewport(r, &vp);
-    x += float(vp.x);
-    y += float(vp.y);
-    float sx, sy;
-    SDL_GetRenderScale(r, &sx, &sy);
-    SDL_SetRenderViewport(r, nullptr);
-    SDL_SetRenderScale(r, sx * scale, sy * scale);
-    // Kept inside the viewport it was meant for (a side of a split), as the shapes are.
-    if (hasViewport) {
-        SDL_Rect clip{int(std::floor(float(vp.x) / scale)), int(std::floor(float(vp.y) / scale)),
-                      int(std::ceil(float(vp.w) / scale)), int(std::ceil(float(vp.h) / scale))};
-        SDL_SetRenderClipRect(r, &clip);
+    if (SDL_RenderViewportSet(r)) SDL_GetRenderViewport(r, &vp);
+    float penX = std::round((x + float(vp.x)) * sx), baseY = std::round((y + float(vp.y)) * sx);
+    std::vector<Atlas::Glyph> glyphs(runs.size());
+    for (int attempt = 0; attempt < 2; attempt++) {   // a second go if the atlas filled up on the way
+        bool ok = true;
+        for (size_t k = 0; k < runs.size() && ok; k++) ok = glyphIn(*a, runs[k].m, px, glyphs[k]);
+        if (ok) break;
+        if (attempt == 1) return;
     }
-    SDL_SetRenderDrawColorFloat(r, c.r, c.g, c.b, c.a);
-    SDL_RenderDebugText(r, x / scale, y / scale, s.c_str());
-    if (bold) SDL_RenderDebugText(r, x / scale + 0.6f, y / scale, s.c_str());
-    if (hasViewport) SDL_SetRenderClipRect(r, nullptr);
-    SDL_SetRenderScale(r, sx, sy);
-    if (hasViewport) SDL_SetRenderViewport(r, &vp);
+    const float inv = 1.f / float(a->dim);
+    SDL_FColor col = fc(c);
+    std::vector<SDL_Vertex> v;
+    v.reserve(runs.size() * 6);
+    float pen = 0;
+    for (size_t k = 0; k < runs.size(); k++) {
+        const Atlas::Glyph& g = glyphs[k];
+        if (g.w > 0 && g.h > 0) {
+            float gx = penX + std::round(pen) + float(g.xoff), gy = baseY + float(g.yoff);
+            float x0 = gx / sx - float(vp.x), y0 = gy / sx - float(vp.y);
+            float x1 = x0 + float(g.w) / sx, y1 = y0 + float(g.h) / sx;
+            float u0 = float(g.x) * inv, v0 = float(g.y) * inv, u1 = float(g.x + g.w) * inv, v1 = float(g.y + g.h) * inv;
+            SDL_Vertex p0{{x0, y0}, col, {u0, v0}}, p1{{x1, y0}, col, {u1, v0}}, p2{{x1, y1}, col, {u1, v1}}, p3{{x0, y1}, col, {u0, v1}};
+            for (const SDL_Vertex& q : {p0, p1, p2, p0, p2, p3}) v.push_back(q);
+        }
+        pen += runs[k].advance;
+    }
+    if (!v.empty()) SDL_RenderGeometry(r, a->tex, v.data(), int(v.size()), nullptr, 0);
 }
 
 // ---- a controller's draw list ------------------------------------------------------------------

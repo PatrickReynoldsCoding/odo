@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
@@ -80,7 +81,10 @@ fun PackageSurface(c: PackageController) {
         onDispose { Native.nativeCtlStop() }
     }
     val center = AppState.instrument(0)?.centerNote ?: 60f
+    // A split (the Grid's): the second part's instrument too, so its half centres on its own sound.
+    val center1 = if (c.inUse > 1) AppState.instrument(1)?.centerNote else null
     LaunchedEffect(center) { Native.nativeCtlInstrument(0, center) }
+    LaunchedEffect(center1) { center1?.let { Native.nativeCtlInstrument(1, it) } }
     LaunchedEffect(c) {
         while (true) {
             withFrameNanos { }
@@ -90,6 +94,8 @@ fun PackageSurface(c: PackageController) {
     }
     failed?.let { Box(Modifier.fillMaxSize()) { Text("This controller can't run: $it", color = Warn, fontSize = 14.sp, modifier = Modifier.padding(16.dp)) }; return }
     var sized by remember { mutableStateOf(Size.Zero) }
+    val context = LocalContext.current
+    val faces = remember { OdoTypefaces(context) }
     Canvas(Modifier.fillMaxSize().clipToBounds().systemGestureExclusion()
         .pointerInput(c) {
             awaitPointerEventScope {
@@ -113,10 +119,11 @@ fun PackageSurface(c: PackageController) {
             sized = size
             Native.nativeCtlInit(size.width / density, size.height / density, if (Eink) 1 else 0)
             Native.nativeCtlInstrument(0, center)
+            center1?.let { Native.nativeCtlInstrument(1, it) }
             c.values.forEachIndexed { k, v -> Native.nativeCtlSetting(k, v) }
         }
         val d = density
-        list?.let { bytes -> withTransform({ scale(d, d, Offset.Zero) }) { drawList(bytes, size.width / d, size.height / d) } }
+        list?.let { bytes -> withTransform({ scale(d, d, Offset.Zero) }) { drawList(bytes, size.width / d, size.height / d, faces) } }
     }
 }
 
@@ -126,8 +133,8 @@ private fun color(c: Int): Color {
                  alpha = (u and 255).toInt())
 }
 
-/** A draw list (CONTROLLER_FORMAT.md), in dp. An operation it doesn't know ends the drawing. */
-private fun DrawScope.drawList(bytes: ByteArray, w: Float, h: Float) {
+/** A draw list (CONTROLLER_FORMAT.md), in dp, its text in odo's Roboto. An operation it doesn't know ends the drawing. */
+private fun DrawScope.drawList(bytes: ByteArray, w: Float, h: Float, faces: OdoTypefaces) {
     val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     val text = android.graphics.Paint().apply { isAntiAlias = true }
     while (b.remaining() >= 4) {
@@ -168,7 +175,7 @@ private fun DrawScope.drawList(bytes: ByteArray, w: Float, h: Float) {
                 val raw = ByteArray(n); b.get(raw); b.position(b.position() + padded - n)
                 text.textSize = size
                 text.color = c.toArgb()
-                text.isFakeBoldText = flags and 4 != 0
+                text.typeface = if (flags and 4 != 0) faces.bold else faces.regular
                 text.textAlign = when (flags and 3) { 1 -> android.graphics.Paint.Align.CENTER; 2 -> android.graphics.Paint.Align.RIGHT
                                                       else -> android.graphics.Paint.Align.LEFT }
                 drawContext.canvas.nativeCanvas.drawText(raw.decodeToString(), x, y, text)

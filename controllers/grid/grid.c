@@ -28,7 +28,7 @@
 
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
-    S_COLS, S_LAYOUT, S_LOCK, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
+    S_COLS, S_LAYOUT, S_LOCK, S_SPLIT, S_SPLIT_SIZE, S_TOP_WAY, S_TOP_NOTES, S_TOP_SCALE, S_TOP_KEY, S_TOP_OCTAVE, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
     S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_ZONE_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
     S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 6,
     /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
@@ -39,7 +39,7 @@ enum {
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
-static double set_[S_COUNT] = {3, 0, 1, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 0,
+static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 0,
                                ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1,
                                100, 100, 0, 100, 100, 0};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
@@ -107,7 +107,8 @@ static void turn_to(float sw, float sh);
 static float W = 400, H = 700, SW = 400, SH = 700;
 static int turned;
 static int eink;
-static float center = 60;          /* the middle of the instrument, as a MIDI note */
+static float center[2] = {60, 60}; /* the middle of each part's instrument, as a MIDI note */
+static int have_top;               /* the host has said where the top part's instrument is */
 static double now, last_tick = -1;
 static int dirty = 1;
 
@@ -115,25 +116,35 @@ static const float STRIP = 64, BAR = 30, SIDE_TOP = 150;
 
 /* Played state the side controls change (the rail's settings set them too). */
 static int latch_on;
-static float pos;                  /* the scroll: rows slid by (fractions too), up shows higher notes */
-static float colpos[8];            /* Up each column: each column's own scroll, in rows */
 static int holding;
 static float side_bend, side_tone;
 
 /* Where things are: worked out again whenever something changes. */
 static int cols = 3;
-static float cell = 50, gap = 4, left = 0, shown = 7;    /* cell: a row's pitch; shown: rows on screen */
-static int mask = 0xAB5, ndeg = 7, degs[12], kshift = 0;
+static float cell = 50, gap = 4, left = 0;               /* cell: a row's pitch */
+/* Split: a second grid across the top, its own part (sound). Each half is its own grid: where it
+   is (top..bot, upright), which way its rows climb, its notes and its scroll. Unsplit, only the
+   bottom one, the whole height. Everything below works on the current half, hv. */
+typedef struct {
+    float top, bot, shown;         /* shown: rows in it */
+    float pos, colpos[8];          /* the scroll: rows slid by (fractions too); up each column, each column's */
+    int flip, key, chrom, mask, ndeg, degs[12], kshift;
+} Half;
+static Half halves[2] = {{0, 700, 7, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0}, {0, 0, 0, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0}};
+static Half* hv = &halves[0];
+static int nhalves = 1;
+static int half_index(void) { return (int)(hv - halves); }
 static float bar_x = -1;                                   /* the scroll bar's left edge, or -1 */
 typedef struct { int control; float x, y, w, h; } SideRect;
 static SideRect sides[MAX_SIDE];
 static int nsides;
 
-static int chromatic(void) { return set_[S_CHROMATIC] != 0; }
-static int key(void) { return (int)set_[S_KEY]; }
+static int chromatic(void) { return hv->chrom; }
+static int key(void) { return hv->key; }
 /* Unflipped, the notes climb right to left along each row (for the right hand) and rows climb up. */
 static int mirrored(void) { return set_[S_FLIP_X] == 0; }
-static int flipped_y(void) { return set_[S_FLIP_Y] != 0; }
+static int flipped_y(void) { return hv->flip; }
+static int split_on(void) { return set_[S_SPLIT] != 0; }
 /* Up each column: every column runs up the scale on its own, and scrolls on its own (while unlocked). */
 static int columns(void) { return set_[S_LAYOUT] != 0; }
 static int locked(void) { return set_[S_LOCK] != 0; }
@@ -185,58 +196,87 @@ static void layout(void) {
     cell = size * gw / ((float)cols + g);
     gap = cell * g;
     left = gx + (gw - (cell * (float)cols + gap)) / 2 + gap;
-    shown = H / cell;
-    int s = (int)set_[S_SCALE];
-    mask = MASKS[s < 0 || s > 8 ? 0 : s];
-    ndeg = 0;
-    for (int d = 0; d < 12; d++) if ((mask >> d) & 1) degs[ndeg++] = d;
-    /* At no scroll, the middle of the screen holds the note nearest the instrument's middle. */
-    int target = roundi(center + 12.0f * (float)set_[S_OCTAVE]);
-    int mid = columns() ? (int)floorf_(shown / 2) : (int)floorf_(shown / 2) * cols + cols / 2;
-    kshift = index_of(target) - mid;
+    /* Split: the line across at the top's share of the height, a little gap either side of it. */
+    nhalves = split_on() ? 2 : 1;
+    float line = H * clampf((float)set_[S_SPLIT_SIZE] / 100.0f, 0.2f, 0.8f), half_gap = gap > 6 ? gap : 6;
+    for (int h = 0; h < nhalves; h++) {
+        Half* a = &halves[h];
+        int bottom = h == 0;
+        /* The top's notes are the bottom's unless it says otherwise; its rows mirror the bottom's
+           (they climb toward the line, as the bottom's do) or run the same way up. */
+        int sc = bottom || set_[S_TOP_SCALE] == 0 ? (int)set_[S_SCALE] : (int)set_[S_TOP_SCALE] - 1;
+        a->key = bottom || set_[S_TOP_KEY] == 0 ? (int)set_[S_KEY] : (int)set_[S_TOP_KEY] - 1;
+        a->chrom = bottom || set_[S_TOP_NOTES] == 0 ? set_[S_CHROMATIC] != 0 : set_[S_TOP_NOTES] == 2;
+        a->flip = bottom ? set_[S_FLIP_Y] != 0 : set_[S_TOP_WAY] == 0 ? set_[S_FLIP_Y] == 0 : set_[S_FLIP_Y] != 0;
+        a->top = bottom ? (nhalves > 1 ? line + half_gap / 2 : 0) : 0;
+        a->bot = bottom ? H : line - half_gap / 2;
+        a->shown = (a->bot - a->top) / cell;
+        a->mask = MASKS[sc < 0 || sc > 8 ? 0 : sc];
+        a->ndeg = 0;
+        for (int d = 0; d < 12; d++) if ((a->mask >> d) & 1) a->degs[a->ndeg++] = d;
+        hv = a;
+        /* At no scroll, the middle of the half holds the note nearest its instrument's middle. */
+        float c = bottom || !have_top ? center[0] : center[1];
+        int oct = (int)set_[S_OCTAVE] + (bottom ? 0 : (int)set_[S_TOP_OCTAVE]);
+        int target = roundi(c + 12.0f * (float)oct);
+        int mid = columns() ? (int)floorf_(a->shown / 2) : (int)floorf_(a->shown / 2) * cols + cols / 2;
+        a->kshift = index_of(target) - mid;
+    }
+    hv = &halves[0];
     dirty = 1;
 }
 
-static int in_scale(int note) { return (mask >> floormod(note - key(), 12)) & 1; }
+/* The half at upright height y, or -1 on the line between. */
+static int half_at(float y) {
+    if (nhalves < 2) return 0;
+    return y >= halves[0].top ? 0 : y <= halves[1].bot ? 1 : -1;
+}
+
+static int in_scale(int note) { return (hv->mask >> floormod(note - key(), 12)) & 1; }
 
 /* The notes in order: index k is the k-th note of the scale (or semitone) above the key's C-1. */
 static int note_at(int k) {
-    return chromatic() ? key() + k : key() + 12 * floordiv(k, ndeg) + degs[floormod(k, ndeg)];
+    return chromatic() ? key() + k : key() + 12 * floordiv(k, hv->ndeg) + hv->degs[floormod(k, hv->ndeg)];
 }
 /* The index of a note, or of the nearest note of the scale at or below it. */
 static int index_of(int note) {
     int rel = note - key();
     if (chromatic()) return rel;
     int oct = floordiv(rel, 12), d = floormod(rel, 12), i = 0;
-    for (int j = 0; j < ndeg; j++) if (degs[j] <= d) i = j;
-    return oct * ndeg + i;
+    for (int j = 0; j < hv->ndeg; j++) if (hv->degs[j] <= d) i = j;
+    return oct * hv->ndeg + i;
 }
 /* The note of square k (k counts along the rows from row 0, which is at the bottom unscrolled).
    Up each column, the note is the row's alone: every column holds the same notes, scrolled its own way. */
 static int note_of(int k) {
-    int note = note_at((columns() ? floordiv(k, cols) : k) + kshift);
+    int note = note_at((columns() ? floordiv(k, cols) : k) + hv->kshift);
     return note < 0 ? 0 : note > 127 ? 127 : note;
 }
 
 /* As far as the scroll goes: the lowest and highest notes just on screen. */
 static void clamp_one(float* p, int per) {
-    float lo = (float)floordiv(index_of(0) - kshift, per) + 1;
-    float hi = (float)floordiv(index_of(127) - kshift, per) - shown + 1;
+    float lo = (float)floordiv(index_of(0) - hv->kshift, per) + 1;
+    float hi = (float)floordiv(index_of(127) - hv->kshift, per) - hv->shown + 1;
     if (hi < lo) hi = lo;
     *p = clampf(*p, lo, hi);
 }
 static void clamp_pos(void) {
-    if (!columns()) { clamp_one(&pos, cols); return; }
-    for (int c = 0; c < cols; c++) clamp_one(&colpos[c], 1);
+    Half* was = hv;
+    for (int h = 0; h < nhalves; h++) {
+        hv = &halves[h];
+        if (!columns()) clamp_one(&hv->pos, cols);
+        else for (int c = 0; c < cols; c++) clamp_one(&hv->colpos[c], 1);
+    }
+    hv = was;
 }
 /* The scroll of column c (as counted, not as on screen). */
-static float scroll_of(int c) { return columns() ? colpos[c] : pos; }
+static float scroll_of(int c) { return columns() ? hv->colpos[c] : hv->pos; }
 
 static int column(int c) { return mirrored() ? cols - 1 - c : c; }
 
 /* Row r's top edge on screen (it may be off it), scrolled by p. */
 static float row_top(int r, float p) {
-    return flipped_y() ? ((float)r - p) * cell : H - ((float)r - p + 1) * cell;
+    return flipped_y() ? hv->top + ((float)r - p) * cell : hv->bot - ((float)r - p + 1) * cell;
 }
 /* The column (as counted) under x, or -1. */
 static int column_at(float x) {
@@ -248,7 +288,7 @@ static int square_at(float x, float y) {
     int c = column_at(x);
     if (c < 0) return -100000;
     float p = scroll_of(c);
-    float f = flipped_y() ? y / cell + p : (H - y) / cell + p;
+    float f = flipped_y() ? (y - hv->top) / cell + p : (hv->bot - y) / cell + p;
     int r = (int)floorf_(f);
     return r * cols + c;
 }
@@ -268,7 +308,7 @@ static int beside(int k, int dir) {
 
 /* ---- fingers and their notes ------------------------------------------------------------------ */
 typedef struct {
-    int used, id, voice, n, note;
+    int used, id, voice, n, note, half;   /* half: which grid it plays (the top is part 1) */
     float x0, y0, x, y, sx, sy;   /* where it came down, where it is, and its slow position */
     float strike;                 /* how loud it started: its strike zone's level */
 } Finger;
@@ -279,11 +319,11 @@ static int nlatched;
 /* Fingers that came down to let a latched square go: they play nothing until they lift. */
 static int spent[MAX_FINGERS], nspent;
 /* A square's light after its note was let go, fading. */
-typedef struct { int n; float glow; } Ring;
+typedef struct { int n, half; float glow; } Ring;
 static Ring ring[MAX_RING];
 static int next_voice = 1;
 
-typedef struct { int id, control, col; float from, top, h; float start, y; } SideTouch;
+typedef struct { int id, control, col, half; float from, top, h; float start, y; } SideTouch;
 enum { C_COL = 98, C_BAR = 99 };     /* a finger scrolling a column (unlocked), or on the scroll bar */
 static SideTouch side_touches[MAX_FINGERS];
 static int touched[C_COUNT];
@@ -380,7 +420,17 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
     }
 }
 
+static Expr expression_in(const Finger* f);
+/* A finger's notes are its own half's. */
 static Expr expression(const Finger* f) {
+    Half* was = hv;
+    hv = &halves[f->half < nhalves ? f->half : 0];
+    Expr e = expression_in(f);
+    hv = was;
+    return e;
+}
+
+static Expr expression_in(const Finger* f) {
     /* Where nothing moves them: a firm press, the tone in the middle, full volume (or Volume's 0.7). */
     Expr e = {0, f->strike, 0.5f, 1};
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
@@ -418,14 +468,15 @@ static void send(const Finger* f) {
     mesh_note_change(f->voice, e.pitch, e.pressure, e.slide, now);
 }
 
-static void glow_after(int n) {
-    for (int k = 0; k < MAX_RING; k++) if (ring[k].glow <= 0 || ring[k].n == n) { ring[k].n = n; ring[k].glow = eink ? 0 : 1; return; }
+static void glow_after(int half, int n) {
+    for (int k = 0; k < MAX_RING; k++)
+        if (ring[k].glow <= 0 || (ring[k].n == n && ring[k].half == half)) { ring[k].n = n; ring[k].half = half; ring[k].glow = eink ? 0 : 1; return; }
 }
 
 /* Note-off, and the square's light fades after it. */
 static void let_go(const Finger* f) {
     mesh_note_off(f->voice, now);
-    glow_after(f->n);
+    glow_after(f->half, f->n);
     dirty = 1;
 }
 
@@ -441,36 +492,46 @@ static void release_latched(void) {
 
 static int latching(void) { return latch_on || holding; }
 
-static int find_latched(int n) {
-    for (int k = 0; k < nlatched; k++) if (latched[k].n == n) return k;
+static int find_latched(int half, int n) {
+    for (int k = 0; k < nlatched; k++) if (latched[k].n == n && latched[k].half == half) return k;
     return -1;
 }
 
+static void down_in(int id, float x, float y, int h);
+/* A finger on a square: it plays its half's note, on its half's part. */
 static void down(int id, float x, float y) {
+    int h = half_at(y);
+    if (h < 0) return;
+    hv = &halves[h];
+    down_in(id, x, y, h);
+    hv = &halves[0];
+}
+
+static void down_in(int id, float x, float y, int h) {
     int n = square_at(x, y);
     if (n == -100000) return;
     if (latch_on && set_[S_LATCHMODE] == LATCH_TAP) {
         /* Tap a held square to let it go. */
-        int k = find_latched(n);
+        int k = find_latched(h, n);
         if (k >= 0) { unlatch(k); if (nspent < MAX_FINGERS) spent[nspent++] = id; return; }
     } else if (latch_on && nfingers() == 0) release_latched();    /* a new hand: the last chord goes */
     /* The same note held over (hold, or a chord being added to) is played again, not doubled. */
-    int k = find_latched(n);
+    int k = find_latched(h, n);
     if (k >= 0) unlatch(k);
     /* Every voice busy: the oldest latched note makes way. */
     if (nfingers() + nlatched >= MAX_VOICES) { if (nlatched) unlatch(0); else return; }
     Finger* f = 0;
     for (int j = 0; j < MAX_FINGERS; j++) if (!fingers[j].used) { f = &fingers[j]; break; }
     if (!f) return;
-    f->used = 1; f->id = id; f->voice = next_voice++; f->n = n; f->note = note_of(n);
+    f->used = 1; f->id = id; f->voice = next_voice++; f->n = n; f->note = note_of(n); f->half = h;
     f->x0 = f->x = f->sx = x; f->y0 = f->y = f->sy = y;
     /* Where in its square it was struck, as the square looks on screen (turned or not). */
     float side = cell - gap, u = (x - square_x(n)) / side, w = (y - square_y(n)) / side;
     f->strike = turned ? strike_level(1 - w, u) : strike_level(u, w);
-    for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n) ring[r].glow = 0;
+    for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
-    mesh_note_on(f->voice, 0, e.pitch, e.pressure, e.slide, f->strike, now);
+    mesh_note_on(f->voice, h, e.pitch, e.pressure, e.slide, f->strike, now);
     dirty = 1;
 }
 
@@ -549,9 +610,12 @@ static void side_drag(SideTouch* s, float at) {
 }
 
 /* The scroll bar: the rows follow the finger, as a list does. */
+/* Split, each half's part of the bar scrolls that half. */
 static void bar_drag(SideTouch* s, float y) {
     float rows = (y - s->y) / cell;
-    pos = s->start + (flipped_y() ? -rows : rows);
+    hv = &halves[s->half];
+    hv->pos = s->start + (flipped_y() ? -rows : rows);
+    hv = &halves[0];
     clamp_pos();
     dirty = 1;
 }
@@ -560,17 +624,19 @@ static void bar_drag(SideTouch* s, float y) {
    (so the rows line up across). */
 static void col_drag(SideTouch* s, float y) {
     float rows = (y - s->y) / cell;
-    colpos[s->col] = s->start + (flipped_y() ? -rows : rows);
+    hv = &halves[s->half];
+    hv->colpos[s->col] = s->start + (flipped_y() ? -rows : rows);
+    hv = &halves[0];
     clamp_pos();
     dirty = 1;
 }
 
 static void col_down(int id, float x, float y) {
-    int c = column_at(x);
-    if (c < 0) return;
+    int c = column_at(x), h = half_at(y);
+    if (c < 0 || h < 0) return;
     for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
         SideTouch* s = &side_touches[j];
-        s->id = id; s->control = C_COL; s->col = c; s->start = colpos[c]; s->y = y;
+        s->id = id; s->control = C_COL; s->col = c; s->half = h; s->start = halves[h].colpos[c]; s->y = y;
         break;
     }
     dirty = 1;
@@ -580,7 +646,9 @@ static int side_down(int id, float x, float y) {
     if (bar_x >= 0 && x >= bar_x - 4 && x <= bar_x + BAR + 4) {
         for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
             SideTouch* s = &side_touches[j];
-            s->id = id; s->control = C_BAR; s->start = pos; s->y = y;
+            int h = half_at(y);
+            s->half = h < 0 ? 0 : h;
+            s->id = id; s->control = C_BAR; s->start = halves[s->half].pos; s->y = y;
             break;
         }
         return 1;
@@ -610,7 +678,7 @@ static SideTouch* side_find(int id) {
 static void side_up(SideTouch* s) {
     if (s->control == C_BAR) { s->id = 0; dirty = 1; return; }
     if (s->control == C_COL) {
-        colpos[s->col] = (float)roundi(colpos[s->col]);
+        halves[s->half].colpos[s->col] = (float)roundi(halves[s->half].colpos[s->col]);
         clamp_pos();
         s->id = 0; dirty = 1; return;
     }
@@ -971,13 +1039,30 @@ static unsigned note_colour(int note) {
     }
 }
 
-static int is_held(int n) { for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used && fingers[k].n == n) return 1; return 0; }
-static int is_kept(int n) { for (int k = 0; k < nlatched; k++) if (latched[k].n == n) return 1; return 0; }
+/* Square n of the current half: held, latched, its fading light. */
+static int is_held(int n) {
+    for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used && fingers[k].n == n && fingers[k].half == half_index()) return 1;
+    return 0;
+}
+static int is_kept(int n) { for (int k = 0; k < nlatched; k++) if (latched[k].n == n && latched[k].half == half_index()) return 1; return 0; }
 static float glow_of(int n) {
     float g = 0;
-    for (int k = 0; k < MAX_RING; k++) if (ring[k].glow > g && ring[k].n == n) g = ring[k].glow;
+    for (int k = 0; k < MAX_RING; k++) if (ring[k].glow > g && ring[k].n == n && ring[k].half == half_index()) g = ring[k].glow;
     return g;
 }
+
+/* A rectangle cut to the current half, so a square never reaches across the split line. */
+static void c_rect(float x, float y, float w, float h, float r, unsigned fill, unsigned stroke, float sw) {
+    if (nhalves > 1) {
+        float t = hv->top, b = hv->bot;
+        if (y < t) { h -= t - y; y = t; }
+        if (y + h > b) h = b - y;
+        if (h <= 0.5f) return;
+        if (r > h / 2) r = h / 2;
+    }
+    g_rect(x, y, w, h, r, fill, stroke, sw);
+}
+static int in_half(float y) { return y >= hv->top && y <= hv->bot; }
 
 static void note_name(char* out, int note, int octave) {
     char* p = put(out, NAMES[note % 12]);
@@ -989,14 +1074,16 @@ static void draw_bar(const Theme* th) {
     if (bar_x < 0) return;
     int flat = eink;
     unsigned ink = flat ? BLACK : th->light;
-    g_rect(bar_x + 3, 4, BAR - 6, H - 8, 8, flat ? WHITE : mesh_alpha(th->square, 0.9f), mesh_alpha(ink, 0.35f), 1);
-    int r0 = (int)floorf_(pos) - 1, r1 = (int)floorf_(pos + shown) + 1;
+    for (int h = 0; h < nhalves; h++) {
+    hv = &halves[h];
+    g_rect(bar_x + 3, hv->top + 4, BAR - 6, hv->bot - hv->top - 8, 8, flat ? WHITE : mesh_alpha(th->square, 0.9f), mesh_alpha(ink, 0.35f), 1);
+    int r0 = (int)floorf_(hv->pos) - 1, r1 = (int)floorf_(hv->pos + hv->shown) + 1;
     for (int r = r0; r <= r1; r++) {
         int root = -1;
         for (int c = 0; c < cols; c++) { int note = note_of(r * cols + c); if (floormod(note - key(), 12) == 0) { root = note; break; } }
         if (root < 0) continue;
-        float y = row_top(r, pos) + cell / 2;
-        if (y < 10 || y > H - 10) continue;
+        float y = row_top(r, hv->pos) + cell / 2;
+        if (y < hv->top + 10 || y > hv->bot - 10) continue;
         unsigned c = note_colour(root);
         unsigned mark = c && !flat ? c : ink;
         g_line(bar_x + 5, y, bar_x + BAR - 5, y, mesh_alpha(mark, 0.8f), 2);
@@ -1006,6 +1093,8 @@ static void draw_bar(const Theme* th) {
         if (turned) g_text_at(bar_x + BAR / 2, y, 6, 0, 10, mark, MESH_TEXT_LEFT | MESH_TEXT_BOLD, name);
         else g_text_at(bar_x + BAR / 2, y, 0, -9, 10, mark, MESH_TEXT_CENTER | MESH_TEXT_BOLD, name);
     }
+    }
+    hv = &halves[0];
 }
 
 /* Lit outlines on squares a shade apart from the background; a sounding square full of light. */
@@ -1023,17 +1112,19 @@ static void draw(void) {
     for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) sounding |= 1 << floormod(fingers[k].note, 12);
     for (int k = 0; k < nlatched; k++) sounding |= 1 << floormod(latched[k].note, 12);
     /* Up each column, unlocked: each column outlined, as something to drag. */
+    for (int h = 0; h < nhalves; h++) {
+    hv = &halves[h];
     if (columns() && !locked())
         for (int c = 0; c < cols; c++)
-            g_rect(left + (float)c * cell - gap / 2 + 1, 2, cell - 2, H - 4, radius + gap / 2,
+            g_rect(left + (float)c * cell - gap / 2 + 1, hv->top + 2, cell - 2, hv->bot - hv->top - 4, radius + gap / 2,
                    flat ? 0 : mesh_alpha(th->hot, 0.06f), mesh_alpha(flat ? BLACK : th->hot, 0.55f), 2);
     for (int c = 0; c < cols; c++) {
       float p = scroll_of(c);
-      int r0 = (int)floorf_(p) - 1, r1 = (int)floorf_(p + shown) + 1;
+      int r0 = (int)floorf_(p) - 1, r1 = (int)floorf_(p + hv->shown) + 1;
       for (int r = r0; r <= r1; r++) {
         int n = r * cols + c;
         float ox = square_x(n), oy = square_y(n);
-        if (oy > H || oy + side < 0) continue;
+        if (oy > hv->bot || oy + side < hv->top) continue;
         int note = note_of(n);
         int root = floormod(note - key(), 12) == 0;
         int off = chromatic() && !in_scale(note);
@@ -1044,13 +1135,13 @@ static void draw(void) {
         /* The square: a shade apart from the background, tinted with its note's colour; a note
            outside the scale sinks nearly into the background. */
         if (!flat) {
-            g_rect(ox, oy, side, side, radius, off ? mesh_alpha(th->square, 0.3f) : th->square, 0, 0);
-            if (colour && glow < 1) g_rect(ox, oy, side, side, radius, mesh_alpha(colour, th->bright ? 0.35f : 0.22f), 0, 0);
+            c_rect(ox, oy, side, side, radius, off ? mesh_alpha(th->square, 0.3f) : th->square, 0, 0);
+            if (colour && glow < 1) c_rect(ox, oy, side, side, radius, mesh_alpha(colour, th->bright ? 0.35f : 0.22f), 0, 0);
         }
         /* The light: an outer bloom, then the fill. */
         if (glow > 0) {
-            if (!flat && !th->bright) g_rect(ox - 6, oy - 6, side + 12, side + 12, radius + 6, mesh_alpha(lit, 0.28f * glow), 0, 0);
-            g_rect(ox, oy, side, side, radius, mesh_alpha(lit, (flat ? 1 : 0.92f) * glow), 0, 0);
+            if (!flat && !th->bright) c_rect(ox - 6, oy - 6, side + 12, side + 12, radius + 6, mesh_alpha(lit, 0.28f * glow), 0, 0);
+            c_rect(ox, oy, side, side, radius, mesh_alpha(lit, (flat ? 1 : 0.92f) * glow), 0, 0);
         }
         /* The outline: the root's fully lit, the scale's soft, a note outside the scale faint. */
         unsigned edge;
@@ -1059,27 +1150,27 @@ static void draw(void) {
         else if (colour) edge = mesh_alpha(colour, root ? 1 : 0.8f);
         else edge = root ? light : mesh_alpha(light, flat ? 0.8f : 0.38f);
         if (root && !flat && !on && !th->bright)
-            g_rect(ox - 3, oy - 3, side + 6, side + 6, radius + 3, 0, mesh_alpha(colour ? colour : light, 0.18f), 6);
-        g_rect(ox, oy, side, side, radius, 0, edge, off ? 1.0f : root ? 2.5f : 1.5f);
+            c_rect(ox - 3, oy - 3, side + 6, side + 6, radius + 3, 0, mesh_alpha(colour ? colour : light, 0.18f), 6);
+        c_rect(ox, oy, side, side, radius, 0, edge, off ? 1.0f : root ? 2.5f : 1.5f);
         /* The same note elsewhere: not lit like a pressed square, only marked. */
         int same = echo != ECHO_OFF && !on && !kept && glow < 0.5f && ((sounding >> floormod(note, 12)) & 1);
         unsigned ec = flat ? BLACK : colour ? colour : th->hot;
         if (same) switch (echo) {
         case ECHO_RING: {
             float in = side * 0.12f;
-            g_rect(ox + in, oy + in, side - 2 * in, side - 2 * in, radius * 0.7f, 0, mesh_alpha(ec, 0.95f), 3);
+            c_rect(ox + in, oy + in, side - 2 * in, side - 2 * in, radius * 0.7f, 0, mesh_alpha(ec, 0.95f), 3);
             break;
         }
         case ECHO_GLOW:
-            if (!flat) g_rect(ox - 8, oy - 8, side + 16, side + 16, radius + 8, mesh_alpha(ec, 0.22f), 0, 0);
-            g_rect(ox, oy, side, side, radius, 0, mesh_alpha(ec, 0.9f), 2.5f);
+            if (!flat) c_rect(ox - 8, oy - 8, side + 16, side + 16, radius + 8, mesh_alpha(ec, 0.22f), 0, 0);
+            c_rect(ox, oy, side, side, radius, 0, mesh_alpha(ec, 0.9f), 2.5f);
             break;
         }
         /* A latched square: a dot in its corner, as long as it is held. */
-        if (kept && !on)
+        if (kept && !on && in_half(oy + side * 0.16f))
             g_circle(ox + side * 0.84f, oy + side * 0.16f, side * 0.06f,
                         glow > 0.5f ? (flat ? WHITE : th->on_light) : (flat ? BLACK : th->hot), 0, 0);
-        if (set_[S_LABELS] != 0) {
+        if (set_[S_LABELS] != 0 && in_half(oy + side / 2)) {
             float size = side * 0.16f;
             unsigned tc = glow > 0.5f ? (flat ? WHITE : colour ? 0x101010FFu : th->on_light)
                         : mesh_alpha(colour ? colour : light, off ? 0.3f : 0.85f);
@@ -1088,6 +1179,13 @@ static void draw(void) {
             g_text(ox + side / 2, oy + side / 2 + size * 0.35f, size, tc, MESH_TEXT_CENTER | (root ? MESH_TEXT_BOLD : 0), name);
         }
       }
+    }
+    }
+    hv = &halves[0];
+    /* Split: the line between the halves. */
+    if (nhalves > 1) {
+        float y = (halves[1].bot + halves[0].top) / 2;
+        g_line(left - gap / 2, y, left + cell * (float)cols - gap / 2, y, mesh_alpha(flat ? BLACK : th->hot, 0.6f), 2);
     }
     /* A halo that follows each finger. */
     if (!flat && !th->bright)
@@ -1118,7 +1216,11 @@ MESH_EXPORT(init) void init(float width, float height, int flags, double t) {
 }
 
 MESH_EXPORT(instrument) void instrument(int part, float center_note) {
-    if (part == 0) { center = center_note; dirty = 1; }
+    if (part < 0 || part > 1) return;
+    center[part] = center_note;
+    if (part == 1) have_top = 1;
+    layout();
+    dirty = 1;
 }
 
 void stop(void);

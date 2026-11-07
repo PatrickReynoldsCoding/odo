@@ -24,8 +24,8 @@ android {
         minSdk = 31          // Android 12: AMidi (29) and the Bluetooth permission model (31)
         targetSdk = 35
         // -Pmpe.versionCode / -Pmpe.versionName: for testing in-app updates with an older-numbered build.
-        versionCode = (findProperty("mpe.versionCode") as String?)?.toInt() ?: 40
-        versionName = (findProperty("mpe.versionName") as String?) ?: "0.23.8"
+        versionCode = (findProperty("mpe.versionCode") as String?)?.toInt() ?: 41
+        versionName = (findProperty("mpe.versionName") as String?) ?: "0.24.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }   // phone, and the emulator
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }
@@ -48,6 +48,9 @@ android {
     // The controller packages that come with the app (controllers/, built to WebAssembly): the same
     // .odoc files a computer MESH plays. Built by controllers/build.sh, which needs clang.
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/controllers"))
+    // odo's fonts (ui/fonts, shared with odo for computers) as res/font, and their licences as assets.
+    sourceSets["main"].res.srcDir(layout.buildDirectory.dir("generated/fonts/res"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/fonts/assets"))
     buildFeatures { prefab = true; compose = true; buildConfig = true }          // Oboe ships as a prefab package
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -76,4 +79,10 @@ val controllerAssets by tasks.registering(Copy::class) {
     from(rootProject.file("controllers/build")) { include("*.odoc") }
     into(layout.buildDirectory.dir("generated/controllers/controllers"))
 }
-tasks.named("preBuild") { dependsOn(controllerAssets) }
+// One copy of the fonts, in ui/fonts: resource names must be lower case, without dashes.
+val fontResources by tasks.registering(Sync::class) {
+    from(rootProject.file("ui/fonts")) { include("*.ttf"); rename { it.lowercase().replace('-', '_') }; into("res/font") }
+    from(rootProject.file("ui/fonts")) { include("OFL-*.txt"); into("assets/licenses") }
+    into(layout.buildDirectory.dir("generated/fonts"))
+}
+tasks.named("preBuild") { dependsOn(controllerAssets, fontResources) }

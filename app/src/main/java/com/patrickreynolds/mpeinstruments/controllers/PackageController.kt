@@ -29,14 +29,26 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
     override val landscape = orientation == "landscape"
     override val upright = orientation == "upright"
     private val parts: List<String> = manifest.optJSONArray("parts")?.let { a -> List(a.length()) { a.optString(it) } } ?: listOf("Main")
-    override val shape get() = EngineShape(split = parts.size > 1, parts = parts.size.coerceIn(2, 4), transpose = 0, bendRange = 48f)
-    override val splitNames get() = if (parts.size > 1) parts else null
+    override val shape get() = EngineShape(split = inUse > 1, parts = inUse.coerceIn(2, 4), transpose = 0, bendRange = 48f)
+    override val splitNames get() = if (inUse > 1) parts.take(inUse) else null
     override val arpUse = when (manifest.optString("arp", "app")) { "off" -> ArpUse.Off; "own" -> ArpUse.Own; else -> ArpUse.App }
 
     /** Its settings, in the manifest's order. */
     val settings: List<JSONObject> = manifest.optJSONArray("settings")?.let { a -> List(a.length()) { a.getJSONObject(it) } } ?: emptyList()
     var values by mutableStateOf(settings.map { default(it) })
         private set
+
+    /** "partsFrom": the setting that says how many of its parts it plays now (its value + 1; a switch:
+     *  one part off, two on), as the Grid's split does. Without one, all of them. */
+    private val partsFrom = manifest.optString("partsFrom").let { id -> settings.indexOfFirst { it.optString("id") == id } }
+    val inUse: Int get() = if (partsFrom < 0) parts.size else (1 + (values.getOrNull(partsFrom) ?: 0.0).toInt()).coerceIn(1, parts.size)
+
+    /** The engine follows when the parts in use change; the rail goes back to the first if its part went. */
+    private fun changed(index: Int) {
+        val engine = index == partsFrom
+        if (engine && AppState.side >= inUse) AppState.side = 0
+        AppState.controllerChanged(this, engine)
+    }
 
     private fun default(s: JSONObject) = when (s.optString("type")) {
         "switch" -> if (s.optBoolean("default")) 1.0 else 0.0
@@ -59,14 +71,14 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
     fun changedByIt(index: Int, value: Double) {
         if (index !in values.indices || values[index] == value) return
         values = values.mapIndexed { k, v -> if (k == index) value else v }
-        AppState.controllerChanged(this, engine = false)
+        changed(index)
     }
 
     fun change(index: Int, value: Double) {
         if (values.getOrNull(index) == value) return
         values = values.mapIndexed { k, v -> if (k == index) value else v }
         if (loaded) Native.nativeCtlSetting(index, value)
-        AppState.controllerChanged(this, engine = false)
+        changed(index)
     }
 
     /** Its settings by name, so a new version that adds or moves settings keeps the rest. */

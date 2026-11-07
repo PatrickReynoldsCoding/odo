@@ -47,6 +47,13 @@ constexpr int kRate = 48000;           // instruments are tuned at 48 kHz: SDL c
 constexpr float kRail = 230;           // the rail's width, points
 constexpr float kRow = 46;
 
+// A chevron pointing left (dir -1) or right (dir 1), centred on (cx, cy), `size` points high.
+void chevron(SDL_Renderer* r, float cx, float cy, float size, int dir, draw::Color c) {
+    float hw = size * 0.3f * float(dir), hh = size / 2, w = std::max(1.5f, size / 7);
+    draw::line(r, cx - hw, cy - hh, cx + hw, cy, c, w);
+    draw::line(r, cx + hw, cy, cx - hw, cy + hh, c, w);
+}
+
 std::string home() { const char* h = std::getenv("HOME"); return h ? h : "."; }
 
 // The folder odo runs from: updates go there, and its own library is beside it.
@@ -129,6 +136,8 @@ struct App {
     // One side of the window: a controller, its settings and its sound (part k of the engine).
     struct Side {
         int controller = 0, sound = 0;
+        int sound2 = -1;                // a split controller's second part's sound (the Grid's top), -1: as the first
+        int engineIndex2 = -1;          // the instrument its second part plays now
         std::unique_ptr<mpe::ControllerHost> host;
         std::vector<double> settings;   // the controller's, by position
         std::vector<size_t> shown;      // the ones on the rail (not "hidden"), in order
@@ -147,7 +156,7 @@ struct App {
     std::string configPath = home() + "/.config/odo/settings.json";
     bool persist = true;
     std::map<std::string, std::map<std::string, double>> saved;
-    std::string savedController[kSides], savedSound[kSides];
+    std::string savedController[kSides], savedSound[kSides], savedSound2[kSides];
     int savedSplit = 0, savedActive = 0;
     bool savedFullscreen = false;
 
@@ -164,6 +173,7 @@ struct App {
         for (size_t k = 0; k < s.size() && k < size_t(kSides); k++) {
             if (!s[k]["controller"].str().empty()) savedController[k] = s[k]["controller"].str();
             if (!s[k]["sound"].str().empty()) savedSound[k] = s[k]["sound"].str();
+            if (!s[k]["sound2"].str().empty()) savedSound2[k] = s[k]["sound2"].str();
         }
         savedSplit = std::clamp(int(j["split"].num(0)), 0, kSplitCount - 1);
         savedActive = std::clamp(int(j["active"].num(0)), 0, kSides - 1);
@@ -186,6 +196,9 @@ struct App {
     std::string soundId(int k) const {
         return lib.instruments.empty() ? "" : lib.instruments[size_t(sides[k].sound)].pkg->id();
     }
+    std::string sound2Id(int k) const {
+        return lib.instruments.empty() || sides[k].sound2 < 0 ? "" : lib.instruments[size_t(sides[k].sound2)].pkg->id();
+    }
     // Where side k keeps its controller's settings.
     std::string settingsKey(int k) const { return k == 0 ? controllerId(0) : controllerId(k) + "#" + std::to_string(k + 1); }
 
@@ -198,7 +211,8 @@ struct App {
         f << "{\n  \"controller\": " << quoted(controllerId(0)) << ",\n  \"sound\": " << quoted(soundId(0))
           << ",\n  \"split\": " << split << ",\n  \"active\": " << active << ",\n  \"sides\": [";
         for (int k = 0; k < kSides; k++)
-            f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k)) << "}";
+            f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k))
+              << ", \"sound2\": " << quoted(sound2Id(k)) << "}";
         f << "],\n  \"railHidden\": " << (railHidden ? "true" : "false")
           << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
           << ",\n  \"controllers\": {";
@@ -294,13 +308,42 @@ struct App {
         return -1;
     }
 
-    // Each side's controller sends on its own MIDI channels, to its own part: a side's notes never
+    // How many sounds side k's controller plays now: its parts, as many as its "partsFrom" setting
+    // says (the Grid's split: one, or two), or all of them; 1 to 2.
+    int partsOf(int k) const {
+        const Side& sd = sides[k];
+        if (!sd.host) return 1;
+        const mpe::Json& m = sd.host->manifest();
+        int n = std::max(1, int(m["parts"].size()));
+        std::string from = m["partsFrom"].str();
+        if (!from.empty()) {
+            const mpe::Json& st = m["settings"];
+            for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
+                if (st[i]["id"].str() == from) { n = std::min(n, 1 + int(sd.settings[i])); break; }
+        }
+        return std::clamp(n, 1, 2);
+    }
+    // The engine part of side k's first sound: the sides' parts one after another (at most kParts in all).
+    int partBase(int k) const {
+        int b = 0;
+        for (int j = 0; j < k; j++) b += partsOf(j);
+        return std::min(b, mpe::kParts - 1);
+    }
+    int sound2Of(int k) const { return sides[k].sound2 < 0 ? sides[k].sound : sides[k].sound2; }
+
+    // Each side's controller sends on its own MIDI channels, to its own parts: a side's notes never
     // take another's channel or sound.
     void route(int k) {
         if (!sides[k].host) return;
         int per = 15 / count();
-        sides[k].host->setPart(k);
+        sides[k].host->setPart(partBase(k));
         sides[k].host->setChannels(1 + k * per, per);
+    }
+    // After the parts in use change: every side routed again and the sounds put in their parts.
+    void reroute() {
+        for (int k = 0; k < count(); k++) { route(k); sides[k].engineIndex = sides[k].engineIndex2 = -1; }
+        applySounds();
+        ensureLoading();
     }
 
     void setSplit(int n) {
@@ -328,20 +371,24 @@ struct App {
 
     // ---- sounds ---------------------------------------------------------------------------------
 
-    // The engine's parts: one per side, each with its sound's effects; and each sound in its part.
+    // The engine's parts: one per side (two for a split Grid's), each with its sound's effects; and
+    // each sound in its part.
     void applySounds() {
         mpe::Performance p;
-        p.layout = count() > 1 ? mpe::Layout::Split : mpe::Layout::Single;
-        for (int k = 0; k < count() && !lib.instruments.empty(); k++) {
-            const mpe::Json& s = lib.instruments[size_t(sides[k].sound)].pkg->manifest["sound"];
-            mpe::PartConfig& c = p.part[k];
+        int total = partBase(count() - 1) + partsOf(count() - 1);
+        p.layout = total > 1 ? mpe::Layout::Split : mpe::Layout::Single;
+        for (int k = 0; k < count() && !lib.instruments.empty(); k++)
+        for (int j = 0; j < partsOf(k); j++) {
+            int part = std::min(partBase(k) + j, mpe::kParts - 1);
+            const mpe::Json& s = lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].pkg->manifest["sound"];
+            mpe::PartConfig& c = p.part[part];
             c.reverb = float(s["reverb"].num(0.15));
             c.delay = float(s["delay"].num(0));
             c.brightness = float(s["brightness"].num(1));
             c.drive = float(s["drive"].num(0));
             c.pressureCurve = float(s["pressureCurve"].num(1));
             c.release = float(s["release"].num(0));
-            if (k == 0) {                        // the room is shared: the first side's
+            if (part == 0) {                     // the room is shared: the first side's
                 p.reverbSize = float(s["reverbSize"].num(0.5));
                 p.reverbDamp = float(s["reverbDamp"].num(0.4));
             }
@@ -349,11 +396,23 @@ struct App {
         engine->setPerformance(p);
         for (int k = 0; k < count() && !lib.instruments.empty(); k++) {
             Side& sd = sides[k];
-            const Instrument& in = lib.instruments[size_t(sd.sound)];
-            if (in.index < 0) continue;
-            if (sd.engineIndex != in.index) { engine->setInstrument(k, in.index); sd.engineIndex = in.index; }
-            if (sd.host) sd.host->instrument(0, centerNote(*in.pkg));
+            for (int j = 0; j < partsOf(k); j++) {
+                const Instrument& in = lib.instruments[size_t(j ? sound2Of(k) : sd.sound)];
+                if (in.index < 0) continue;
+                int& now = j ? sd.engineIndex2 : sd.engineIndex;
+                if (now != in.index) { engine->setInstrument(std::min(partBase(k) + j, mpe::kParts - 1), in.index); now = in.index; }
+                if (sd.host) sd.host->instrument(j, centerNote(*in.pkg));
+            }
         }
+    }
+
+    void chooseSound2(int k, int n) {
+        if (lib.instruments.empty()) return;
+        n = (n % int(lib.instruments.size()) + int(lib.instruments.size())) % int(lib.instruments.size());
+        sides[k].sound2 = n;
+        if (lib.instruments[size_t(n)].index >= 0) { status.clear(); applySounds(); }
+        else ensureLoading();
+        saveConfig();
     }
 
     void chooseSound(int k, int n) {
@@ -368,8 +427,9 @@ struct App {
     // Compile the first sound a side wants that isn't ready (one at a time).
     void ensureLoading() {
         if (compiling || lib.instruments.empty()) return;
-        for (int k = 0; k < count(); k++) {
-            int n = sides[k].sound;
+        for (int k = 0; k < count(); k++)
+        for (int j = 0; j < partsOf(k); j++) {
+            int n = j ? sound2Of(k) : sides[k].sound;
             Instrument& in = lib.instruments[size_t(n)];
             if (in.index >= 0 || !in.error.empty()) continue;
             compiling = true;
@@ -403,7 +463,8 @@ struct App {
 
     bool soundsReady() const {
         for (int k = 0; k < count(); k++)
-            if (lib.instruments.empty() || lib.instruments[size_t(sides[k].sound)].index < 0) return false;
+            for (int j = 0; j < partsOf(k); j++)
+                if (lib.instruments.empty() || lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].index < 0) return false;
         return true;
     }
 
@@ -438,8 +499,7 @@ struct App {
         }
         sd.initW = sd.initH = 0;                 // init() at the next frame, with its size
         saveConfig();
-        if (!lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index >= 0)
-            sd.host->instrument(0, centerNote(*lib.instruments[size_t(sd.sound)].pkg));
+        reroute();                               // its parts may differ from the last controller's
     }
 
     void keepSetting(int k, size_t i, double v) {
@@ -463,8 +523,10 @@ struct App {
             if (step <= 0) step = (hi - lo) / 20;
             v = std::clamp(v + dir * step, lo, hi);
         }
+        int parts = partsOf(active);
         sd.host->setting(int(i), v);
         keepSetting(active, i, v);
+        if (partsOf(active) != parts) reroute();
         saveConfig();
     }
 
@@ -483,7 +545,7 @@ struct App {
 
     // The rail's rows: the top buttons, the split, the side it changes, its controller and sound;
     // then that controller's settings.
-    enum { kRowTop, kRowSplit, kRowSide, kRowController, kRowSound };
+    enum { kRowTop, kRowSplit, kRowSide, kRowController, kRowSound, kRowSound2 };
 
     // A tap on the rail: which row, and whether on its left (back) or right (on) half. The update
     // row is at the bottom.
@@ -508,8 +570,9 @@ struct App {
         else if (row == kRowSide) setActive(active + dir);
         else if (row == kRowController) chooseController(active, cur().controller + dir);
         else if (row == kRowSound) chooseSound(active, cur().sound + dir);
-        else if (cur().host && y >= kSettingsTop && y < float(wh) - kBottom) {
-            size_t r = size_t((y - kSettingsTop + settingsScroll) / settingRow(float(wh)));
+        else if (row == kRowSound2 && partsOf(active) > 1) chooseSound2(active, sound2Of(active) + dir);
+        else if (cur().host && y >= settingsTop() && y < float(wh) - kBottom) {
+            size_t r = size_t((y - settingsTop() + settingsScroll) / settingRow(float(wh)));
             if (r < cur().shown.size()) changeSetting(cur().shown[r], dir);
         }
     }
@@ -522,7 +585,7 @@ struct App {
     float settingsScroll = 0;
 
     void scrollSettings(float by, float h) {
-        float rows = float(cur().shown.size()) * settingRow(h), room = h - kBottom - kSettingsTop;
+        float rows = float(cur().shown.size()) * settingRow(h), room = h - kBottom - settingsTop();
         settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, rows - room));
     }
 
@@ -550,10 +613,12 @@ struct App {
 
     // The controller's settings fill the rail between the sound and the lines at the bottom:
     // each row as tall as fits, down to a compact one.
-    static constexpr float kSettingsTop = 5.7f * kRow, kBottom = 84;
+    static constexpr float kBottom = 84;
+    // The settings start under the sound, or under the second sound when the controller is split.
+    float settingsTop() const { return (partsOf(active) > 1 ? 6.7f : 5.7f) * kRow; }
     float settingRow(float h) {
         if (cur().shown.empty()) return kRow;
-        return std::clamp((h - kBottom - kSettingsTop) / float(cur().shown.size()), 30.f, kRow);
+        return std::clamp((h - kBottom - settingsTop()) / float(cur().shown.size()), 30.f, kRow);
     }
 
     // A pointer on the play area: down on a side, it plays that side until it lifts.
@@ -637,15 +702,12 @@ struct App {
         auto arrows = [&](float y, float h) {
             draw::fillRect(renderer, kRail - 2 * kButton + 2, y + 3, kButton - 4, h - 6, key, tokens::radius::control);
             draw::fillRect(renderer, kRail - kButton + 2, y + 3, kButton - 4, h - 6, key, tokens::radius::control);
-            float size = h >= 40 ? 14 : 11;
-            draw::text(renderer, kRail - 1.5f * kButton, y + h / 2 + size / 2, size, text, "<", 1);
-            draw::text(renderer, kRail - 0.5f * kButton, y + h / 2 + size / 2, size, text, ">", 1);
+            float size = h >= 40 ? 12 : 10;
+            chevron(renderer, kRail - 1.5f * kButton, y + h / 2, size, -1, text);
+            chevron(renderer, kRail - 0.5f * kButton, y + h / 2, size, 1, text);
         };
-        // A value cut to fit before the arrows.
-        auto fit = [&](const std::string& v, float size) {
-            size_t room = size_t((kRail - 2 * kButton - 16) / size);
-            return draw::textWidth(size, v) <= kRail - 2 * kButton - 16 ? v : v.substr(0, room > 2 ? room - 2 : room) + "..";
-        };
+        // A value cut to fit before the arrows, ending in an ellipsis when it is cut.
+        auto fit = [&](const std::string& v, float size) { return draw::fit(v, size, kRail - 2 * kButton - 16); };
         auto row = [&](int k, const std::string& label, const std::string& value, draw::Color c, bool withArrows) {
             float y = float(k) * kRow;
             draw::text(renderer, 12, y + 19, tokens::type::label, dim, label);
@@ -657,15 +719,25 @@ struct App {
         draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kRow - 10, key, tokens::radius::control);
         draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kRow - 10, key, tokens::radius::control);
         draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kRow / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
-        draw::text(renderer, kRail - 0.5f * kButton, kRow / 2 + 6, 12, text, "<<", 1);
+        chevron(renderer, kRail - 0.5f * kButton - 4, kRow / 2, 12, -1, text);
+        chevron(renderer, kRail - 0.5f * kButton + 4, kRow / 2, 12, -1, text);
         row(kRowSplit, "Split", kSplits[split].name, text, true);
         row(kRowSide, count() > 1 ? "Changing" : "Side", kSplits[split].side[active], count() > 1 ? accent : dim, count() > 1);
         Side& sd = cur();
         row(kRowController, "Controller", sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", text, true);
         std::string snd = lib.instruments.empty() ? "none" : lib.instruments[size_t(sd.sound)].pkg->name();
         bool loading = !lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index < 0 && lib.instruments[size_t(sd.sound)].error.empty();
-        row(kRowSound, "Sound", loading ? snd + "..." : snd, text, true);
-        draw::line(renderer, 12, 5.5f * kRow, kRail - 12, 5.5f * kRow, rgba(p.line), 1);
+        // Split (the Grid's), a sound for each part, named as the controller names them.
+        bool two = partsOf(active) > 1 && !lib.instruments.empty();
+        const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
+        row(kRowSound, two ? "Sound: " + parts[size_t(0)].str() : "Sound", loading ? snd + "..." : snd, text, true);
+        if (two) {
+            const Instrument& in2 = lib.instruments[size_t(sound2Of(active))];
+            bool loading2 = in2.index < 0 && in2.error.empty();
+            row(kRowSound2, "Sound: " + parts[size_t(1)].str(), in2.pkg->name() + (loading2 ? "..." : ""), text, true);
+        }
+        float divider = settingsTop() - 0.2f * kRow;
+        draw::line(renderer, 12, divider, kRail - 12, divider, rgba(p.line), 1);
         if (sd.host) {
             const mpe::Json& s = sd.host->manifest()["settings"];
             float rh = settingRow(h);
@@ -673,16 +745,16 @@ struct App {
             bool big = rh >= 40;
             for (size_t r = 0; r < sd.shown.size(); r++) {
                 size_t i = sd.shown[r];
-                float y = kSettingsTop + float(r) * rh - settingsScroll;
-                if (y < kSettingsTop - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
+                float y = settingsTop() + float(r) * rh - settingsScroll;
+                if (y < settingsTop() - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
                 float ls = big ? tokens::type::label : 8, vs = big ? tokens::type::body : tokens::type::caption;
                 draw::text(renderer, 12, y + (big ? 19 : 12), ls, dim, fit(s[i]["name"].str(), ls));
                 draw::text(renderer, 12, y + (big ? 37 : 26), vs, text, fit(settingValue(i), vs));
                 arrows(y, rh);
             }
-            float rows = float(sd.shown.size()) * rh, room = h - kBottom - kSettingsTop;
+            float rows = float(sd.shown.size()) * rh, room = h - kBottom - settingsTop();
             if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
-                float bar = room * room / rows, at = kSettingsTop + (room - bar) * settingsScroll / (rows - room);
+                float bar = room * room / rows, at = settingsTop() + (room - bar) * settingsScroll / (rows - room);
                 draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
             }
         }
@@ -691,15 +763,16 @@ struct App {
             std::string line = "odo " + updater->current();
             std::string msg = us == Updater::State::Checking ? "checking for updates" : updater->message();
             bool act = us == Updater::State::Available || us == Updater::State::Installed;
-            draw::text(renderer, 12, h - 62, tokens::type::caption, dim, line);
-            draw::text(renderer, 12, h - 46, act ? tokens::type::header : tokens::type::caption, act ? accent : dim, msg, 0, act);
+            float ms = act ? tokens::type::header : tokens::type::caption;
+            draw::text(renderer, 12, h - 62, tokens::type::caption, dim, draw::fit(line, tokens::type::caption, kRail - 24));
+            draw::text(renderer, 12, h - 46, ms, act ? accent : dim, draw::fit(msg, ms, kRail - 24, act), 0, act);
         }
         mpe::Stats st = engine->stats();
         char b[96];
         std::snprintf(b, sizeof b, "Latency %.1f ms, max %.1f", st.eventAgeAvgMs, st.eventAgeMaxMs);
-        draw::text(renderer, 12, h - 30, tokens::type::caption, dim, b);
+        draw::text(renderer, 12, h - 30, tokens::type::caption, dim, draw::fit(b, tokens::type::caption, kRail - 24));
         std::snprintf(b, sizeof b, "Load %.0f%%  Voices %d", 100 * st.loadAvg, engine->activeVoices());
-        draw::text(renderer, 12, h - 14, tokens::type::caption, dim, b);
+        draw::text(renderer, 12, h - 14, tokens::type::caption, dim, draw::fit(b, tokens::type::caption, kRail - 24));
     }
 
     void frame() {
@@ -714,17 +787,21 @@ struct App {
                 sd.initW = sd.w; sd.initH = sd.h;
                 sd.host->init(sd.w, sd.h, eink ? 1 : 0);
                 for (size_t i = 0; i < sd.settings.size(); i++) sd.host->setting(int(i), sd.settings[i]);
-                if (!lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index >= 0)
-                    sd.host->instrument(0, centerNote(*lib.instruments[size_t(sd.sound)].pkg));
+                for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) {
+                    const Instrument& in = lib.instruments[size_t(j ? sound2Of(k) : sd.sound)];
+                    if (in.index >= 0) sd.host->instrument(j, centerNote(*in.pkg));
+                }
             }
             sd.host->tick();
             // Settings it changed itself (its editor, a button on its surface): kept as if set here.
             bool changed = false;
+            int parts = partsOf(k);
             for (const auto& c : sd.host->takeSettingChanges()) {
                 if (size_t(c.index) >= sd.settings.size()) continue;
                 keepSetting(k, size_t(c.index), c.value);
                 changed = true;
             }
+            if (partsOf(k) != parts) reroute();
             if (changed) saveConfig();
         }
         SDL_SetRenderViewport(renderer, nullptr);
@@ -756,7 +833,8 @@ struct App {
         if (!railHidden) drawRail(float(wh));
         else {                                           // the corner button that brings the rail back
             draw::fillRect(renderer, 6, 6, 36, 36, rgba(tokens::alpha(look().ink, 0xCC)), 8);
-            draw::text(renderer, 24, 30, tokens::type::header, rgba(look().text), ">>", 1);
+            chevron(renderer, 20, 24, 12, 1, rgba(look().text));
+            chevron(renderer, 28, 24, 12, 1, rgba(look().text));
         }
         SDL_RenderPresent(renderer);
     }
@@ -937,6 +1015,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < app.lib.instruments.size(); i++) {
             const auto& p = *app.lib.instruments[i].pkg;
             if (p.id() == sid || p.manifest["aliases"][size_t(0)].str() == sid) app.sides[k].sound = int(i);
+            if (!app.savedSound2[k].empty() && p.id() == app.savedSound2[k]) app.sides[k].sound2 = int(i);
         }
         for (size_t i = 0; i < app.lib.controllers.size(); i++) if (app.lib.controllers[i]->id() == cid) app.sides[k].controller = int(i);
         if (k < int(controllerIds.size()) && (app.lib.controllers.empty() || app.lib.controllers[size_t(app.sides[k].controller)]->id() != cid))
@@ -951,6 +1030,7 @@ int main(int argc, char** argv) {
             sd.host->setting(ps.index, ps.value);
         }
     }
+    app.reroute();                               // a --setting may have split a controller
     app.persist = persist;
     app.saveConfig();
 

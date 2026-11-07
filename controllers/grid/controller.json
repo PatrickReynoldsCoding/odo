@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row, or up each column on its own; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -12,8 +12,10 @@
   },
   "orientation": "any",
   "parts": [
-    "Main"
+    "Bottom",
+    "Top"
   ],
+  "partsFrom": "split",
   "arp": "app",
   "settings": [
     {
@@ -40,6 +42,90 @@
       "name": "Lock column scrolling",
       "type": "switch",
       "default": true
+    },
+    {
+      "id": "split",
+      "name": "Split: a second grid across the top",
+      "type": "switch",
+      "default": false
+    },
+    {
+      "id": "splitSize",
+      "name": "Top's share (%)",
+      "type": "number",
+      "min": 20,
+      "max": 80,
+      "step": 5,
+      "default": 50
+    },
+    {
+      "id": "topWay",
+      "name": "Top: rows",
+      "type": "choice",
+      "options": [
+        "Mirrored",
+        "Same way up"
+      ],
+      "default": 0
+    },
+    {
+      "id": "topNotes",
+      "name": "Top: notes",
+      "type": "choice",
+      "options": [
+        "Same as bottom",
+        "The scale's notes",
+        "Chromatic"
+      ],
+      "default": 0
+    },
+    {
+      "id": "topScale",
+      "name": "Top: scale",
+      "type": "choice",
+      "options": [
+        "Same as bottom",
+        "Major",
+        "Minor",
+        "Dorian",
+        "Mixolydian",
+        "Harmonic minor",
+        "Pentatonic major",
+        "Pentatonic minor",
+        "Blues",
+        "Chromatic"
+      ],
+      "default": 0
+    },
+    {
+      "id": "topKey",
+      "name": "Top: key",
+      "type": "choice",
+      "options": [
+        "Same as bottom",
+        "C",
+        "C♯",
+        "D",
+        "E♭",
+        "E",
+        "F",
+        "F♯",
+        "G",
+        "A♭",
+        "A",
+        "B♭",
+        "B"
+      ],
+      "default": 0
+    },
+    {
+      "id": "topOctave",
+      "name": "Top: octave (from bottom's)",
+      "type": "number",
+      "min": -3,
+      "max": 3,
+      "step": 1,
+      "default": 0
     },
     {
       "id": "squareSize",

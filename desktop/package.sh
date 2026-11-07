@@ -18,6 +18,9 @@ stage="$root/desktop/dist/$name"
 rm -rf "$stage" "$stage.tar.gz"
 mkdir -p "$stage/library"
 cp "$build/odo" "$root/desktop/odo.svg" "$root/desktop/install.sh" "$stage/"
+# The fonts are inside odo; their licences go beside it.
+mkdir -p "$stage/licenses"
+cp "$root"/ui/fonts/OFL-*.txt "$stage/licenses/"
 strip "$stage/odo"
 cp "$root"/third_party/mpe-instruments/build/packages/*.odoi "$stage/library/"
 for c in $controllers; do
@@ -32,6 +35,7 @@ Needs:    Linux x86-64 with SDL 3 and Faust's libfaust (Ubuntu 26.04: sudo apt i
 Updates:  odo checks GitHub for a newer version when it opens; tap the update line at the
           bottom of the rail to install it. ./odo --no-update turns the check off.
 Keys:     Tab hides the rail, F11 full screen, Left/Right change the sound, Esc quits.
+Fonts:    Roboto and Noto Sans Symbols, under the SIL Open Font License (licenses/).
 More:     https://github.com/PatrickReynoldsCoding/odo
 TXT
 (cd "$root/desktop/dist" && tar -czf "$name.tar.gz" "$name")

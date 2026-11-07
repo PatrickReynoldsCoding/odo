@@ -24,6 +24,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -96,9 +97,10 @@ private fun scheme(p: Palette) = if (p.eink) lightColorScheme(
 fun MpeTheme(content: @Composable () -> Unit) {
     val p = palette
     // E-ink: no ripples (they redraw the screen for nothing) and a little bigger text.
-    val typography = if (p.eink) MaterialTheme.typography.let { t ->
-        t.copy(bodyLarge = t.bodyLarge.copy(fontSize = 17.sp), bodyMedium = t.bodyMedium.copy(fontSize = 15.sp))
-    } else MaterialTheme.typography
+    // All of it in Roboto from ui/fonts, the file odo for computers draws with.
+    val base = Typography().withFamily(Roboto)
+    val typography = if (p.eink) base.copy(bodyLarge = base.bodyLarge.copy(fontSize = 17.sp), bodyMedium = base.bodyMedium.copy(fontSize = 15.sp))
+                     else base
     MaterialTheme(colorScheme = scheme(p), typography = typography) {
         if (p.eink) CompositionLocalProvider(LocalRippleConfiguration provides null, content = content) else content()
     }

@@ -92,6 +92,9 @@ channel (up to 15), pitch bend over 48 semitones, pressure as channel pressure, 
 | 7 | vertical gradient | x y w h top-colour bottom-colour |
 | 8 | glow | cx cy r centre-colour edge-colour |
 
+Text is Roboto (odo's MESHes carry it, in ui/fonts; sharps, flats and arrows from Noto Sans
+Symbols), `size` points to the em, so capitals stand about 0.71 x `size` above the baseline.
+
 A MESH that meets an operation it doesn't know stops drawing that list, rather than misread
 the rest.
 
@@ -123,6 +126,7 @@ the rest.
 | `needs` | the most fingers it uses, and whether it uses touch size or force |
 | `orientation` | `landscape`, `portrait`, `upright` (stays put as the device turns) or `any` |
 | `parts` | the sounds it plays, by name: one, or the sections of a split |
+| `partsFrom` | optional: the id of a setting that says how many of `parts` it plays now, its value + 1 (a switch: the first part off, the first two on). The MESH gives it that many sounds, and calls `instrument` for each. Without it, every part always |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
 | `settings` | its options: `choice`, `number`, `switch`. Each MESH shows them its own way, on its rail. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers |
 
