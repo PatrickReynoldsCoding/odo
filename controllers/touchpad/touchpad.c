@@ -196,6 +196,7 @@ static int eink;
 static float center[2] = {60, 60};
 static double now;
 static int dirty = 1;
+static int ticked;             /* a frame has passed: the settings sent on loading are in */
 
 /*
  * One pad: its settings now (the right one's "Same as left" filled in), where it shows across the
@@ -951,6 +952,15 @@ MESH_EXPORT(instrument) void instrument(int part, float center_note) {
 MESH_EXPORT(setting) void setting(int index, double value) {
     if (index < 0 || index >= S_COUNT || set_[index] == value) return;
     set_[index] = value;
+    /* Another way of laying out the notes (a scale, the wheel, the grid): they start from the
+       middle again, as Android's pad did. Not while loading, when the saved shift follows. */
+    if (ticked && (index == S_MODE || index == S_R_MODE)) {
+        int both = index == S_MODE;
+        for (int k = both ? 0 : 1; k <= 1; k++) {
+            int sh = k ? S_SHIFT2 : S_SHIFT;
+            if (set_[sh] != 0) { set_[sh] = 0; mesh_set_setting(sh, 0); }
+        }
+    }
     if (index == S_SPLIT && value == 0) {        /* one pad again: the right one's fingers let go */
         for (int q = 0; q < MAX_FINGERS; q++) if (fingers[q].used && fingers[q].pad == 1) lift(&fingers[q]);
         for (int g = 0; g < MAX_GRABS; g++) if (grabs[g].used && grabs[g].pad == 1) grabs[g].used = 0;
@@ -992,6 +1002,7 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
 }
 
 MESH_EXPORT(tick) void tick(double t) {
+    ticked = 1;
     float dt = (float)((t - now) / 1000.0);
     if (dt < 0) dt = 0;
     if (dt > 0.1f) dt = 0.1f;
