@@ -10,6 +10,10 @@
  * bottom of the screen, and the scroll bar (a thin strip the height of the screen, with each
  * root's octave marked) slides them up and down under the finger, as the touch pad's note strip
  * does. At full size the squares fill the width, edge to edge. Either axis can be flipped.
+ *
+ * Or, Up each column: the columns are each a scale of their own, climbing up the rows, and each
+ * scrolls on its own. A lock (the Lock button, or the rail) keeps them still while you play;
+ * unlocked, a drag on a column slides it and plays nothing.
  * Controls can sit in strips either side: Latch, Hold, Bend, Tone. The colours can mark notes
  * by their place in the key (the 4th always blue, say).
  *
@@ -24,9 +28,9 @@
 
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
-    S_COLS, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
+    S_COLS, S_LAYOUT, S_LOCK, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
     S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_ZONE_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
-    S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 5,
+    S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 6,
     /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
     S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4,
     /* the axes' shaping, set in the touch panel: amount and sensitivity in %, flip */
@@ -35,7 +39,7 @@ enum {
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0,
+static double set_[S_COUNT] = {3, 0, 1, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 0,
                                ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1,
                                100, 100, 0, 100, 100, 0};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
@@ -44,7 +48,7 @@ enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
-enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_COUNT };   /* the side controls */
+enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_COUNT };   /* the side controls */
 enum { COL_PLAIN, COL_DEGREES, COL_CHORD, COL_PILLARS, COL_NAMES };
 /* Same notes elsewhere: how the other squares of a held note's pitch, in any octave, are marked. */
 enum { ECHO_OFF, ECHO_RING, ECHO_GLOW };
@@ -112,6 +116,7 @@ static const float STRIP = 64, BAR = 30, SIDE_TOP = 150;
 /* Played state the side controls change (the rail's settings set them too). */
 static int latch_on;
 static float pos;                  /* the scroll: rows slid by (fractions too), up shows higher notes */
+static float colpos[8];            /* Up each column: each column's own scroll, in rows */
 static int holding;
 static float side_bend, side_tone;
 
@@ -129,13 +134,18 @@ static int key(void) { return (int)set_[S_KEY]; }
 /* Unflipped, the notes climb right to left along each row (for the right hand) and rows climb up. */
 static int mirrored(void) { return set_[S_FLIP_X] == 0; }
 static int flipped_y(void) { return set_[S_FLIP_Y] != 0; }
-static int side_of(int c) { return (int)set_[S_SIDE0 + c]; }
+/* Up each column: every column runs up the scale on its own, and scrolls on its own (while unlocked). */
+static int columns(void) { return set_[S_LAYOUT] != 0; }
+static int locked(void) { return set_[S_LOCK] != 0; }
+/* The Lock button only means something with the columns. */
+static int side_of(int c) { return c == C_LOCK && !columns() ? SIDE_OFF : (int)set_[S_SIDE0 + c]; }
+static int is_button(int c) { return c <= C_HOLD || c == C_LOCK; }
 
 /* The strip of one side, from the bottom up as the thumb reaches: buttons their own height,
    sliders sharing the rest, none taller than 300. */
 static void strip(int where, float x) {
     int list[C_COUNT], n = 0, nb = 0, ns = 0;
-    for (int c = 0; c < C_COUNT; c++) if (side_of(c) == where) { list[n++] = c; if (c <= C_HOLD) nb++; else ns++; }
+    for (int c = 0; c < C_COUNT; c++) if (side_of(c) == where) { list[n++] = c; if (is_button(c)) nb++; else ns++; }
     if (!n) return;
     float top = SIDE_TOP, bot = H - 10;
     float spare = (bot - top) - 52.0f * (float)nb - 10.0f * (float)(n - 1);
@@ -143,7 +153,7 @@ static void strip(int where, float x) {
     float total = 52.0f * (float)nb + sh * (float)ns + 10.0f * (float)(n - 1);
     float y = bot - total;
     for (int k = 0; k < n && nsides < MAX_SIDE; k++) {
-        float h = list[k] <= C_HOLD ? 52 : sh;
+        float h = is_button(list[k]) ? 52 : sh;
         SideRect r = {list[k], x + 6, y, STRIP - 12, h};
         sides[nsides++] = r;
         y += h + 10;
@@ -151,13 +161,15 @@ static void strip(int where, float x) {
 }
 
 static int index_of(int note);
+static void keep(int index, double v);
 
 static void layout(void) {
     cols = (int)set_[S_COLS];
     if (cols < 2) cols = 2;
     if (cols > 8) cols = 8;
     /* From the outside in, on each side: the scroll bar, then the strip of controls. */
-    int nl = 0, nr = 0, bar = (int)set_[S_BAR];
+    /* Up each column there is no scroll bar: each column is dragged on its own instead. */
+    int nl = 0, nr = 0, bar = columns() ? SIDE_OFF : (int)set_[S_BAR];
     for (int c = 0; c < C_COUNT; c++) { if (side_of(c) == SIDE_LEFT) nl = 1; if (side_of(c) == SIDE_RIGHT) nr = 1; }
     float lw = (bar == SIDE_LEFT ? BAR : 0) + (nl ? STRIP : 0), rw = (bar == SIDE_RIGHT ? BAR : 0) + (nr ? STRIP : 0);
     bar_x = bar == SIDE_LEFT ? 0 : bar == SIDE_RIGHT ? W - BAR : -1;
@@ -180,7 +192,7 @@ static void layout(void) {
     for (int d = 0; d < 12; d++) if ((mask >> d) & 1) degs[ndeg++] = d;
     /* At no scroll, the middle of the screen holds the note nearest the instrument's middle. */
     int target = roundi(center + 12.0f * (float)set_[S_OCTAVE]);
-    int mid = (int)floorf_(shown / 2) * cols + cols / 2;
+    int mid = columns() ? (int)floorf_(shown / 2) : (int)floorf_(shown / 2) * cols + cols / 2;
     kshift = index_of(target) - mid;
     dirty = 1;
 }
@@ -199,37 +211,60 @@ static int index_of(int note) {
     for (int j = 0; j < ndeg; j++) if (degs[j] <= d) i = j;
     return oct * ndeg + i;
 }
-/* The note of square k (k counts along the rows from row 0, which is at the bottom unscrolled). */
+/* The note of square k (k counts along the rows from row 0, which is at the bottom unscrolled).
+   Up each column, the note is the row's alone: every column holds the same notes, scrolled its own way. */
 static int note_of(int k) {
-    int note = note_at(k + kshift);
+    int note = note_at((columns() ? floordiv(k, cols) : k) + kshift);
     return note < 0 ? 0 : note > 127 ? 127 : note;
 }
 
 /* As far as the scroll goes: the lowest and highest notes just on screen. */
-static void clamp_pos(void) {
-    float lo = (float)floordiv(index_of(0) - kshift, cols) + 1;
-    float hi = (float)floordiv(index_of(127) - kshift, cols) - shown + 1;
+static void clamp_one(float* p, int per) {
+    float lo = (float)floordiv(index_of(0) - kshift, per) + 1;
+    float hi = (float)floordiv(index_of(127) - kshift, per) - shown + 1;
     if (hi < lo) hi = lo;
-    pos = clampf(pos, lo, hi);
+    *p = clampf(*p, lo, hi);
 }
+static void clamp_pos(void) {
+    if (!columns()) { clamp_one(&pos, cols); return; }
+    for (int c = 0; c < cols; c++) clamp_one(&colpos[c], 1);
+}
+/* The scroll of column c (as counted, not as on screen). */
+static float scroll_of(int c) { return columns() ? colpos[c] : pos; }
 
 static int column(int c) { return mirrored() ? cols - 1 - c : c; }
 
-/* Row r's top edge on screen (it may be off it). */
-static float row_top(int r) {
-    return flipped_y() ? ((float)r - pos) * cell : H - ((float)r - pos + 1) * cell;
+/* Row r's top edge on screen (it may be off it), scrolled by p. */
+static float row_top(int r, float p) {
+    return flipped_y() ? ((float)r - p) * cell : H - ((float)r - p + 1) * cell;
+}
+/* The column (as counted) under x, or -1. */
+static int column_at(float x) {
+    int c = (int)floorf_((x - left + gap / 2) / cell);
+    return c < 0 || c >= cols ? -1 : column(c);
 }
 
 static int square_at(float x, float y) {
-    int c = (int)floorf_((x - left + gap / 2) / cell);
-    if (c < 0 || c >= cols) return -100000;
-    c = column(c);
-    float f = flipped_y() ? y / cell + pos : (H - y) / cell + pos;
+    int c = column_at(x);
+    if (c < 0) return -100000;
+    float p = scroll_of(c);
+    float f = flipped_y() ? y / cell + p : (H - y) / cell + p;
     int r = (int)floorf_(f);
     return r * cols + c;
 }
 static float square_x(int k) { return left + (float)column(floormod(k, cols)) * cell; }
-static float square_y(int k) { return row_top(floordiv(k, cols)) + gap / 2; }
+static float square_y(int k) { return row_top(floordiv(k, cols), scroll_of(floormod(k, cols))) + gap / 2; }
+
+/* The square beside k on screen, to the right (dir 1) or left (-1). Along the rows it is the next
+   note or the one before (it carries on into the next row); up each column it is the square at the
+   same height in the next column, and past the edge the next note up or down its own column. */
+static int beside(int k, int dir) {
+    int along = mirrored() ? -dir : dir;
+    if (!columns()) return k + along;
+    int sc = column(floormod(k, cols)) + dir;     /* column() turns counted into on-screen and back */
+    if (sc < 0 || sc >= cols) return k + along * cols;
+    return square_at(left + (float)sc * cell + (cell - gap) / 2, square_y(k) + (cell - gap) / 2);
+}
 
 /* ---- fingers and their notes ------------------------------------------------------------------ */
 typedef struct {
@@ -248,8 +283,8 @@ typedef struct { int n; float glow; } Ring;
 static Ring ring[MAX_RING];
 static int next_voice = 1;
 
-typedef struct { int id, control; float from, top, h; float start, y; } SideTouch;
-enum { C_BAR = 99 };     /* a finger on the scroll bar */
+typedef struct { int id, control, col; float from, top, h; float start, y; } SideTouch;
+enum { C_COL = 98, C_BAR = 99 };     /* a finger scrolling a column (unlocked), or on the scroll bar */
 static SideTouch side_touches[MAX_FINGERS];
 static int touched[C_COUNT];
 
@@ -335,8 +370,8 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
         if (range > 0) { *semis += (v >= 0 ? range : -range) * amount; break; }
         /* Toward the note you drag to: across, the next square or the one before (unflipped the
            next is to the left); up and down, the row above or below. */
-        int step = !across ? (flipped_y() ? -cols : cols) : mirrored() ? -1 : 1;
-        int to = note_of(f->n + (v >= 0 ? step : -step));
+        int dir = v >= 0 ? 1 : -1;
+        int to = across ? note_of(beside(f->n, dir)) : note_of(f->n + dir * (flipped_y() ? -cols : cols));
         *semis += (float)(to - f->note) * amount;
         break;
     }
@@ -521,6 +556,26 @@ static void bar_drag(SideTouch* s, float y) {
     dirty = 1;
 }
 
+/* Up each column, unlocked: the column follows the finger, and settles on a whole row when let go
+   (so the rows line up across). */
+static void col_drag(SideTouch* s, float y) {
+    float rows = (y - s->y) / cell;
+    colpos[s->col] = s->start + (flipped_y() ? -rows : rows);
+    clamp_pos();
+    dirty = 1;
+}
+
+static void col_down(int id, float x, float y) {
+    int c = column_at(x);
+    if (c < 0) return;
+    for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
+        SideTouch* s = &side_touches[j];
+        s->id = id; s->control = C_COL; s->col = c; s->start = colpos[c]; s->y = y;
+        break;
+    }
+    dirty = 1;
+}
+
 static int side_down(int id, float x, float y) {
     if (bar_x >= 0 && x >= bar_x - 4 && x <= bar_x + BAR + 4) {
         for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
@@ -554,6 +609,11 @@ static SideTouch* side_find(int id) {
 
 static void side_up(SideTouch* s) {
     if (s->control == C_BAR) { s->id = 0; dirty = 1; return; }
+    if (s->control == C_COL) {
+        colpos[s->col] = (float)roundi(colpos[s->col]);
+        clamp_pos();
+        s->id = 0; dirty = 1; return;
+    }
     touched[s->control]--;
     if (s->control == C_HOLD) hold(0);
     else if (s->control == C_LATCH) {
@@ -563,6 +623,7 @@ static void side_up(SideTouch* s) {
     }
     else if (s->control == C_BEND) { side_bend = 0; resend_all(); }
     else if (s->control == C_DYN) mesh_set_setting(S_DYN, set_[S_DYN]);   /* remembered */
+    else if (s->control == C_LOCK) keep(S_LOCK, locked() ? 0 : 1);         /* the rail shows it */
     s->id = 0;
     dirty = 1;
 }
@@ -639,6 +700,7 @@ static void draw_sides(const Theme* th) {
             draw_button(r, "Latch", v, latch_on, th, ink);
             break;
         case C_HOLD: draw_button(r, "Hold", holding ? "holding" : "press", holding, th, ink); break;
+        case C_LOCK: draw_button(r, "Lock", locked() ? "on" : "off", !locked(), th, ink); break;
         case C_BEND: {
             int tenths = roundi(side_bend * 10);
             if (tenths == 0) put(v, "0");
@@ -933,7 +995,7 @@ static void draw_bar(const Theme* th) {
         int root = -1;
         for (int c = 0; c < cols; c++) { int note = note_of(r * cols + c); if (floormod(note - key(), 12) == 0) { root = note; break; } }
         if (root < 0) continue;
-        float y = row_top(r) + cell / 2;
+        float y = row_top(r, pos) + cell / 2;
         if (y < 10 || y > H - 10) continue;
         unsigned c = note_colour(root);
         unsigned mark = c && !flat ? c : ink;
@@ -956,12 +1018,19 @@ static void draw(void) {
     g_clear(flat ? WHITE : th->background);
     float radius = cell * 0.08f, side = cell - gap;
     unsigned light = flat ? BLACK : th->light;
-    int r0 = (int)floorf_(pos) - 1, r1 = (int)floorf_(pos + shown) + 1;
     /* The pitches sounding now (held or latched), for marking the same notes elsewhere. */
     int sounding = 0, echo = (int)set_[S_ECHO];
     for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) sounding |= 1 << floormod(fingers[k].note, 12);
     for (int k = 0; k < nlatched; k++) sounding |= 1 << floormod(latched[k].note, 12);
-    for (int r = r0; r <= r1; r++) for (int c = 0; c < cols; c++) {
+    /* Up each column, unlocked: each column outlined, as something to drag. */
+    if (columns() && !locked())
+        for (int c = 0; c < cols; c++)
+            g_rect(left + (float)c * cell - gap / 2 + 1, 2, cell - 2, H - 4, radius + gap / 2,
+                   flat ? 0 : mesh_alpha(th->hot, 0.06f), mesh_alpha(flat ? BLACK : th->hot, 0.55f), 2);
+    for (int c = 0; c < cols; c++) {
+      float p = scroll_of(c);
+      int r0 = (int)floorf_(p) - 1, r1 = (int)floorf_(p + shown) + 1;
+      for (int r = r0; r <= r1; r++) {
         int n = r * cols + c;
         float ox = square_x(n), oy = square_y(n);
         if (oy > H || oy + side < 0) continue;
@@ -1018,6 +1087,7 @@ static void draw(void) {
             note_name(name, note, root);
             g_text(ox + side / 2, oy + side / 2 + size * 0.35f, size, tc, MESH_TEXT_CENTER | (root ? MESH_TEXT_BOLD : 0), name);
         }
+      }
     }
     /* A halo that follows each finger. */
     if (!flat && !th->bright)
@@ -1073,10 +1143,15 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
     if (phase == MESH_DOWN) {
         if (find(id)) up(id);
         layout();
-        if (!side_down(id, x, y)) down(id, x, y);
+        if (!side_down(id, x, y)) { if (columns() && !locked()) col_down(id, x, y); else down(id, x, y); }
     } else if (phase == MESH_MOVE) {
         SideTouch* s = side_find(id);
-        if (s) { if (s->control == C_BAR) bar_drag(s, y); else side_drag(s, frac(s, y)); return; }
+        if (s) {
+            if (s->control == C_BAR) bar_drag(s, y);
+            else if (s->control == C_COL) col_drag(s, y);
+            else side_drag(s, frac(s, y));
+            return;
+        }
         Finger* f = find(id);
         if (!f) return;
         f->x = x; f->y = y;

@@ -1,9 +1,9 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "name": "Grid",
-  "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
+  "description": "Square keys, upright: the notes climb row by row, or up each column on its own; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
   "licence": "MIT",
   "needs": {
@@ -24,6 +24,22 @@
       "max": 8,
       "step": 1,
       "default": 3
+    },
+    {
+      "id": "layout",
+      "name": "Notes run",
+      "type": "choice",
+      "options": [
+        "Along the rows",
+        "Up each column"
+      ],
+      "default": 0
+    },
+    {
+      "id": "scrollLock",
+      "name": "Lock column scrolling",
+      "type": "switch",
+      "default": true
     },
     {
       "id": "squareSize",
@@ -324,6 +340,17 @@
         "Right"
       ],
       "default": 1
+    },
+    {
+      "id": "sideLock",
+      "name": "Lock button (columns)",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 2
     },
     {
       "id": "turn",
