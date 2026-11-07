@@ -45,21 +45,14 @@ class Palette(
     val parts: List<Color>, val warn: Color, val danger: Color, val eink: Boolean,
 )
 
-val DarkPalette = Palette(
-    ink = Color(0xFF0E1014), panel = Color(0xFF181B22), panelHigh = Color(0xFF222632), line = Color(0xFF2E3341),
-    text = Color(0xFFECEFF5), textDim = Color(0xFF9AA2B4),
-    parts = listOf(Color(0xFFFF8A65), Color(0xFF4DD0E1), Color(0xFFAEEA70), Color(0xFFC792EA)), warn = Color(0xFFFFC857), danger = Color(0xFFFF6B6B), eink = false,
-)
+/** The colours themselves live in ui/tokens.json (shared with odo for computers), written into Tokens.kt. */
+val DarkPalette = Tokens.dark
 
 /**
  * For e-ink screens (as in focus-tracker): black on white, no tints, gradients, glows or motion,
  * thick borders, the chosen option filled black. The two parts are told apart by black and grey.
  */
-val EinkPalette = Palette(
-    ink = Color.White, panel = Color.White, panelHigh = Color.White, line = Color.Black,
-    text = Color.Black, textDim = Color(0xFF333333),
-    parts = listOf(Color.Black, Color(0xFF666666), Color(0xFF333333), Color(0xFF999999)), warn = Color.Black, danger = Color.Black, eink = true,
-)
+val EinkPalette = Tokens.eink
 
 /** The palette in use; read in composition, so changing it recolours everything. */
 var palette by mutableStateOf(DarkPalette)
@@ -115,13 +108,13 @@ fun MpeTheme(content: @Composable () -> Unit) {
 fun SectionCard(title: String, accent: Color? = null, trailing: (@Composable () -> Unit)? = null, content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(Tokens.Radius.card),
         colors = CardDefaults.cardColors(containerColor = Panel),
         border = if (Eink) BorderStroke(Edge, Line) else null,
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title.uppercase(), color = accent ?: TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                Text(title.uppercase(), color = accent ?: TextDim, fontSize = Tokens.Type.header, fontWeight = FontWeight.SemiBold,
                      letterSpacing = 1.2.sp, modifier = Modifier.weight(1f))
                 trailing?.invoke()
             }

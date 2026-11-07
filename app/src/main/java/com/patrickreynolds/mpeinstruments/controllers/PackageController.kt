@@ -77,11 +77,19 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
     override fun load(o: JSONObject?) {
         val byId = o?.optJSONObject("byId")
         val a = o?.optJSONArray("values")            // before 0.22.2: by position
+        // Neither: a Kotlin controller's own settings (the Grid's, the Tonnetz's), or a preset made with
+        // one. Their keys that are this package's ids mean the same, so they carry over.
+        val flat = if (byId == null && a == null) o else null
         values = settings.mapIndexed { k, s ->
             val id = s.optString("id", "$k")
             when {
                 byId != null && byId.has(id) -> byId.optDouble(id, default(s))
                 byId == null && a != null && k < a.length() -> a.optDouble(k, default(s))
+                flat != null && flat.has(id) -> when (val v = flat.opt(id)) {
+                    is Boolean -> if (v) 1.0 else 0.0
+                    is Number -> v.toDouble()
+                    else -> default(s)
+                }
                 else -> default(s)
             }
         }

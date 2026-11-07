@@ -31,6 +31,7 @@
 #include <thread>
 #include <vector>
 #include "draw.h"
+#include "tokens.h"
 #include "update.h"
 #include "mpe/controller.h"
 #include "mpe/engine.h"
@@ -457,8 +458,10 @@ struct App {
             double n = double(s["options"].size());
             v = std::fmod(v + dir + n, n);
         } else {
-            double step = s["step"].num(1);
-            v = std::clamp(v + dir * (step > 0 ? step : 1), s["min"].num(0), s["max"].num(1));
+            // No step (or 0): a continuous number, crossed in 20 taps, as Android's slider would.
+            double lo = s["min"].num(0), hi = s["max"].num(1), step = s["step"].num(0);
+            if (step <= 0) step = (hi - lo) / 20;
+            v = std::clamp(v + dir * step, lo, hi);
         }
         sd.host->setting(int(i), v);
         keepSetting(active, i, v);
@@ -622,14 +625,18 @@ struct App {
 
     // ---- drawing --------------------------------------------------------------------------------
 
+    // The look: ui/tokens.json, the same as odo on Android's.
+    const tokens::Palette& look() const { return eink ? tokens::eink : tokens::dark; }
+
     void drawRail(float h) {
-        draw::Color bg = rgba(0x07080BFF), text = rgba(0xFFFFFFD9), dim = rgba(0x9AA2B4FF), accent = rgba(0xFF8A65FF);
+        const tokens::Palette& p = look();
+        draw::Color bg = rgba(p.ink), text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]);
         draw::fillRect(renderer, 0, 0, kRail, h, bg);
-        draw::Color key = rgba(0x1A1D26FF);
+        draw::Color key = rgba(p.panelHigh);
         // The arrows: two buttons at the right of a row.
         auto arrows = [&](float y, float h) {
-            draw::fillRect(renderer, kRail - 2 * kButton + 2, y + 3, kButton - 4, h - 6, key, 6);
-            draw::fillRect(renderer, kRail - kButton + 2, y + 3, kButton - 4, h - 6, key, 6);
+            draw::fillRect(renderer, kRail - 2 * kButton + 2, y + 3, kButton - 4, h - 6, key, tokens::radius::control);
+            draw::fillRect(renderer, kRail - kButton + 2, y + 3, kButton - 4, h - 6, key, tokens::radius::control);
             float size = h >= 40 ? 14 : 11;
             draw::text(renderer, kRail - 1.5f * kButton, y + h / 2 + size / 2, size, text, "<", 1);
             draw::text(renderer, kRail - 0.5f * kButton, y + h / 2 + size / 2, size, text, ">", 1);
@@ -641,14 +648,14 @@ struct App {
         };
         auto row = [&](int k, const std::string& label, const std::string& value, draw::Color c, bool withArrows) {
             float y = float(k) * kRow;
-            draw::text(renderer, 12, y + 19, 11, dim, label);
-            draw::text(renderer, 12, y + 37, 13, c, fit(value, 13));
+            draw::text(renderer, 12, y + 19, tokens::type::label, dim, label);
+            draw::text(renderer, 12, y + 37, tokens::type::body, c, fit(value, tokens::type::body));
             if (withArrows) arrows(y, kRow);
         };
-        draw::text(renderer, 12, 30, 18, accent, "odo", 0, true);
+        draw::text(renderer, 12, 30, tokens::type::title, accent, "odo", 0, true);
         // The top row's buttons: full screen, and hide the rail.
-        draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kRow - 10, key, 6);
-        draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kRow - 10, key, 6);
+        draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kRow - 10, key, tokens::radius::control);
+        draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kRow - 10, key, tokens::radius::control);
         draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kRow / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
         draw::text(renderer, kRail - 0.5f * kButton, kRow / 2 + 6, 12, text, "<<", 1);
         row(kRowSplit, "Split", kSplits[split].name, text, true);
@@ -658,7 +665,7 @@ struct App {
         std::string snd = lib.instruments.empty() ? "none" : lib.instruments[size_t(sd.sound)].pkg->name();
         bool loading = !lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index < 0 && lib.instruments[size_t(sd.sound)].error.empty();
         row(kRowSound, "Sound", loading ? snd + "..." : snd, text, true);
-        draw::line(renderer, 12, 5.5f * kRow, kRail - 12, 5.5f * kRow, rgba(0x9AA2B460), 1);
+        draw::line(renderer, 12, 5.5f * kRow, kRail - 12, 5.5f * kRow, rgba(p.line), 1);
         if (sd.host) {
             const mpe::Json& s = sd.host->manifest()["settings"];
             float rh = settingRow(h);
@@ -668,14 +675,15 @@ struct App {
                 size_t i = sd.shown[r];
                 float y = kSettingsTop + float(r) * rh - settingsScroll;
                 if (y < kSettingsTop - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
-                draw::text(renderer, 12, y + (big ? 19 : 12), big ? 11 : 8, dim, fit(s[i]["name"].str(), big ? 11 : 8));
-                draw::text(renderer, 12, y + (big ? 37 : 26), big ? 13 : 10, text, fit(settingValue(i), big ? 13 : 10));
+                float ls = big ? tokens::type::label : 8, vs = big ? tokens::type::body : tokens::type::caption;
+                draw::text(renderer, 12, y + (big ? 19 : 12), ls, dim, fit(s[i]["name"].str(), ls));
+                draw::text(renderer, 12, y + (big ? 37 : 26), vs, text, fit(settingValue(i), vs));
                 arrows(y, rh);
             }
             float rows = float(sd.shown.size()) * rh, room = h - kBottom - kSettingsTop;
             if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
                 float bar = room * room / rows, at = kSettingsTop + (room - bar) * settingsScroll / (rows - room);
-                draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(0x9AA2B480), 1);
+                draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
             }
         }
         if (updater) {
@@ -683,15 +691,15 @@ struct App {
             std::string line = "odo " + updater->current();
             std::string msg = us == Updater::State::Checking ? "checking for updates" : updater->message();
             bool act = us == Updater::State::Available || us == Updater::State::Installed;
-            draw::text(renderer, 12, h - 62, 10, dim, line);
-            draw::text(renderer, 12, h - 46, act ? 12 : 10, act ? accent : dim, msg, 0, act);
+            draw::text(renderer, 12, h - 62, tokens::type::caption, dim, line);
+            draw::text(renderer, 12, h - 46, act ? tokens::type::header : tokens::type::caption, act ? accent : dim, msg, 0, act);
         }
         mpe::Stats st = engine->stats();
         char b[96];
         std::snprintf(b, sizeof b, "Latency %.1f ms, max %.1f", st.eventAgeAvgMs, st.eventAgeMaxMs);
-        draw::text(renderer, 12, h - 30, 10, dim, b);
+        draw::text(renderer, 12, h - 30, tokens::type::caption, dim, b);
         std::snprintf(b, sizeof b, "Load %.0f%%  Voices %d", 100 * st.loadAvg, engine->activeVoices());
-        draw::text(renderer, 12, h - 14, 10, dim, b);
+        draw::text(renderer, 12, h - 14, tokens::type::caption, dim, b);
     }
 
     void frame() {
@@ -741,14 +749,14 @@ struct App {
         }
         if (!railHidden && count() > 1) {
             const Side& sd = cur();
-            draw::strokeRect(renderer, sd.x + 1, sd.y + 1, sd.w - 2, sd.h - 2, rgba(0xFF8A65B0), 2, 4);
+            draw::strokeRect(renderer, sd.x + 1, sd.y + 1, sd.w - 2, sd.h - 2, rgba(tokens::alpha(look().parts[0], 0xB0)), 2, 4);
         }
-        if (!any) draw::text(renderer, railW() + 20, 40, 14, rgba(0xFFFFFFFF), "No controller packages (.odoc) in the library.");
-        if (!status.empty()) draw::text(renderer, railW() + 16, float(wh) - 16, 12, rgba(0xFFC857FF), status);
+        if (!any) draw::text(renderer, railW() + 20, 40, 14, rgba(look().text), "No controller packages (.odoc) in the library.");
+        if (!status.empty()) draw::text(renderer, railW() + 16, float(wh) - 16, tokens::type::header, rgba(look().warn), status);
         if (!railHidden) drawRail(float(wh));
         else {                                           // the corner button that brings the rail back
-            draw::fillRect(renderer, 6, 6, 36, 36, rgba(0x07080BCC), 8);
-            draw::text(renderer, 24, 30, 12, rgba(0xFFFFFFD9), ">>", 1);
+            draw::fillRect(renderer, 6, 6, 36, 36, rgba(tokens::alpha(look().ink, 0xCC)), 8);
+            draw::text(renderer, 24, 30, tokens::type::header, rgba(look().text), ">>", 1);
         }
         SDL_RenderPresent(renderer);
     }

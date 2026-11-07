@@ -125,7 +125,11 @@ object AppState {
         loopSnap = prefs.getBoolean("loopSnap", true)
         if (!prefs.contains("ctl.${TouchPad.id}")) migrateToControllers(perfJson)
         Controllers.packaged = com.patrickreynolds.mpeinstruments.controllers.PackageController.builtIn(appContext)
-        for (c in Controllers.all) runCatching { c.load(prefs.getString("ctl.${c.id}", null)?.let { JSONObject(it) }) }
+        for (c in Controllers.all) runCatching {
+            val saved = prefs.getString("ctl.${c.id}", null)
+                ?: Controllers.formerIds(c.id).firstNotNullOfOrNull { prefs.getString("ctl.$it", null) }
+            c.load(saved?.let { JSONObject(it) })
+        }
         controller = Controllers.byId(prefs.getString("controller", TouchPad.id))
         // From 0.16 to 0.20 the arps were each controller's: the one in use brings its own into the sound.
         if (Perf.arpsInController(perfJson)) {
