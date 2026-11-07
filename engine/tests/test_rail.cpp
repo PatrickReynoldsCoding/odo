@@ -221,7 +221,7 @@ static void tonnetzAndTouchpad() {
     gs = rail::groups(p, defaults(p));
     names.clear();
     for (auto& g : gs) names += (names.empty() ? "" : ", ") + g.name;
-    CHECK(names == "Layout, Notes, Touch, Playing, Look", "the touch pad's groups: %s", names.c_str());
+    CHECK(names == "Layout, Notes, Split, Chords, Touch, Playing, Look", "the touch pad's groups: %s", names.c_str());
     rs = rail::rows(p, defaults(p));
     auto glide = find(rs, "glide");
     CHECK(glide && glide->widget == Widget::Slider && glide->step == 0.05 && glide->display == "0", "Glide: 21 values, a slider");
