@@ -4,12 +4,14 @@
 //
 //   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--no-update]
 //       [--version] [--self-update] [--setting [SIDE:]INDEX=VALUE]...
-//       [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]
+//       [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]
 //
 // Library folders hold .odoi and .odoc files (default: the library folder beside odo, and
 // ~/.local/share/odo/library). It checks GitHub for a newer odo when it opens (--no-update: not);
-// the update row at the bottom of the rail installs it. The rail on
-// the left picks the split, then for each side its controller, sound and settings; the rest of
+// the update line at the bottom of the rail installs it. The rail on
+// the left, as odo on Android's, picks the split, then for each side its controller, sound and
+// settings: a tap opens a panel beside it with chips, a slider or a list (--tap: a self-test's
+// taps there, in window points, before its touches). The rest of
 // the window is the controllers: whole, or split side by side, above and below, in three or in
 // four, each side playing its own sound. (--controller and --sound repeat: the first is the
 // first side's, the next the second's.) Keys: Tab hides the rail, F11 full screen, Esc quits.
@@ -47,7 +49,6 @@ namespace {
 
 constexpr int kRate = 48000;           // instruments are tuned at 48 kHz: SDL converts if the device differs
 constexpr float kRail = 230;           // the rail's width, points
-constexpr float kRow = 46;
 
 // A chevron pointing left (dir -1) or right (dir 1), centred on (cx, cy), `size` points high.
 void chevron(SDL_Renderer* r, float cx, float cy, float size, int dir, draw::Color c) {
@@ -507,25 +508,213 @@ struct App {
         saved[settingsKey(k)][sd.host->manifest()["settings"][i]["id"].str()] = v;
     }
 
-    void changeSetting(size_t i, int dir) {
+    // Setting i of the side the rail changes, to v. A slider being dragged saves when it lets go.
+    void setSetting(size_t i, double v, bool save = true) {
         Side& sd = cur();
-        const mpe::Json& s = sd.host->manifest()["settings"][i];
-        double v = mpe::rail::stepped(s, sd.settings[i], dir);   // as Android steps it (rail.h)
+        if (!sd.host || i >= sd.settings.size()) return;
         int parts = partsOf(active);
         sd.host->setting(int(i), v);
         keepSetting(active, i, v);
         if (partsOf(active) != parts) reroute();
-        saveConfig();
+        if (save) saveConfig();
+    }
+    const mpe::Json& settingOf(size_t i) { return cur().host->manifest()["settings"][i]; }
+
+    // ---- the rail and its panel -----------------------------------------------------------------
+
+    // As odo on Android: the rail lists what can be changed, each a name over its value. A tap
+    // flips a switch, or opens a panel beside the rail with the setting's chips, slider or list,
+    // until Done (or the row again). The controller's settings come from mpe::rail, in their
+    // groups, as Android shows them; under the top row the whole rail scrolls.
+    static constexpr float kButton = 40;           // the top buttons' width
+    static constexpr float kTop = 46;              // the top row: odo, full screen, hide
+    static constexpr float kBottom = 84;           // the lines at the bottom: version and update, latency, load
+    static constexpr float kItem = 40, kHeading = 26, kToggle = 42, kDivider = 13;
+
+    // What a row opens or flips: a controller setting by its place in the manifest (0 and up), or one of these.
+    enum Key { kNone = -100, kSplitKey = -1, kControllerKey = -2, kSoundKey = -3, kSound2Key = -4 };
+
+    struct RailItem {
+        enum Kind { Row, Heading, Toggle, Divider } kind;
+        int key;
+        std::string label, value;
+        bool isSwitch, on;                         // a switch, and whether it is on
+        float y, h;                                // from the top of the scrolled part, unscrolled
+    };
+
+    std::string soundName(int n) const {
+        const Instrument& in = lib.instruments[size_t(n)];
+        return in.pkg->name() + (in.index < 0 && in.error.empty() ? "..." : "");
     }
 
-    // ---- input ----------------------------------------------------------------------------------
+    // The rail under its top row: the split, which side it changes, that side's controller and
+    // sound (two, for a split controller), then the controller's settings. Drawing, tapping and
+    // scrolling all use this one layout.
+    std::vector<RailItem> railItems() {
+        std::vector<RailItem> items;
+        float y = 0;
+        auto add = [&](RailItem::Kind k, int key, std::string label, std::string value, float h, bool sw = false, bool on = false) {
+            items.push_back({k, key, std::move(label), std::move(value), sw, on, y, h});
+            y += h;
+        };
+        Side& sd = cur();
+        add(RailItem::Row, kSplitKey, "Split", kSplits[split].name, kItem);
+        if (count() > 1) add(RailItem::Toggle, kNone, "", "", kToggle);
+        add(RailItem::Row, kControllerKey, "Controller", sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", kItem);
+        if (!lib.instruments.empty()) {
+            bool two = partsOf(active) > 1;
+            const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
+            add(RailItem::Row, kSoundKey, two ? "Sound: " + parts[size_t(0)].str() : "Sound", soundName(sd.sound), kItem);
+            if (two) add(RailItem::Row, kSound2Key, "Sound: " + parts[size_t(1)].str(), soundName(sound2Of(active)), kItem);
+        }
+        if (sd.host) {
+            add(RailItem::Divider, kNone, "", "", kDivider);
+            for (auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) {
+                if (!g.name.empty()) add(RailItem::Heading, kNone, g.name, "", kHeading);
+                for (auto& r : g.rows) {
+                    bool sw = r.widget == mpe::rail::Widget::Switch;
+                    add(RailItem::Row, int(r.index), r.label, r.display, kItem, sw, sw && r.value != 0);
+                }
+            }
+        }
+        return items;
+    }
+    static float itemsHeight(const std::vector<RailItem>& items) { return items.empty() ? 0 : items.back().y + items.back().h; }
 
-    // The rail's rows: the top buttons, the split, the side it changes, its controller and sound;
-    // then that controller's settings.
-    enum { kRowTop, kRowSplit, kRowSide, kRowController, kRowSound, kRowSound2 };
+    float settingsScroll = 0;                      // how far the rail under its top row is scrolled
+    void scrollRail(float by, float h) {
+        float room = h - kBottom - kTop;
+        settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, itemsHeight(railItems()) - room));
+    }
 
-    // A tap on the rail: which row, and whether on its left (back) or right (on) half. The update
-    // row is at the bottom.
+    // The open panel: what it is for (kNone: none), and how far its list is scrolled.
+    int panelKey = kNone;
+    float panelScroll = 0;
+    static constexpr float kPanelHead = 50, kPad = 14, kChipH = 32, kChipGap = 8, kListH = 36, kSliderH = 56;
+
+    struct PanelLayout {
+        bool open = false;
+        float x = 0, y = 0, w = 0, h = 0;          // the card, in the window
+        std::string title;
+        enum Kind { Chips, List, Slider } kind = Chips;
+        struct Item { std::string text; float x, y, w, h; };   // y from the content's top, unscrolled
+        std::vector<Item> items;
+        int chosen = -1;
+        float top = 0, room = 0, contentH = 0;     // where the content starts, how much of it shows, all of it
+        double frac = 0;                           // a slider's place, 0..1
+        std::string label, valueText;              // a slider's name and value
+        float trackX = 0, trackW = 0;
+        bool inCard(float px, float py) const { return open && px >= x && px < x + w && py >= y && py < y + h; }
+        bool onDone(float px, float py) const { return inCard(px, py) && px >= x + w - 80 && py < y + kPanelHead; }
+    };
+
+    PanelLayout panelLayout() {
+        PanelLayout p;
+        if (panelKey == kNone || railHidden) return p;
+        int ww, wh;
+        SDL_GetWindowSize(window, &ww, &wh);
+        Side& sd = cur();
+        std::vector<std::string> names;
+        if (panelKey == kSplitKey) {
+            p.title = "Split"; p.kind = PanelLayout::List; p.chosen = split;
+            for (const Split& s : kSplits) names.push_back(s.name);
+        } else if (panelKey == kControllerKey) {
+            p.title = "Controller"; p.kind = PanelLayout::List; p.chosen = sd.controller;
+            for (const auto& c : lib.controllers) names.push_back(c->name());
+        } else if (panelKey == kSoundKey || panelKey == kSound2Key) {
+            if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < 2)) { panelKey = kNone; return p; }
+            const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
+            bool two = partsOf(active) > 1;
+            p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? 1 : 0)].str() : "Sound";
+            p.kind = PanelLayout::List;
+            p.chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
+            for (const Instrument& in : lib.instruments) names.push_back(in.pkg->name());
+        } else {
+            // A controller setting: as the rail model shows it. Gone (another controller, now
+            // hidden) or a switch: no panel.
+            if (!sd.host) { panelKey = kNone; return p; }
+            bool found = false;
+            for (const mpe::rail::Row& r : mpe::rail::rows(sd.host->manifest(), sd.settings)) {
+                if (int(r.index) != panelKey || r.widget == mpe::rail::Widget::Switch) continue;
+                found = true;
+                p.title = r.label;
+                if (r.widget == mpe::rail::Widget::Chips) { p.kind = PanelLayout::Chips; names = r.choices; p.chosen = r.chosen; }
+                else {
+                    p.kind = PanelLayout::Slider;
+                    p.frac = mpe::rail::toFraction(settingOf(r.index), r.value);
+                    p.label = r.label;
+                    p.valueText = r.display;
+                }
+            }
+            if (!found) { panelKey = kNone; return p; }
+        }
+        p.open = true;
+        p.x = kRail + 8;
+        p.y = 12;
+        p.w = std::min(380.f, float(ww) - p.x - 8);
+        float inner = p.w - 2 * kPad;
+        if (p.kind == PanelLayout::Chips) {
+            float cx = 0, cy = 0;
+            for (const std::string& n : names) {
+                float tw = std::min(inner, draw::textWidth(tokens::type::body, n) + 26);
+                if (cx > 0 && cx + tw > inner) { cx = 0; cy += kChipH + kChipGap; }
+                p.items.push_back({n, p.x + kPad + cx, cy, tw, kChipH});
+                cx += tw + kChipGap;
+            }
+            p.contentH = names.empty() ? 0 : cy + kChipH;
+        } else if (p.kind == PanelLayout::List) {
+            for (size_t i = 0; i < names.size(); i++) p.items.push_back({names[i], p.x + kPad, float(i) * kListH, inner, kListH});
+            p.contentH = float(names.size()) * kListH;
+        } else {
+            p.contentH = kSliderH;
+            p.trackX = p.x + kPad + 9;
+            p.trackW = inner - 18;
+        }
+        p.h = std::min(kPanelHead + p.contentH + kPad, float(wh) - 24);
+        p.top = p.y + kPanelHead;
+        p.room = p.h - kPanelHead - kPad;
+        panelScroll = std::clamp(panelScroll, 0.f, std::max(0.f, p.contentH - p.room));
+        return p;
+    }
+
+    void openPanel(int key) {
+        panelKey = panelKey == key ? kNone : key;
+        panelScroll = 0;
+        // A long list opens with the chosen one in sight.
+        PanelLayout p = panelLayout();
+        if (p.open && p.kind == PanelLayout::List && p.chosen >= 0)
+            panelScroll = std::clamp(float(p.chosen) * kListH - p.room / 2 + kListH / 2, 0.f, std::max(0.f, p.contentH - p.room));
+    }
+
+    // A tap in the panel: Done, or a chip or a list's item.
+    void panelTap(float x, float y) {
+        PanelLayout p = panelLayout();
+        if (!p.open) return;
+        if (p.onDone(x, y)) { panelKey = kNone; return; }
+        if (y < p.top || y >= p.top + p.room) return;
+        for (size_t i = 0; i < p.items.size(); i++) {
+            const auto& it = p.items[i];
+            float iy = p.top + it.y - panelScroll;
+            if (x < it.x || x >= it.x + it.w || y < iy || y >= iy + it.h) continue;
+            int n = int(i);
+            if (panelKey == kSplitKey) { setSplit(n); panelKey = kNone; }
+            else if (panelKey == kControllerKey) { chooseController(active, n); panelKey = kNone; }
+            else if (panelKey == kSoundKey) chooseSound(active, n);
+            else if (panelKey == kSound2Key) chooseSound2(active, n);
+            else setSetting(size_t(panelKey), mpe::rail::chipValue(settingOf(size_t(panelKey)), n));
+            return;
+        }
+    }
+
+    // A slider under x: the setting at that place.
+    void panelSlide(const PanelLayout& p, float x, bool save) {
+        if (p.kind != PanelLayout::Slider || panelKey < 0 || p.trackW <= 0) return;
+        double t = std::clamp(double(x - p.trackX) / double(p.trackW), 0.0, 1.0);
+        setSetting(size_t(panelKey), mpe::rail::fromFraction(settingOf(size_t(panelKey)), t), save);
+    }
+
+    // A tap on the rail: the top row's buttons, the update line, a row (a switch flips, the rest
+    // open their panel) or the side toggle.
     void railTap(float x, float y) {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
@@ -535,94 +724,71 @@ struct App {
             else if (updater->state() == Updater::State::Failed || updater->state() == Updater::State::UpToDate) updater->check();
             return;
         }
-        int row = int(y / kRow);
-        if (row == kRowTop) {                            // the top row's buttons: full screen, hide
+        if (y < kTop) {                                  // full screen, hide
             if (x >= kRail - kButton) setRailHidden(true);
             else if (x >= kRail - 2 * kButton) setFullscreen(!fullscreen());
             return;
         }
-        // "<" goes back, ">" on, the rest of the row on (a switch flips).
-        int dir = x >= kRail - 2 * kButton && x < kRail - kButton ? -1 : 1;
-        if (row == kRowSplit) setSplit(split + dir);
-        else if (row == kRowSide) setActive(active + dir);
-        else if (row == kRowController) chooseController(active, cur().controller + dir);
-        else if (row == kRowSound) chooseSound(active, cur().sound + dir);
-        else if (row == kRowSound2 && partsOf(active) > 1) chooseSound2(active, sound2Of(active) + dir);
-        else if (cur().host && y >= settingsTop() && y < float(wh) - kBottom) {
-            // The same layout drawRail draws: the row under y, if any (a heading does nothing).
-            float at = y - settingsTop() + settingsScroll;
-            for (const RailItem& it : settingsLayout(float(wh)))
-                if (at >= it.y && at < it.y + it.h) {
-                    if (!it.heading) changeSetting(it.row.index, dir);
-                    break;
-                }
+        if (y >= float(wh) - kBottom) return;
+        float at = y - kTop + settingsScroll;
+        for (const RailItem& it : railItems()) {
+            if (at < it.y || at >= it.y + it.h) continue;
+            if (it.kind == RailItem::Toggle) {           // which side the rail changes
+                int n = count(), k = std::clamp(int((x - 8) / ((kRail - 16) / float(n))), 0, n - 1);
+                if (k != active) { setActive(k); panelKey = kNone; }
+            } else if (it.kind == RailItem::Row) {
+                if (it.isSwitch) { setSetting(size_t(it.key), mpe::rail::stepped(settingOf(size_t(it.key)), cur().settings[size_t(it.key)], 1)); }
+                else openPanel(it.key);
+            }
+            return;
         }
     }
 
-    // A finger (or the mouse) on the rail: a tap acts when it lifts; a drag scrolls the settings.
-    // phase 0 down, 1 move, 2 up. True if the rail took it.
+    // A finger (or the mouse) on the rail or the panel: a tap acts when it lifts, a drag scrolls
+    // (the rail, or the panel's list), and on a slider it slides. phase 0 down, 1 move, 2 up.
+    // True if the rail or the panel took it.
     static constexpr int64_t kMouse = -1;
-    static constexpr float kButton = 40;           // the arrows' and the top buttons' width
-    struct Press { bool on = false; int64_t id = 0; float x = 0, y0 = 0, last = 0; bool dragged = false; } press;
-    float settingsScroll = 0;
-
-    void scrollSettings(float by, float h) {
-        float rows = settingsHeight(settingsLayout(h)), room = h - kBottom - settingsTop();
-        settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, rows - room));
-    }
+    struct Press {
+        enum Where { Rail, Panel, Corner } where = Rail;
+        bool on = false;
+        int64_t id = 0;
+        float x = 0, y0 = 0, last = 0;
+        bool dragged = false, sliding = false;
+    } press;
 
     bool railPress(int phase, int64_t id, float x, float y) {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         if (phase == 0) {
             // Hidden, the rail's corner button brings it back.
-            if (railHidden && x < 44 && y < 44) { setRailHidden(false); press = Press{true, id, -1, -1, -1, true}; return true; }
-            if (x >= railW() || press.on) return x < railW();
-            press = Press{true, id, x, y, y, false};
+            if (railHidden && x < 44 && y < 44) { setRailHidden(false); press = Press{Press::Corner, true, id, x, y, y, true, false}; return true; }
+            PanelLayout p = panelLayout();
+            bool mine = x < railW() || p.inCard(x, y);
+            if (press.on) return mine;                   // one finger at a time on the rail and panel
+            if (!mine) return false;
+            press = Press{p.inCard(x, y) ? Press::Panel : Press::Rail, true, id, x, y, y, false, false};
+            if (press.where == Press::Panel && p.kind == PanelLayout::Slider && y >= p.top && !p.onDone(x, y)) {
+                press.sliding = press.dragged = true;
+                panelSlide(p, x, false);
+            }
             return true;
         }
         if (!press.on || press.id != id) return false;
         if (phase == 1) {
-            if (std::fabs(y - press.y0) > 16) press.dragged = true;
-            if (press.dragged) scrollSettings(press.last - y, float(wh));
+            if (press.sliding) panelSlide(panelLayout(), x, false);
+            else {
+                if (std::fabs(y - press.y0) > 16) press.dragged = true;
+                if (press.dragged && press.where == Press::Rail) scrollRail(press.last - y, float(wh));
+                if (press.dragged && press.where == Press::Panel) { panelScroll += press.last - y; panelLayout(); }
+            }
             press.last = y;
             return true;
         }
         press.on = false;
-        if (!press.dragged) railTap(press.x, press.y0);
+        if (press.sliding) saveConfig();
+        else if (!press.dragged && press.where == Press::Rail) railTap(press.x, press.y0);
+        else if (!press.dragged && press.where == Press::Panel) panelTap(press.x, press.y0);
         return true;
-    }
-
-    // The controller's settings fill the rail between the sound and the lines at the bottom, in
-    // their groups (mpe::rail), each named group under a small heading: each row as tall as fits,
-    // down to a compact one.
-    static constexpr float kBottom = 84;
-    static constexpr float kHeading = 24;          // a group's heading, with a little room above it
-    // The settings start under the sound, or under the second sound when the controller is split.
-    float settingsTop() const { return (partsOf(active) > 1 ? 6.7f : 5.7f) * kRow; }
-
-    // One item of the settings' layout: a group's heading or a setting's row. y is from the top of
-    // the settings, unscrolled. Drawing, tapping and scrolling all use this one layout.
-    struct RailItem { bool heading; std::string name; mpe::rail::Row row; float y, h; };
-    std::vector<RailItem> settingsLayout(float h) {
-        std::vector<RailItem> items;
-        Side& sd = cur();
-        if (!sd.host) return items;
-        auto groups = mpe::rail::groups(sd.host->manifest(), sd.settings);
-        size_t headings = 0, rows = 0;
-        for (const auto& g : groups) { headings += g.name.empty() ? 0 : 1; rows += g.rows.size(); }
-        if (rows == 0) return items;
-        float room = h - kBottom - settingsTop() - float(headings) * kHeading;
-        float rh = std::clamp(room / float(rows), 30.f, kRow);
-        float y = 0;
-        for (auto& g : groups) {
-            if (!g.name.empty()) { items.push_back({true, g.name, {}, y, kHeading}); y += kHeading; }
-            for (auto& r : g.rows) { items.push_back({false, "", std::move(r), y, rh}); y += rh; }
-        }
-        return items;
-    }
-    static float settingsHeight(const std::vector<RailItem>& items) {
-        return items.empty() ? 0 : items.back().y + items.back().h;
     }
 
     // A pointer on the play area: down on a side, it plays that side until it lifts.
@@ -679,7 +845,8 @@ struct App {
             case SDL_EVENT_MOUSE_WHEEL: {
                 float mx, my;
                 SDL_GetMouseState(&mx, &my);
-                if (mx < railW()) scrollSettings(-e.wheel.y * 40, float(wh));
+                if (panelLayout().inCard(mx, my)) { panelScroll -= e.wheel.y * 40; panelLayout(); }
+                else if (mx < railW()) scrollRail(-e.wheel.y * 40, float(wh));
                 return;
             }
             case SDL_EVENT_KEY_DOWN:
@@ -697,76 +864,74 @@ struct App {
     // The look: ui/tokens.json, the same as odo on Android's.
     const tokens::Palette& look() const { return eink ? tokens::eink : tokens::dark; }
 
+    void clip(float x, float y, float w, float h) {
+        SDL_Rect r{int(x), int(y), int(std::ceil(w)), int(std::ceil(h))};
+        SDL_SetRenderClipRect(renderer, &r);
+    }
+
     void drawRail(float h) {
         const tokens::Palette& p = look();
         draw::Color bg = rgba(p.ink), text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]);
         draw::fillRect(renderer, 0, 0, kRail, h, bg);
+        if (p.eink) draw::fillRect(renderer, kRail - 2, 0, 2, h, rgba(p.line));
         draw::Color key = rgba(p.panelHigh);
-        // The arrows: two buttons at the right of a row.
-        auto arrows = [&](float y, float h) {
-            draw::fillRect(renderer, kRail - 2 * kButton + 2, y + 3, kButton - 4, h - 6, key, tokens::radius::control);
-            draw::fillRect(renderer, kRail - kButton + 2, y + 3, kButton - 4, h - 6, key, tokens::radius::control);
-            float size = h >= 40 ? 12 : 10;
-            chevron(renderer, kRail - 1.5f * kButton, y + h / 2, size, -1, text);
-            chevron(renderer, kRail - 0.5f * kButton, y + h / 2, size, 1, text);
-        };
-        // A value cut to fit before the arrows, ending in an ellipsis when it is cut.
-        auto fit = [&](const std::string& v, float size) { return draw::fit(v, size, kRail - 2 * kButton - 16); };
-        auto row = [&](int k, const std::string& label, const std::string& value, draw::Color c, bool withArrows) {
-            float y = float(k) * kRow;
-            draw::text(renderer, 12, y + 19, tokens::type::label, dim, label);
-            draw::text(renderer, 12, y + 37, tokens::type::body, c, fit(value, tokens::type::body));
-            if (withArrows) arrows(y, kRow);
-        };
+        // The top row: odo, and buttons for full screen and to hide the rail.
         draw::text(renderer, 12, 30, tokens::type::title, accent, "odo", 0, true);
-        // The top row's buttons: full screen, and hide the rail.
-        draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kRow - 10, key, tokens::radius::control);
-        draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kRow - 10, key, tokens::radius::control);
-        draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kRow / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
-        chevron(renderer, kRail - 0.5f * kButton - 4, kRow / 2, 12, -1, text);
-        chevron(renderer, kRail - 0.5f * kButton + 4, kRow / 2, 12, -1, text);
-        row(kRowSplit, "Split", kSplits[split].name, text, true);
-        row(kRowSide, count() > 1 ? "Changing" : "Side", kSplits[split].side[active], count() > 1 ? accent : dim, count() > 1);
-        Side& sd = cur();
-        row(kRowController, "Controller", sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", text, true);
-        std::string snd = lib.instruments.empty() ? "none" : lib.instruments[size_t(sd.sound)].pkg->name();
-        bool loading = !lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index < 0 && lib.instruments[size_t(sd.sound)].error.empty();
-        // Split (the Grid's), a sound for each part, named as the controller names them.
-        bool two = partsOf(active) > 1 && !lib.instruments.empty();
-        const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
-        row(kRowSound, two ? "Sound: " + parts[size_t(0)].str() : "Sound", loading ? snd + "..." : snd, text, true);
-        if (two) {
-            const Instrument& in2 = lib.instruments[size_t(sound2Of(active))];
-            bool loading2 = in2.index < 0 && in2.error.empty();
-            row(kRowSound2, "Sound: " + parts[size_t(1)].str(), in2.pkg->name() + (loading2 ? "..." : ""), text, true);
-        }
-        float divider = settingsTop() - 0.2f * kRow;
-        draw::line(renderer, 12, divider, kRail - 12, divider, rgba(p.line), 1);
-        if (sd.host) {
-            scrollSettings(0, h);                // keep the scroll in range (the window may have grown)
-            std::vector<RailItem> items = settingsLayout(h);
-            for (const RailItem& it : items) {
-                float y = settingsTop() + it.y - settingsScroll;
-                if (y < settingsTop() - 1 || y + it.h > h - kBottom + 1) continue;   // scrolled out of the rail
-                if (it.heading) {                // a group's heading: small, dim capitals, room above
-                    std::string up = it.name;
+        draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kTop - 10, key, tokens::radius::control);
+        draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kTop - 10, key, tokens::radius::control);
+        draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kTop / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
+        chevron(renderer, kRail - 0.5f * kButton - 4, kTop / 2, 12, -1, text);
+        chevron(renderer, kRail - 0.5f * kButton + 4, kTop / 2, 12, -1, text);
+
+        // Under it, scrolled: the rows, as Android's rail has them.
+        scrollRail(0, h);                                // keep the scroll in range (the window may have grown)
+        std::vector<RailItem> items = railItems();
+        float room = h - kBottom - kTop;
+        clip(0, kTop, kRail, room);
+        for (const RailItem& it : items) {
+            float y = kTop + it.y - settingsScroll;
+            if (y + it.h < kTop || y > kTop + room) continue;
+            switch (it.kind) {
+                case RailItem::Divider:
+                    draw::line(renderer, 12, y + it.h / 2, kRail - 12, y + it.h / 2, rgba(p.line), 1);
+                    break;
+                case RailItem::Heading: {                // a group's name: small capitals, as Android's
+                    std::string up = it.label;
                     for (char& c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
-                    draw::text(renderer, 12, y + it.h - 6, tokens::type::caption, dim,
-                               draw::fit(up, tokens::type::caption, kRail - 24, true), 0, true);
-                    continue;
+                    draw::text(renderer, 14, y + it.h - 7, tokens::type::header, dim, draw::fit(up, tokens::type::header, kRail - 28, true), 0, true);
+                    break;
                 }
-                bool big = it.h >= 40;
-                float ls = big ? tokens::type::label : 8, vs = big ? tokens::type::body : tokens::type::caption;
-                draw::text(renderer, 12, y + (big ? 19 : 12), ls, dim, fit(it.row.label, ls));
-                draw::text(renderer, 12, y + (big ? 37 : 26), vs, text, fit(it.row.display, vs));
-                arrows(y, it.h);
-            }
-            float rows = settingsHeight(items), room = h - kBottom - settingsTop();
-            if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
-                float bar = room * room / rows, at = settingsTop() + (room - bar) * settingsScroll / (rows - room);
-                draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
+                case RailItem::Toggle: {                 // which side the rail changes, one cell each
+                    int n = count();
+                    float bx = 8, bw = kRail - 16, cw = bw / float(n);
+                    draw::strokeRect(renderer, bx, y + 5, bw, it.h - 10, p.eink ? rgba(p.line) : dim, p.eink ? 2 : 1, 8);
+                    for (int k = 0; k < n; k++) {
+                        bool on = k == active;
+                        float cx = bx + float(k) * cw;
+                        if (on) draw::fillRect(renderer, cx + 2, y + 7, cw - 4, it.h - 14, p.eink ? rgba(p.text) : rgba(tokens::alpha(p.parts[0], 0x4D)), 6);
+                        std::string name = draw::fit(kSplits[split].side[k], tokens::type::header, cw - 8, on);
+                        draw::text(renderer, cx + cw / 2, y + it.h / 2 + 4.5f, tokens::type::header,
+                                   on ? (p.eink ? bg : accent) : text, name, 1, on);
+                    }
+                    break;
+                }
+                case RailItem::Row: {
+                    bool open = panelKey == it.key, lit = open || it.on;
+                    if (open) draw::fillRect(renderer, 6, y + 1, kRail - 12, it.h - 2, p.eink ? rgba(p.text) : key, tokens::radius::control);
+                    draw::Color lc = open && p.eink ? bg : lit ? accent : text, vc = open && p.eink ? bg : dim;
+                    draw::text(renderer, 14, y + 17, tokens::type::header, lc, draw::fit(it.label, tokens::type::header, kRail - 28, true), 0, true);
+                    draw::text(renderer, 14, y + 32, tokens::type::label, vc, draw::fit(it.value, tokens::type::label, kRail - 28));
+                    break;
+                }
             }
         }
+        SDL_SetRenderClipRect(renderer, nullptr);
+        float all = itemsHeight(items);
+        if (all > room) {                                // a scroll bar: how much of the rail shows, and where
+            float bar = room * room / all, at = kTop + (room - bar) * settingsScroll / (all - room);
+            draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
+        }
+
         if (updater) {
             Updater::State us = updater->state();
             std::string line = "odo " + updater->current();
@@ -782,6 +947,52 @@ struct App {
         draw::text(renderer, 12, h - 30, tokens::type::caption, dim, draw::fit(b, tokens::type::caption, kRail - 24));
         std::snprintf(b, sizeof b, "Load %.0f%%  Voices %d", 100 * st.loadAvg, engine->activeVoices());
         draw::text(renderer, 12, h - 14, tokens::type::caption, dim, draw::fit(b, tokens::type::caption, kRail - 24));
+        drawPanel();
+    }
+
+    // The open panel, beside the rail over the play area: its name and Done, then the setting's
+    // chips, a slider, or a list to choose from (Android's SettingPanel).
+    void drawPanel() {
+        PanelLayout pl = panelLayout();
+        if (!pl.open) return;
+        const tokens::Palette& p = look();
+        draw::Color text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]), line = rgba(p.line);
+        draw::fillRect(renderer, pl.x, pl.y, pl.w, pl.h, rgba(p.panel), tokens::radius::card);
+        if (p.eink) draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, line, 2, tokens::radius::card);
+        else draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, rgba(tokens::alpha(p.line, 0xC0)), 1, tokens::radius::card);
+        draw::text(renderer, pl.x + kPad, pl.y + 31, 17, text, draw::fit(pl.title, 17, pl.w - 2 * kPad - 70, true), 0, true);
+        draw::text(renderer, pl.x + pl.w - kPad - 6, pl.y + 31, tokens::type::body + 1, accent, "Done", 2, true);
+        if (pl.kind == PanelLayout::Slider) {            // its name and value, then the slider
+            float y = pl.top;
+            draw::text(renderer, pl.x + kPad, y + 16, 14, text, draw::fit(pl.label, 14, pl.w - 2 * kPad - 70));
+            draw::text(renderer, pl.x + pl.w - kPad, y + 16, 14, dim, pl.valueText, 2);
+            float ty = y + 38, fx = pl.trackX + float(pl.frac) * pl.trackW;
+            draw::fillRect(renderer, pl.trackX, ty - 2, pl.trackW, 4, p.eink ? rgba(0xBBBBBBFF) : line, 2);
+            draw::fillRect(renderer, pl.trackX, ty - 2, fx - pl.trackX, 4, accent, 2);
+            draw::circle(renderer, fx, ty, 9, accent, accent, 0);
+            return;
+        }
+        clip(pl.x, pl.top, pl.w, pl.room);
+        for (size_t i = 0; i < pl.items.size(); i++) {
+            const auto& it = pl.items[i];
+            float y = pl.top + it.y - panelScroll;
+            if (y + it.h < pl.top || y > pl.top + pl.room) continue;
+            bool on = int(i) == pl.chosen;
+            if (pl.kind == PanelLayout::Chips) {         // Android's FilterChip: the chosen one tinted and edged in the accent
+                if (on) draw::fillRect(renderer, it.x, y, it.w, it.h, p.eink ? text : rgba(tokens::alpha(p.parts[0], 0x38)), 8);
+                draw::strokeRect(renderer, it.x, y, it.w, it.h, p.eink ? line : on ? accent : line, p.eink ? 2 : 1, 8);
+                draw::text(renderer, it.x + it.w / 2, y + it.h / 2 + 4.5f, tokens::type::body,
+                           on ? (p.eink ? rgba(p.ink) : accent) : text, draw::fit(it.text, tokens::type::body, it.w - 16), 1);
+            } else {                                     // a list: the chosen one in the accent, bold
+                if (i > 0) draw::line(renderer, it.x, y, it.x + it.w, y, rgba(tokens::alpha(p.line, 0x80)), 1);
+                draw::text(renderer, it.x, y + it.h / 2 + 5.5f, 15, on ? accent : text, draw::fit(it.text, 15, it.w, on), 0, on);
+            }
+        }
+        SDL_SetRenderClipRect(renderer, nullptr);
+        if (pl.contentH > pl.room) {                     // a scroll bar for a long list
+            float bar = pl.room * pl.room / pl.contentH, at = pl.top + (pl.room - bar) * panelScroll / (pl.contentH - pl.room);
+            draw::fillRect(renderer, pl.x + pl.w - 6, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
+        }
     }
 
     void frame() {
@@ -858,6 +1069,7 @@ struct Selftest {
     std::vector<std::pair<float, float>> touches;
     float moveX = 0, moveY = 0;
     int expect = -1;
+    std::vector<std::pair<float, float>> taps;   // taps on the rail or its panel first, in window points
 };
 
 int selftest(App& app, const char* out, Selftest t) {
@@ -875,6 +1087,13 @@ int selftest(App& app, const char* out, Selftest t) {
         wait(20);
     }
     wait(100);
+    for (size_t k = 0; k < t.taps.size(); k++) {
+        app.railPress(0, int64_t(2000 + k), t.taps[k].first, t.taps[k].second);
+        wait(20);
+        app.railPress(2, int64_t(2000 + k), t.taps[k].first, t.taps[k].second);
+        wait(50);
+    }
+    while (!app.soundsReady()) wait(20);         // a tap may have picked a sound still to load
     int ww, wh;
     SDL_GetWindowSize(app.window, &ww, &wh);
     float aw = float(ww) - app.railW(), ah = float(wh);
@@ -956,6 +1175,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "--touch" && more && std::sscanf(argv[i + 1], "%f,%f", &x, &y) == 2) { test.touches.push_back({x, y}); i++; }
         else if (a == "--move" && more && std::sscanf(argv[i + 1], "%f,%f", &x, &y) == 2) { test.moveX = x; test.moveY = y; i++; }
+        else if (a == "--tap" && more && std::sscanf(argv[i + 1], "%f,%f", &x, &y) == 2) { test.taps.push_back({x, y}); i++; }
         else if (a == "--expect" && more) test.expect = std::atoi(argv[++i]);
         else if (a == "--setting" && more && std::strchr(argv[i + 1], '=')) {
             const char* s = argv[++i];
@@ -966,7 +1186,7 @@ int main(int argc, char** argv) {
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
             std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--no-update] [--version]\n"
-                                 "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
+                                 "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
     }
