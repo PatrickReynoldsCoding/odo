@@ -99,12 +99,22 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
         settings.forEachIndexed { k, st -> put(st.optString("id", "$k"), values[k]) }
     })
 
-    override fun load(o: JSONObject?) {
-        val byId = o?.optJSONObject("byId")
-        val a = o?.optJSONArray("values")            // before 0.22.2: by position
+    override fun load(o: JSONObject?) = load(o, settings.map { default(it) }, preset = false)
+
+    /** A preset's: what it does not say stays as it is (a built-in touch pad preset may give only the split). */
+    override fun loadPreset(o: JSONObject) = load(o, values, preset = true)
+
+    /** A preset made for another controller, or none: what is per preset (a split) goes back to off. */
+    override fun clearForPreset() { if (partsFrom >= 0) change(partsFrom, 0.0) }
+
+    private fun load(o: JSONObject?, base: List<Double>, preset: Boolean) {
+        // The Kotlin touch pad's settings (until 0.26), or a preset made with it: as this package's.
+        val src = if (o != null && id == LegacyTouchPad.PACKAGE && LegacyTouchPad.isLegacy(o)) LegacyTouchPad.flatten(o, preset) else o
+        val byId = src?.optJSONObject("byId")
+        val a = src?.optJSONArray("values")          // before 0.22.2: by position
         // Neither: a Kotlin controller's own settings (the Grid's, the Tonnetz's), or a preset made with
         // one. Their keys that are this package's ids mean the same, so they carry over.
-        val flat = if (byId == null && a == null) o else null
+        val flat = if (byId == null && a == null) src else null
         values = settings.mapIndexed { k, s ->
             val id = s.optString("id", "$k")
             when {
@@ -113,12 +123,31 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
                 flat != null && flat.has(id) -> when (val v = flat.opt(id)) {
                     is Boolean -> if (v) 1.0 else 0.0
                     is Number -> v.toDouble()
-                    else -> default(s)
+                    else -> base.getOrElse(k) { default(s) }
                 }
-                else -> default(s)
+                else -> base.getOrElse(k) { default(s) }
             }
         }
         if (loaded) values.forEachIndexed { k, v -> Native.nativeCtlSetting(k, v) }
+    }
+
+    /** Until 0.21 the Kotlin touch pad's pads each had an arp. */
+    override fun legacyArps(o: JSONObject?) = if (id == LegacyTouchPad.PACKAGE && o != null && LegacyTouchPad.isLegacy(o)) LegacyTouchPad.arps(o) else null
+
+    /** Setting [id]'s value now, if it has one. */
+    fun valueOf(id: String): Double? = settings.indexOfFirst { it.optString("id") == id }.takeIf { it >= 0 }?.let { values[it] }
+
+    /** "drumsFrom": for each part, the switch that says its sound is a drum kit (the touch pad's), set by the app. */
+    private val drumsFrom: List<Int> = manifest.optJSONArray("drumsFrom")?.let { a ->
+        List(a.length()) { i -> a.optString(i).let { id -> settings.indexOfFirst { it.optString("id") == id } } }
+    } ?: emptyList()
+
+    /** Each part's sound, whether it is a drum kit: the "drumsFrom" switches follow. */
+    fun syncDrums(drums: List<Boolean>) {
+        for ((k, i) in drumsFrom.withIndex()) if (i >= 0 && k < drums.size) {
+            val v = if (drums[k]) 1.0 else 0.0
+            if (values[i] != v) change(i, v)
+        }
     }
 
     override fun stop() {

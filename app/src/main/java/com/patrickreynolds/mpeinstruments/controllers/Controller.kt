@@ -105,14 +105,17 @@ data class Option(
  */
 object Controllers {
     var packaged: List<PackageController> = emptyList()
-    private val builtIn: List<Controller> get() = listOf(TouchPad, ExternalMidi)
+    private val builtIn: List<Controller> get() = listOf(ExternalMidi)
     val all: List<Controller> get() = builtIn + packaged
-    /** Older ids a package now answers to: the Kotlin Grid's, and from 0.23.7 the Kotlin Tonnetz's (the
-     *  package has the same settings, by the same names, so they carry over: PackageController.load). */
-    private val moved = mapOf(KeyGrid.id to "pkg:patrickreynolds/grid", Tonnetz.id to "pkg:patrickreynolds/tonnetz")
+    /** Older ids a package now answers to: the Kotlin Grid's, from 0.23.7 the Kotlin Tonnetz's (the
+     *  package has the same settings, by the same names, so they carry over: PackageController.load),
+     *  and from 0.26 the Kotlin touch pad's (its settings converted: LegacyTouchPad). */
+    private val moved = mapOf(KeyGrid.id to "pkg:patrickreynolds/grid", Tonnetz.id to "pkg:patrickreynolds/tonnetz",
+                              LegacyTouchPad.ID to LegacyTouchPad.PACKAGE)
     /** The ids a controller had before: where its settings were kept, if it has none of its own yet. */
     fun formerIds(id: String) = moved.filterValues { it == id }.keys
-    fun byId(id: String?): Controller = all.firstOrNull { it.id == (moved[id] ?: id) } ?: TouchPad
+    fun byId(id: String?): Controller = all.firstOrNull { it.id == (moved[id] ?: id) }
+        ?: all.firstOrNull { it.id == LegacyTouchPad.PACKAGE } ?: all.first()
     /** A package's name, told apart from a built-in controller of the same name. */
     fun nameFor(name: String) = if (builtIn.any { it.name == name }) "$name (package)" else name
 }

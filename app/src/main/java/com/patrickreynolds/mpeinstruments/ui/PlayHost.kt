@@ -50,7 +50,8 @@ import com.patrickreynolds.mpeinstruments.ARP_ORDERS
 import com.patrickreynolds.mpeinstruments.controllers.ArpUse
 import com.patrickreynolds.mpeinstruments.controllers.Controllers
 import com.patrickreynolds.mpeinstruments.controllers.Option
-import com.patrickreynolds.mpeinstruments.controllers.TouchPad
+import com.patrickreynolds.mpeinstruments.controllers.LegacyTouchPad
+import com.patrickreynolds.mpeinstruments.controllers.PackageController
 import com.patrickreynolds.mpeinstruments.releaseName
 
 /** The rail's colours: the touch pad's look while it is in use, else the default one. */
@@ -58,7 +59,12 @@ import com.patrickreynolds.mpeinstruments.releaseName
 fun partColor(t: PadTheme, k: Int): Color =
     AppState.controller.partColors?.getOrNull(k) ?: t.parts.getOrNull(k) ?: PartColors.getOrElse(k) { PartColors[0] }
 
-fun hostTheme() = if (AppState.controller === TouchPad) padTheme(TouchPad.pad) else padTheme(PadSettings())
+fun hostTheme(): PadTheme {
+    // The touch pad's look, while it is in use.
+    val c = AppState.controller as? PackageController
+    val look = if (c?.id == LegacyTouchPad.PACKAGE) c.valueOf("theme")?.toInt() ?: 0 else 0
+    return padTheme(PadSettings(theme = look))
+}
 
 /**
  * The play screen, the same for every controller: the rail at the left (the controller to play

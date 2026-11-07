@@ -81,6 +81,9 @@ fun PackageSurface(c: PackageController) {
     val center1 = if (c.inUse > 1) AppState.instrument(1)?.centerNote else null
     LaunchedEffect(center) { Native.nativeCtlInstrument(0, center) }
     LaunchedEffect(center1) { center1?.let { Native.nativeCtlInstrument(1, it) } }
+    // A drum kit: the controller's "drumsFrom" switches follow each part's sound (the touch pad lays out drums).
+    val drums = List(2) { AppState.instrument(it)?.group == "drums" }
+    LaunchedEffect(c, drums) { c.syncDrums(drums) }
     LaunchedEffect(c) {
         while (true) {
             withFrameNanos { }

@@ -53,7 +53,7 @@ import com.patrickreynolds.mpeinstruments.Stats
 import com.patrickreynolds.mpeinstruments.MidiConnector
 import com.patrickreynolds.mpeinstruments.Preset
 import com.patrickreynolds.mpeinstruments.controllers.Controllers
-import com.patrickreynolds.mpeinstruments.controllers.TouchPad
+import com.patrickreynolds.mpeinstruments.controllers.LegacyTouchPad
 
 /**
  * Play: the controller you play with (and the way into it, full screen), the others to switch
@@ -99,7 +99,7 @@ fun PlayScreen(stats: Stats?, openPlay: () -> Unit, openSetup: () -> Unit) {
 @Composable
 private fun ControllerCard(open: () -> Unit) {
     val c = AppState.controller
-    val pad = c === TouchPad
+    val pad = c.id == LegacyTouchPad.PACKAGE
     Card(Modifier.fillMaxWidth().padding(16.dp).height(150.dp).clickable(onClick = open), shape = RoundedCornerShape(22.dp),
          colors = CardDefaults.cardColors(containerColor = Panel),
          border = if (Eink) androidx.compose.foundation.BorderStroke(Edge, Line) else null) {
@@ -194,8 +194,9 @@ fun PresetSheet(onClose: () -> Unit) {
 internal fun presetSummary(p: Preset): String {
     fun name(id: String) = AppState.instruments.firstOrNull { it.id == id }?.name ?: id
     val s = p.settings?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
-    val pad = p.controller == TouchPad.id
-    val split = pad && s?.optBoolean("split") == true
+    val pad = p.controller == LegacyTouchPad.ID || p.controller == LegacyTouchPad.PACKAGE
+    // Its split: in the Kotlin touch pad's settings, or the package's.
+    val split = pad && (s?.optBoolean("split") == true || s?.optJSONObject("byId")?.optDouble("split", 0.0) == 1.0)
     fun desc(k: Int) = name(p.perf.part(k).instrument) +
         if (p.perf.part(k).arp.on) " arp" else ""
     val gridParts = if (p.controller == com.patrickreynolds.mpeinstruments.controllers.KeyGrid.id)

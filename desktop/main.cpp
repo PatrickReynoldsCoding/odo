@@ -2,7 +2,7 @@
 // with controller packages (.odoc, run in wasm3) on a touch screen, from the same files as odo
 // on Android. Linux and Windows (SDL3).
 //
-//   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--no-update]
+//   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--no-update]
 //       [--version] [--self-update] [--setting [SIDE:]INDEX=VALUE]...
 //       [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]
 //
@@ -181,6 +181,7 @@ struct App {
         savedActive = std::clamp(int(j["active"].num(0)), 0, kSides - 1);
         railHidden = j["railHidden"].boolean();
         savedFullscreen = j["fullscreen"].boolean();
+        eink = j["eink"].boolean();
         const mpe::Json& c = j["controllers"];
         for (const auto& kv : c.o)
             for (const auto& sv : kv.second.o) saved[kv.first][sv.first] = sv.second.num();
@@ -216,6 +217,7 @@ struct App {
             f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k))
               << ", \"sound2\": " << quoted(sound2Id(k)) << "}";
         f << "],\n  \"railHidden\": " << (railHidden ? "true" : "false")
+          << ",\n  \"eink\": " << (eink ? "true" : "false")
           << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
           << ",\n  \"controllers\": {";
         bool first = true;
@@ -232,6 +234,13 @@ struct App {
     }
 
     void setRailHidden(bool on) { railHidden = on; saveConfig(); }
+    // E-ink (as odo on Android's Look): black on white, and the controllers told so, started again.
+    void setEink(bool on) {
+        if (on == eink) return;
+        eink = on;
+        for (Side& s : sides) s.initW = s.initH = 0;
+        saveConfig();
+    }
     void setFullscreen(bool on) { SDL_SetWindowFullscreen(window, on); saveConfig(); }
     bool fullscreen() const { return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0; }
     bool railHidden = false, eink = false, logMidi = false;
@@ -405,7 +414,27 @@ struct App {
                 if (now != in.index) { engine->setInstrument(std::min(partBase(k) + j, mpe::kParts - 1), in.index); now = in.index; }
                 if (sd.host) sd.host->instrument(j, centerNote(*in.pkg));
             }
+            syncDrums(k);
         }
+    }
+
+    // A drum kit (a sound in the drums group: its first alias "drums/..."), as odo on Android tells.
+    bool isDrums(int n) const {
+        if (n < 0 || size_t(n) >= lib.instruments.size()) return false;
+        return lib.instruments[size_t(n)].pkg->manifest["aliases"][size_t(0)].str().rfind("drums/", 0) == 0;
+    }
+    // A controller's "drumsFrom" switches follow each part's sound (the touch pad lays out drums).
+    void syncDrums(int k) {
+        Side& sd = sides[k];
+        if (!sd.host) return;
+        const mpe::Json& from = sd.host->manifest()["drumsFrom"];
+        const mpe::Json& st = sd.host->manifest()["settings"];
+        for (size_t j = 0; j < from.size() && j < 2; j++)
+            for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++) {
+                if (st[i]["id"].str() != from[j].str()) continue;
+                double v = isDrums(j ? sound2Of(k) : sd.sound) ? 1 : 0;
+                if (sd.settings[i] != v) { sd.host->setting(int(i), v); keepSetting(k, i, v); }
+            }
     }
 
     void chooseSound2(int k, int n) {
@@ -532,7 +561,7 @@ struct App {
     static constexpr float kItem = 40, kHeading = 26, kToggle = 42, kDivider = 13;
 
     // What a row opens or flips: a controller setting by its place in the manifest (0 and up), or one of these.
-    enum Key { kNone = -100, kSplitKey = -1, kControllerKey = -2, kSoundKey = -3, kSound2Key = -4 };
+    enum Key { kNone = -100, kSplitKey = -1, kControllerKey = -2, kSoundKey = -3, kSound2Key = -4, kLookKey = -5 };
 
     struct RailItem {
         enum Kind { Row, Heading, Toggle, Divider } kind;
@@ -567,6 +596,7 @@ struct App {
             add(RailItem::Row, kSoundKey, two ? "Sound: " + parts[size_t(0)].str() : "Sound", soundName(sd.sound), kItem);
             if (two) add(RailItem::Row, kSound2Key, "Sound: " + parts[size_t(1)].str(), soundName(sound2Of(active)), kItem);
         }
+        add(RailItem::Row, kLookKey, "Look", eink ? "E-ink" : "Dark", kItem);
         if (sd.host) {
             add(RailItem::Divider, kNone, "", "", kDivider);
             for (auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) {
@@ -621,6 +651,9 @@ struct App {
         } else if (panelKey == kControllerKey) {
             p.title = "Controller"; p.kind = PanelLayout::List; p.chosen = sd.controller;
             for (const auto& c : lib.controllers) names.push_back(c->name());
+        } else if (panelKey == kLookKey) {
+            p.title = "Look"; p.kind = PanelLayout::Chips; p.chosen = eink ? 1 : 0;
+            names = {"Dark", "E-ink"};
         } else if (panelKey == kSoundKey || panelKey == kSound2Key) {
             if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < 2)) { panelKey = kNone; return p; }
             const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
@@ -701,6 +734,7 @@ struct App {
             else if (panelKey == kControllerKey) { chooseController(active, n); panelKey = kNone; }
             else if (panelKey == kSoundKey) chooseSound(active, n);
             else if (panelKey == kSound2Key) chooseSound2(active, n);
+            else if (panelKey == kLookKey) setEink(n == 1);
             else setSetting(size_t(panelKey), mpe::rail::chipValue(settingOf(size_t(panelKey)), n));
             return;
         }
@@ -879,6 +913,8 @@ struct App {
         draw::text(renderer, 12, 30, tokens::type::title, accent, "odo", 0, true);
         draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kTop - 10, key, tokens::radius::control);
         draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kTop - 10, key, tokens::radius::control);
+        if (p.eink) for (int b = 1; b <= 2; b++)
+            draw::strokeRect(renderer, kRail - float(b) * kButton + 2, 5, kButton - 4, kTop - 10, rgba(p.line), 2, tokens::radius::control);
         draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kTop / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
         chevron(renderer, kRail - 0.5f * kButton - 4, kTop / 2, 12, -1, text);
         chevron(renderer, kRail - 0.5f * kButton + 4, kTop / 2, 12, -1, text);
@@ -1025,7 +1061,8 @@ struct App {
             if (changed) saveConfig();
         }
         SDL_SetRenderViewport(renderer, nullptr);
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        draw::Color back = rgba(look().ink);        // between the sides: black, or e-ink's white
+        SDL_SetRenderDrawColor(renderer, Uint8(back.r * 255), Uint8(back.g * 255), Uint8(back.b * 255), 255);
         SDL_RenderClear(renderer);
         SDL_SetRenderClipRect(renderer, nullptr);
         bool any = false;
@@ -1041,8 +1078,9 @@ struct App {
         // The lines between the sides; with the rail out, the side it changes is outlined.
         for (int k = 0; k < count() && count() > 1; k++) {
             const Side& sd = sides[k];
-            if (sd.x > railW() + 1) draw::fillRect(renderer, sd.x - kGap, sd.y, kGap, sd.h, rgba(0x000000FF));
-            if (sd.y > 1) draw::fillRect(renderer, sd.x, sd.y - kGap, sd.w, kGap, rgba(0x000000FF));
+            draw::Color gap = rgba(eink ? look().line : 0x000000FFu);
+            if (sd.x > railW() + 1) draw::fillRect(renderer, sd.x - kGap, sd.y, kGap, sd.h, gap);
+            if (sd.y > 1) draw::fillRect(renderer, sd.x, sd.y - kGap, sd.w, kGap, gap);
         }
         if (!railHidden && count() > 1) {
             const Side& sd = cur();
@@ -1151,7 +1189,7 @@ int main(int argc, char** argv) {
     struct Preset { int side, index; double value; };
     std::vector<Preset> presetSettings;                  // --setting [SIDE:]INDEX=VALUE
     int width = 1280, height = 720, splitArg = -1;
-    bool logMidi = false, checkUpdates = true;
+    bool logMidi = false, checkUpdates = true, einkArg = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         bool more = i + 1 < argc;
@@ -1162,6 +1200,7 @@ int main(int argc, char** argv) {
         else if (a == "--sound" && more) soundIds.push_back(argv[++i]);
         else if (a == "--split" && more) splitArg = std::clamp(std::atoi(argv[++i]), 0, kSplitCount - 1);
         else if (a == "--log-midi") logMidi = true;
+        else if (a == "--eink") einkArg = true;
         else if (a == "--no-update") checkUpdates = false;
         else if (a == "--version") { std::printf("odo %s\n", ODO_DESKTOP_VERSION); return 0; }
         else if (a == "--self-update") {
@@ -1185,7 +1224,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
-            std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--no-update] [--version]\n"
+            std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--no-update] [--version]\n"
                                  "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
@@ -1250,6 +1289,7 @@ int main(int argc, char** argv) {
         if (k < int(controllerIds.size()) && (app.lib.controllers.empty() || app.lib.controllers[size_t(app.sides[k].controller)]->id() != cid))
             std::fprintf(stderr, "odo: no controller %s in the library\n", cid.c_str());
     }
+    if (einkArg) app.eink = true;
     app.active = selftestOut ? 0 : app.savedActive;
     app.setSplit(splitArg >= 0 ? splitArg : app.savedSplit);
     for (const auto& ps : presetSettings) {
