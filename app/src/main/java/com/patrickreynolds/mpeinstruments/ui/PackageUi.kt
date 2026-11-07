@@ -35,36 +35,32 @@ import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.controllers.Option
 import com.patrickreynolds.mpeinstruments.controllers.PackageController
+import com.patrickreynolds.mpeinstruments.controllers.RailWidget
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.roundToInt
 
-/** A controller package's settings on the rail, from its manifest. */
+/**
+ * A controller package's settings on the rail, from the engine's rail model (mpe/rail.h), as odo
+ * for computers shows them: grouped, each group's name over its first setting; a switch flips in
+ * place, a choice or a number with a few steps is chips, any other number a slider.
+ */
 @Composable
 fun packageOptions(c: PackageController): List<Option> {
     val accent = if (Eink) Color.Black else PartColors[0]
-    // A "hidden" setting is state the controller keeps itself (its editor's), not for the rail.
-    return c.settings.withIndex().filter { !it.value.optBoolean("hidden") }.map { (k, s) ->
-        val v = c.values.getOrElse(k) { 0.0 }
-        val label = s.optString("name", s.optString("id"))
-        when (s.optString("type")) {
-            "switch" -> Option(label, if (v != 0.0) "On" else "Off", perPart = false, on = v != 0.0, tap = { c.change(k, if (v != 0.0) 0.0 else 1.0) })
-            "choice" -> {
-                val opts = s.optJSONArray("options")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList()
-                Option(label, opts.getOrElse(v.roundToInt()) { "" }, perPart = false) {
-                    Chips(opts, v.roundToInt(), accent) { i -> c.change(k, i.toDouble()) }
+    val groups = remember(c, c.values) { c.railGroups() }
+    return groups.flatMap { g ->
+        g.rows.mapIndexed { n, row ->
+            val k = row.index
+            val heading = g.name.takeIf { n == 0 && it.isNotEmpty() }
+            when (row.widget) {
+                RailWidget.Switch -> Option(row.label, row.display, perPart = false, on = row.value != 0.0, heading = heading,
+                                            tap = { c.change(k, c.stepped(k, row.value, 1)) })
+                RailWidget.Chips -> Option(row.label, row.display, perPart = false, heading = heading) {
+                    Chips(row.choices, row.chosen, accent) { i -> c.change(k, c.chipValue(k, i)) }
                 }
-            }
-            else -> {
-                val min = s.optDouble("min", 0.0); val max = s.optDouble("max", 1.0)
-                val step = s.optDouble("step", 0.0)
-                fun show(x: Double) = if (step >= 1.0 || step == 0.0 && x == x.roundToInt().toDouble()) "${x.roundToInt()}" else "%.2f".format(x)
-                Option(label, show(v), perPart = false) {
-                    val count = if (step > 0) ((max - min) / step).roundToInt() + 1 else 0
-                    if (count in 2..16) Chips(List(count) { show(min + it * step) }, ((v - min) / step).roundToInt(), accent) { i ->
-                        c.change(k, min + i * step) }
-                    else LabeledSlider(label, v.toFloat(), min.toFloat()..max.toFloat(), show(v), accent = accent) { x ->
-                        c.change(k, if (step > 0) min + ((x - min) / step).roundToInt() * step else x.toDouble()) }
+                RailWidget.Slider -> Option(row.label, row.display, perPart = false, heading = heading) {
+                    LabeledSlider(row.label, c.toFraction(k, row.value).toFloat(), 0f..1f, row.display, accent = accent) { t ->
+                        c.change(k, c.fromFraction(k, t.toDouble())) }
                 }
             }
         }

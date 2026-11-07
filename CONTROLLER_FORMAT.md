@@ -128,7 +128,37 @@ the rest.
 | `parts` | the sounds it plays, by name: one, or the sections of a split |
 | `partsFrom` | optional: the id of a setting that says how many of `parts` it plays now, its value + 1 (a switch: the first part off, the first two on). The MESH gives it that many sounds, and calls `instrument` for each. Without it, every part always |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
-| `settings` | its options: `choice`, `number`, `switch`. Each MESH shows them its own way, on its rail. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers |
+| `settings` | its options: `choice`, `number`, `switch`, shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"group"` (optional): a short heading it is shown under |
+
+## Settings on the rail
+
+Every MESH shows a controller's settings the same way: the engine's `mpe::rail`
+(`engine/include/mpe/rail.h`) turns the manifest and the current values into the rail's rows,
+and steps them, so a change is made in one place.
+
+Each setting has an `id`, a `name` (the `id` if none), a `type`, a `default` and these optional fields:
+
+| field | meaning |
+| --- | --- |
+| `options` | a `choice`'s options, by name; its value is the option's index |
+| `min`, `max`, `step` | a `number`'s range (0 and 1 if missing) and step. A missing or 0 step: continuous |
+| `hidden` | `true`: not on the rail |
+| `group` | a short name it is shown under: `Layout`, `Notes`, `Split`, `Touch`, `Look`, `Playing`, `Controls`... |
+
+- **Order.** Hidden settings are left out. The rest are grouped by `group` (no group: a group
+  named `""`). Groups appear in the order of their first setting; within a group, settings keep
+  the manifest's order. A setting is still set by its place in the manifest, whatever its group.
+- **switch**: an on/off switch, shown `On` or `Off`. A step flips it.
+- **choice**: chips, one per option, the chosen one marked. A step on or back moves to the next
+  or previous option, wrapping round.
+- **number**: if it has a step and `(max - min) / step + 1` is from 2 to 16, chips of its values
+  (`min`, `min + step`, ... up to `max`), the nearest marked; otherwise a slider. A step moves by
+  `step` (a continuous number: `(max - min) / 20`), stops at `min` and `max` (no wrap), and lands
+  on the step grid from `min`. A slider snaps to the step too.
+- **Numbers shown**: whole numbers when the step (with `min`) or the value is whole; otherwise up
+  to 2 decimals, trailing zeros dropped (`0.5`, `0.25`). A name ending in `(%)` shows the value
+  with `%` (`50%`), one ending in `(dB)` with ` dB` (`24 dB`); the name is then shown without it.
+- **Values**: a missing value is the setting's `default`.
 
 ## Layouts without code
 

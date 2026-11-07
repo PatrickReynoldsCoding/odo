@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row, or up each column on its own; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -25,7 +25,8 @@
       "min": 2,
       "max": 8,
       "step": 1,
-      "default": 3
+      "default": 3,
+      "group": "Layout"
     },
     {
       "id": "layout",
@@ -35,19 +36,22 @@
         "Along the rows",
         "Up each column"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Layout"
     },
     {
       "id": "scrollLock",
       "name": "Lock column scrolling",
       "type": "switch",
-      "default": true
+      "default": true,
+      "group": "Layout"
     },
     {
       "id": "split",
       "name": "Split: a second grid across the top",
       "type": "switch",
-      "default": false
+      "default": false,
+      "group": "Split"
     },
     {
       "id": "splitSize",
@@ -56,7 +60,8 @@
       "min": 20,
       "max": 80,
       "step": 5,
-      "default": 50
+      "default": 50,
+      "group": "Split"
     },
     {
       "id": "topWay",
@@ -66,7 +71,8 @@
         "Mirrored",
         "Same way up"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Split"
     },
     {
       "id": "topNotes",
@@ -77,7 +83,8 @@
         "The scale's notes",
         "Chromatic"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Split"
     },
     {
       "id": "topScale",
@@ -95,7 +102,8 @@
         "Blues",
         "Chromatic"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Split"
     },
     {
       "id": "topKey",
@@ -116,7 +124,8 @@
         "B♭",
         "B"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Split"
     },
     {
       "id": "topOctave",
@@ -125,7 +134,8 @@
       "min": -3,
       "max": 3,
       "step": 1,
-      "default": 0
+      "default": 0,
+      "group": "Split"
     },
     {
       "id": "squareSize",
@@ -134,7 +144,8 @@
       "min": 50,
       "max": 100,
       "step": 5,
-      "default": 100
+      "default": 100,
+      "group": "Layout"
     },
     {
       "id": "spacing",
@@ -143,19 +154,22 @@
       "min": 2,
       "max": 30,
       "step": 1,
-      "default": 9
+      "default": 9,
+      "group": "Layout"
     },
     {
       "id": "flipAcross",
       "name": "Flip across",
       "type": "switch",
-      "default": false
+      "default": false,
+      "group": "Layout"
     },
     {
       "id": "flipUpDown",
       "name": "Flip up/down",
       "type": "switch",
-      "default": false
+      "default": false,
+      "group": "Layout"
     },
     {
       "id": "chromatic",
@@ -165,7 +179,8 @@
         "The scale's notes",
         "Chromatic"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Notes"
     },
     {
       "id": "scale",
@@ -182,7 +197,8 @@
         "Blues",
         "Chromatic"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Notes"
     },
     {
       "id": "key",
@@ -202,7 +218,8 @@
         "B♭",
         "B"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Notes"
     },
     {
       "id": "octave",
@@ -211,7 +228,8 @@
       "min": -3,
       "max": 3,
       "step": 1,
-      "default": 0
+      "default": 0,
+      "group": "Notes"
     },
     {
       "id": "xTarget",
@@ -225,7 +243,8 @@
         "Volume"
       ],
       "default": 3,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "yTarget",
@@ -239,7 +258,8 @@
         "Volume"
       ],
       "default": 2,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "bendRange",
@@ -255,7 +275,8 @@
         "±12"
       ],
       "default": 0,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "bendSnap",
@@ -265,19 +286,22 @@
       "max": 100,
       "step": 5,
       "default": 0,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "zoneEdit",
       "name": "Edit touch & strike zones",
       "type": "switch",
-      "default": false
+      "default": false,
+      "group": "Touch"
     },
     {
       "id": "zoneBlend",
       "name": "Smooth between zones",
       "type": "switch",
-      "default": true
+      "default": true,
+      "group": "Touch"
     },
     {
       "id": "strikeRangeDb",
@@ -287,7 +311,8 @@
       "max": 60,
       "step": 1,
       "default": 24,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "vibrato",
@@ -299,13 +324,15 @@
         "Normal",
         "Wide"
       ],
-      "default": 2
+      "default": 2,
+      "group": "Touch"
     },
     {
       "id": "labels",
       "name": "Note names",
       "type": "switch",
-      "default": false
+      "default": false,
+      "group": "Look"
     },
     {
       "id": "theme",
@@ -319,7 +346,8 @@
         "Sunset",
         "Paper"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Look"
     },
     {
       "id": "colours",
@@ -332,7 +360,8 @@
         "Root, 4th, 5th",
         "By note name"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Look"
     },
     {
       "id": "sameNotes",
@@ -343,13 +372,15 @@
         "Ring",
         "Glow"
       ],
-      "default": 1
+      "default": 1,
+      "group": "Look"
     },
     {
       "id": "latch",
       "name": "Latch",
       "type": "switch",
-      "default": false
+      "default": false,
+      "group": "Playing"
     },
     {
       "id": "latchMode",
@@ -359,7 +390,8 @@
         "New hand replaces",
         "Tap on, tap off"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Playing"
     },
     {
       "id": "scrollBar",
@@ -370,7 +402,8 @@
         "Left",
         "Right"
       ],
-      "default": 2
+      "default": 2,
+      "group": "Controls"
     },
     {
       "id": "sideLatch",
@@ -381,7 +414,8 @@
         "Left",
         "Right"
       ],
-      "default": 1
+      "default": 1,
+      "group": "Controls"
     },
     {
       "id": "sideHold",
@@ -392,7 +426,8 @@
         "Left",
         "Right"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Controls"
     },
     {
       "id": "sideBend",
@@ -403,7 +438,8 @@
         "Left",
         "Right"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Controls"
     },
     {
       "id": "sideTone",
@@ -414,7 +450,8 @@
         "Left",
         "Right"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Controls"
     },
     {
       "id": "sideDyn",
@@ -425,7 +462,8 @@
         "Left",
         "Right"
       ],
-      "default": 1
+      "default": 1,
+      "group": "Controls"
     },
     {
       "id": "sideLock",
@@ -436,7 +474,8 @@
         "Left",
         "Right"
       ],
-      "default": 2
+      "default": 2,
+      "group": "Controls"
     },
     {
       "id": "turn",
@@ -447,7 +486,8 @@
         "Upright",
         "Sideways"
       ],
-      "default": 0
+      "default": 0,
+      "group": "Layout"
     },
     {
       "id": "zoneMap",
@@ -457,7 +497,8 @@
       "max": 10077695,
       "step": 1,
       "default": 6046617,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "zonePreset1",
@@ -467,7 +508,8 @@
       "max": 10077695,
       "step": 1,
       "default": 6046617,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "zonePreset2",
@@ -477,7 +519,8 @@
       "max": 10077695,
       "step": 1,
       "default": 6046617,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "zonePreset3",
@@ -487,7 +530,8 @@
       "max": 10077695,
       "step": 1,
       "default": 6046617,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "zonePreset4",
@@ -497,7 +541,8 @@
       "max": 10077695,
       "step": 1,
       "default": 6046617,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "dynamics",
@@ -507,7 +552,8 @@
       "max": 1,
       "step": 0,
       "default": 1,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "acrossAmount",
@@ -517,7 +563,8 @@
       "max": 100,
       "step": 5,
       "default": 100,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "acrossSensitivity",
@@ -527,14 +574,16 @@
       "max": 400,
       "step": 5,
       "default": 100,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "acrossFlip",
       "name": "Across flipped",
       "type": "switch",
       "default": false,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "upDownAmount",
@@ -544,7 +593,8 @@
       "max": 100,
       "step": 5,
       "default": 100,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "upDownSensitivity",
@@ -554,14 +604,16 @@
       "max": 400,
       "step": 5,
       "default": 100,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     },
     {
       "id": "upDownFlip",
       "name": "Up/down flipped",
       "type": "switch",
       "default": false,
-      "hidden": true
+      "hidden": true,
+      "group": "Touch"
     }
   ]
 }

@@ -19,7 +19,8 @@ import java.util.zip.ZipInputStream
  * file a computer MESH plays (CONTROLLER_FORMAT.md). Its settings come from its manifest and are
  * shown on the rail like any controller's. One runs at a time: the one in use.
  */
-class PackageController(private val bytes: ByteArray, val manifest: JSONObject) : Controller {
+class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
+                        manifestText: ByteArray = manifest.toString().encodeToByteArray()) : Controller {
     override val id: String = "pkg:" + manifest.optString("id")
     override val name: String get() = Controllers.nameFor(manifest.optString("name", id))
     override val description: String = manifest.optString("description") + " · from a controller package (.odoc)"
@@ -37,6 +38,18 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
     val settings: List<JSONObject> = manifest.optJSONArray("settings")?.let { a -> List(a.length()) { a.getJSONObject(it) } } ?: emptyList()
     var values by mutableStateOf(settings.map { default(it) })
         private set
+
+    /** Its manifest in the engine's rail model (Native.nativeRail*), which shows and steps its settings as
+     *  odo for computers does; it needs no controller loaded, so it serves whichever controller the rail shows. */
+    private val rail = Native.nativeRailOpen(manifestText)
+
+    /** The rail's groups and rows for its values now. */
+    fun railGroups(): List<RailGroup> =
+        if (settings.isEmpty()) emptyList() else RailGroup.parse(Native.nativeRail(rail, values.toDoubleArray()).decodeToString())
+    fun stepped(index: Int, value: Double, dir: Int) = Native.nativeRailStepped(rail, index, value, dir)
+    fun fromFraction(index: Int, t: Double) = Native.nativeRailFromFraction(rail, index, t)
+    fun toFraction(index: Int, value: Double) = Native.nativeRailToFraction(rail, index, value)
+    fun chipValue(index: Int, k: Int) = Native.nativeRailChipValue(rail, index, k)
 
     /** "partsFrom": the setting that says how many of its parts it plays now (its value + 1; a switch:
      *  one part off, two on), as the Grid's split does. Without one, all of them. */
@@ -131,7 +144,10 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
             ZipInputStream(bytes.inputStream()).use { z ->
                 while (true) {
                     val e = z.nextEntry ?: return null
-                    if (e.name == "controller.json") return PackageController(bytes, JSONObject(z.readBytes().decodeToString()))
+                    if (e.name == "controller.json") {
+                        val text = z.readBytes()
+                        return PackageController(bytes, JSONObject(text.decodeToString()), text)
+                    }
                 }
             }
         }

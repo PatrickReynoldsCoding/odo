@@ -93,6 +93,8 @@ data class Option(
     /** A switch: on (highlighted) or off; [tap] flips it. */
     val on: Boolean = false,
     val tap: (() -> Unit)? = null,
+    /** A group heading the rail shows above it (a controller package's settings group: "Layout", "Notes"...). */
+    val heading: String? = null,
     val panel: (@Composable () -> Unit)? = null,
 )
 

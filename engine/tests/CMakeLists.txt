@@ -7,6 +7,12 @@ foreach(t test_clean test_engine test_replay test_threads test_perform test_phon
   endif()
 endforeach()
 
+# The rail's settings model, against the controllers' own manifests (no build of them needed).
+add_executable(test_rail test_rail.cpp)
+target_link_libraries(test_rail mpe_engine Threads::Threads)
+target_compile_definitions(test_rail PRIVATE MPE_TEST_CONTROLLER_SOURCES="${CMAKE_CURRENT_SOURCE_DIR}/../../controllers")
+add_test(NAME test_rail COMMAND test_rail WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 # Packages: needs the instrument packages (made at configure time) and the controllers, built
 # here with clang's WebAssembly target. Without clang, this test is left out.
 find_program(CLANG clang)

@@ -16,6 +16,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -37,6 +38,7 @@
 #include "mpe/engine.h"
 #include "mpe/faust_loader.h"
 #include "mpe/package.h"
+#include "mpe/rail.h"
 
 namespace fs = std::filesystem;
 using draw::rgba;
@@ -140,7 +142,6 @@ struct App {
         int engineIndex2 = -1;          // the instrument its second part plays now
         std::unique_ptr<mpe::ControllerHost> host;
         std::vector<double> settings;   // the controller's, by position
-        std::vector<size_t> shown;      // the ones on the rail (not "hidden"), in order
         float x = 0, y = 0, w = 0, h = 0;   // its place in the window
         float initW = 0, initH = 0;     // the size its controller was started with
         int engineIndex = -1;           // the instrument its part plays now
@@ -490,8 +491,6 @@ struct App {
         // A side after the first starts from the first side's settings for this controller.
         auto own = saved.find(settingsKey(k));
         const auto& mine = own != saved.end() ? own->second : saved[controllerId(k)];
-        sd.shown.clear();
-        for (size_t i = 0; i < s.size(); i++) if (!s[i]["hidden"].boolean()) sd.shown.push_back(i);
         for (size_t i = 0; i < s.size(); i++) {
             auto it = mine.find(s[i]["id"].str());
             sd.settings.push_back(it != mine.end() ? it->second : s[i]["default"].num());
@@ -511,34 +510,12 @@ struct App {
     void changeSetting(size_t i, int dir) {
         Side& sd = cur();
         const mpe::Json& s = sd.host->manifest()["settings"][i];
-        std::string type = s["type"].str();
-        double v = sd.settings[i];
-        if (type == "switch") v = v != 0 ? 0 : 1;
-        else if (type == "choice") {
-            double n = double(s["options"].size());
-            v = std::fmod(v + dir + n, n);
-        } else {
-            // No step (or 0): a continuous number, crossed in 20 taps, as Android's slider would.
-            double lo = s["min"].num(0), hi = s["max"].num(1), step = s["step"].num(0);
-            if (step <= 0) step = (hi - lo) / 20;
-            v = std::clamp(v + dir * step, lo, hi);
-        }
+        double v = mpe::rail::stepped(s, sd.settings[i], dir);   // as Android steps it (rail.h)
         int parts = partsOf(active);
         sd.host->setting(int(i), v);
         keepSetting(active, i, v);
         if (partsOf(active) != parts) reroute();
         saveConfig();
-    }
-
-    std::string settingValue(size_t i) {
-        const mpe::Json& s = cur().host->manifest()["settings"][i];
-        std::string type = s["type"].str();
-        double v = cur().settings[i];
-        if (type == "switch") return v != 0 ? "on" : "off";
-        if (type == "choice") return s["options"][size_t(v)].str();
-        char b[32];
-        std::snprintf(b, sizeof b, "%g", v);
-        return b;
     }
 
     // ---- input ----------------------------------------------------------------------------------
@@ -572,8 +549,13 @@ struct App {
         else if (row == kRowSound) chooseSound(active, cur().sound + dir);
         else if (row == kRowSound2 && partsOf(active) > 1) chooseSound2(active, sound2Of(active) + dir);
         else if (cur().host && y >= settingsTop() && y < float(wh) - kBottom) {
-            size_t r = size_t((y - settingsTop() + settingsScroll) / settingRow(float(wh)));
-            if (r < cur().shown.size()) changeSetting(cur().shown[r], dir);
+            // The same layout drawRail draws: the row under y, if any (a heading does nothing).
+            float at = y - settingsTop() + settingsScroll;
+            for (const RailItem& it : settingsLayout(float(wh)))
+                if (at >= it.y && at < it.y + it.h) {
+                    if (!it.heading) changeSetting(it.row.index, dir);
+                    break;
+                }
         }
     }
 
@@ -585,7 +567,7 @@ struct App {
     float settingsScroll = 0;
 
     void scrollSettings(float by, float h) {
-        float rows = float(cur().shown.size()) * settingRow(h), room = h - kBottom - settingsTop();
+        float rows = settingsHeight(settingsLayout(h)), room = h - kBottom - settingsTop();
         settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, rows - room));
     }
 
@@ -611,14 +593,36 @@ struct App {
         return true;
     }
 
-    // The controller's settings fill the rail between the sound and the lines at the bottom:
-    // each row as tall as fits, down to a compact one.
+    // The controller's settings fill the rail between the sound and the lines at the bottom, in
+    // their groups (mpe::rail), each named group under a small heading: each row as tall as fits,
+    // down to a compact one.
     static constexpr float kBottom = 84;
+    static constexpr float kHeading = 24;          // a group's heading, with a little room above it
     // The settings start under the sound, or under the second sound when the controller is split.
     float settingsTop() const { return (partsOf(active) > 1 ? 6.7f : 5.7f) * kRow; }
-    float settingRow(float h) {
-        if (cur().shown.empty()) return kRow;
-        return std::clamp((h - kBottom - settingsTop()) / float(cur().shown.size()), 30.f, kRow);
+
+    // One item of the settings' layout: a group's heading or a setting's row. y is from the top of
+    // the settings, unscrolled. Drawing, tapping and scrolling all use this one layout.
+    struct RailItem { bool heading; std::string name; mpe::rail::Row row; float y, h; };
+    std::vector<RailItem> settingsLayout(float h) {
+        std::vector<RailItem> items;
+        Side& sd = cur();
+        if (!sd.host) return items;
+        auto groups = mpe::rail::groups(sd.host->manifest(), sd.settings);
+        size_t headings = 0, rows = 0;
+        for (const auto& g : groups) { headings += g.name.empty() ? 0 : 1; rows += g.rows.size(); }
+        if (rows == 0) return items;
+        float room = h - kBottom - settingsTop() - float(headings) * kHeading;
+        float rh = std::clamp(room / float(rows), 30.f, kRow);
+        float y = 0;
+        for (auto& g : groups) {
+            if (!g.name.empty()) { items.push_back({true, g.name, {}, y, kHeading}); y += kHeading; }
+            for (auto& r : g.rows) { items.push_back({false, "", std::move(r), y, rh}); y += rh; }
+        }
+        return items;
+    }
+    static float settingsHeight(const std::vector<RailItem>& items) {
+        return items.empty() ? 0 : items.back().y + items.back().h;
     }
 
     // A pointer on the play area: down on a side, it plays that side until it lifts.
@@ -739,20 +743,25 @@ struct App {
         float divider = settingsTop() - 0.2f * kRow;
         draw::line(renderer, 12, divider, kRail - 12, divider, rgba(p.line), 1);
         if (sd.host) {
-            const mpe::Json& s = sd.host->manifest()["settings"];
-            float rh = settingRow(h);
             scrollSettings(0, h);                // keep the scroll in range (the window may have grown)
-            bool big = rh >= 40;
-            for (size_t r = 0; r < sd.shown.size(); r++) {
-                size_t i = sd.shown[r];
-                float y = settingsTop() + float(r) * rh - settingsScroll;
-                if (y < settingsTop() - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
+            std::vector<RailItem> items = settingsLayout(h);
+            for (const RailItem& it : items) {
+                float y = settingsTop() + it.y - settingsScroll;
+                if (y < settingsTop() - 1 || y + it.h > h - kBottom + 1) continue;   // scrolled out of the rail
+                if (it.heading) {                // a group's heading: small, dim capitals, room above
+                    std::string up = it.name;
+                    for (char& c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
+                    draw::text(renderer, 12, y + it.h - 6, tokens::type::caption, dim,
+                               draw::fit(up, tokens::type::caption, kRail - 24, true), 0, true);
+                    continue;
+                }
+                bool big = it.h >= 40;
                 float ls = big ? tokens::type::label : 8, vs = big ? tokens::type::body : tokens::type::caption;
-                draw::text(renderer, 12, y + (big ? 19 : 12), ls, dim, fit(s[i]["name"].str(), ls));
-                draw::text(renderer, 12, y + (big ? 37 : 26), vs, text, fit(settingValue(i), vs));
-                arrows(y, rh);
+                draw::text(renderer, 12, y + (big ? 19 : 12), ls, dim, fit(it.row.label, ls));
+                draw::text(renderer, 12, y + (big ? 37 : 26), vs, text, fit(it.row.display, vs));
+                arrows(y, it.h);
             }
-            float rows = float(sd.shown.size()) * rh, room = h - kBottom - settingsTop();
+            float rows = settingsHeight(items), room = h - kBottom - settingsTop();
             if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
                 float bar = room * room / rows, at = settingsTop() + (room - bar) * settingsScroll / (rows - room);
                 draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);

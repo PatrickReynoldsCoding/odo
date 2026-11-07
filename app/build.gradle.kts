@@ -24,8 +24,8 @@ android {
         minSdk = 31          // Android 12: AMidi (29) and the Bluetooth permission model (31)
         targetSdk = 35
         // -Pmpe.versionCode / -Pmpe.versionName: for testing in-app updates with an older-numbered build.
-        versionCode = (findProperty("mpe.versionCode") as String?)?.toInt() ?: 41
-        versionName = (findProperty("mpe.versionName") as String?) ?: "0.24.0"
+        versionCode = (findProperty("mpe.versionCode") as String?)?.toInt() ?: 42
+        versionName = (findProperty("mpe.versionName") as String?) ?: "0.25.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }   // phone, and the emulator
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }

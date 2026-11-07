@@ -30,6 +30,20 @@ object Native {
     /** Settings it changed itself (its editor, a button on its surface): index, value pairs, or null. */
     external fun nativeCtlTakeSettings(): DoubleArray?
 
+    // The rail's settings model (engine mpe/rail.h), from a controller's manifest: the same rows and
+    // steps as odo for computers. It needs no controller loaded. Any thread.
+    /** A handle for a manifest (controller.json as UTF-8), parsed once; the same text gives the same handle. */
+    external fun nativeRailOpen(manifest: ByteArray): Int
+    /** The rail's groups and rows for these values, as UTF-8 JSON (rail::toJson): see RailGroup.parse. */
+    external fun nativeRail(manifest: Int, values: DoubleArray): ByteArray
+    /** Setting `index` one step on (dir 1) or back (-1). */
+    external fun nativeRailStepped(manifest: Int, index: Int, value: Double, dir: Int): Double
+    /** A slider's position 0..1 to the setting's value (snapped to its step), and back. */
+    external fun nativeRailFromFraction(manifest: Int, index: Int, t: Double): Double
+    external fun nativeRailToFraction(manifest: Int, index: Int, value: Double): Double
+    /** The value of chip k. */
+    external fun nativeRailChipValue(manifest: Int, index: Int, k: Int): Double
+
     external fun nativeInstrumentCount(): Int
     /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or "") */
     external fun nativeInstrumentField(index: Int, field: Int): String

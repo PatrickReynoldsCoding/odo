@@ -210,3 +210,63 @@ FN(jbyteArray, nativeCtlTick)(JNIEnv* env, jobject) {
     env->SetByteArrayRegion(out, 0, jsize(d.size()), reinterpret_cast<const jbyte*>(d.data()));
     return out;
 }
+
+// ---- the rail's settings model (mpe/rail.h) --------------------------------------------------
+// Stateless of the engine: it works from a controller's manifest, whether or not that controller is
+// the one loaded. A manifest is parsed once: nativeRailOpen gives a handle for its text (the same
+// text, the same handle, so there are only ever as many as there are controllers' manifests).
+#include <deque>
+#include <mutex>
+#include "mpe/rail.h"
+
+namespace {
+struct RailManifest { std::string text; mpe::Json json; };
+std::mutex& railLock() { static std::mutex m; return m; }
+std::deque<RailManifest>& railManifests() { static std::deque<RailManifest> d; return d; }   // a deque: entries never move
+
+// The manifest for a handle (an empty one for a bad handle), and its setting `index` (Null if none).
+const mpe::Json& railManifest(jint h) {
+    static const mpe::Json none;
+    std::lock_guard<std::mutex> l(railLock());
+    auto& d = railManifests();
+    return h >= 0 && size_t(h) < d.size() ? d[size_t(h)].json : none;
+}
+const mpe::Json& railSetting(jint h, jint index) {
+    static const mpe::Json none;
+    return index < 0 ? none : railManifest(h)["settings"][size_t(index)];
+}
+}  // namespace
+
+// manifest: the controller.json text as UTF-8.
+FN(jint, nativeRailOpen)(JNIEnv* env, jobject, jbyteArray manifest) {
+    jsize n = env->GetArrayLength(manifest);
+    std::string text(size_t(n), '\0');
+    if (n) env->GetByteArrayRegion(manifest, 0, n, reinterpret_cast<jbyte*>(&text[0]));
+    std::lock_guard<std::mutex> l(railLock());
+    auto& d = railManifests();
+    for (size_t i = 0; i < d.size(); i++) if (d[i].text == text) return jint(i);
+    mpe::Json json = mpe::Json::parse(text);
+    d.push_back({std::move(text), std::move(json)});
+    return jint(d.size() - 1);
+}
+// rail::toJson(rail::groups(manifest, values)), as UTF-8.
+FN(jbyteArray, nativeRail)(JNIEnv* env, jobject, jint h, jdoubleArray values) {
+    std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
+    if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
+    std::string out = mpe::rail::toJson(mpe::rail::groups(railManifest(h), v));
+    jbyteArray a = env->NewByteArray(jsize(out.size()));
+    env->SetByteArrayRegion(a, 0, jsize(out.size()), reinterpret_cast<const jbyte*>(out.data()));
+    return a;
+}
+FN(jdouble, nativeRailStepped)(JNIEnv*, jobject, jint h, jint index, jdouble value, jint dir) {
+    return mpe::rail::stepped(railSetting(h, index), value, dir);
+}
+FN(jdouble, nativeRailFromFraction)(JNIEnv*, jobject, jint h, jint index, jdouble t) {
+    return mpe::rail::fromFraction(railSetting(h, index), t);
+}
+FN(jdouble, nativeRailToFraction)(JNIEnv*, jobject, jint h, jint index, jdouble value) {
+    return mpe::rail::toFraction(railSetting(h, index), value);
+}
+FN(jdouble, nativeRailChipValue)(JNIEnv*, jobject, jint h, jint index, jint k) {
+    return mpe::rail::chipValue(railSetting(h, index), k);
+}

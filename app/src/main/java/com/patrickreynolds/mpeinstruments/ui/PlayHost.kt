@@ -215,9 +215,22 @@ private fun Rail(pick: Option, own: List<Option>, shared: List<Option>, t: PadTh
         val turn = if (AppState.controller.upright) rememberPhoneTurn() else 0f
         RailItem(pick, open == pick.label, t, accent, tap, turn)
         if (AppState.twoParts) PartToggle(AppState.controller.splitNames ?: listOf("Main", "Layer"), t)
-        for (o in own) RailItem(o, open == o.label, t, accent, tap, turn)
+        for (o in own) {
+            o.heading?.let { RailHeading(it, t, turn) }
+            RailItem(o, open == o.label, t, accent, tap, turn)
+        }
         Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(t.railDim.copy(alpha = 0.4f)))
         for (o in shared) RailItem(o, open == o.label, t, accent, tap, turn)
+    }
+}
+
+/** A group's name over its settings, in the section-header style (SectionCard's), sized for the rail. */
+@Composable
+private fun RailHeading(name: String, t: PadTheme, turn: Float) {
+    // Turned (an upright controller's), it gets a square of its own as the items do.
+    Box(if (turn != 0f) Modifier.size(86.dp).rotate(turn) else Modifier.padding(top = 4.dp), contentAlignment = Alignment.Center) {
+        Text(name.uppercase(), fontSize = Tokens.Type.header, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp,
+             color = t.railDim, maxLines = 1)
     }
 }
 

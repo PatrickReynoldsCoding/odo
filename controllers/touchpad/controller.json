@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/touchpad",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Touch pad",
   "description": "Play with your fingers on the screen: columns of notes, each finger its own voice; slide to glide, up for louder and brighter, rock a finger for vibrato",
   "author": "Patrick Reynolds",
@@ -11,18 +11,18 @@
   "parts": ["Main"],
   "arp": "app",
   "settings": [
-    { "id": "size", "name": "Size", "type": "number", "min": 3, "max": 24, "step": 1, "default": 8 },
-    { "id": "octave", "name": "Octave", "type": "number", "min": -4, "max": 4, "step": 1, "default": 0 },
-    { "id": "key", "name": "Key", "type": "choice", "options": ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"], "default": 0 },
-    { "id": "scale", "name": "Scale", "type": "choice", "options": ["All notes", "Major", "Minor", "Dorian", "Mixolydian", "Harmonic minor", "Pentatonic major", "Pentatonic minor", "Blues", "Chromatic"], "default": 1 },
-    { "id": "vertical", "name": "Up/down", "type": "choice", "options": ["Loudness + tone", "Tone", "Loudness"], "default": 0 },
-    { "id": "fade", "name": "Fade to silence", "type": "choice", "options": ["None", "Short", "Medium", "Long", "Whole pad"], "default": 2 },
-    { "id": "glide", "name": "Glide", "type": "number", "min": 0, "max": 1, "step": 0.05, "default": 0 },
-    { "id": "vibrato", "name": "Vibrato", "type": "choice", "options": ["Off", "Light", "Normal", "Wide"], "default": 2 },
-    { "id": "vibSense", "name": "Vibrato sensitivity", "type": "choice", "options": ["Low", "Medium", "High", "Very high"], "default": 1 },
-    { "id": "locked", "name": "Lock (the strip plays)", "type": "switch", "default": false },
-    { "id": "theme", "name": "Look", "type": "choice", "options": ["Night", "Sunset", "Ocean", "Forest", "Contrast", "Daylight"], "default": 0 },
-    { "id": "lines", "name": "Lines", "type": "choice", "options": ["Soft", "Clear", "Bold"], "default": 1 },
-    { "id": "drums", "name": "Drum kit", "type": "switch", "default": false }
+    { "id": "size", "name": "Size", "type": "number", "min": 3, "max": 24, "step": 1, "default": 8, "group": "Layout" },
+    { "id": "octave", "name": "Octave", "type": "number", "min": -4, "max": 4, "step": 1, "default": 0, "group": "Notes" },
+    { "id": "key", "name": "Key", "type": "choice", "options": ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"], "default": 0, "group": "Notes" },
+    { "id": "scale", "name": "Scale", "type": "choice", "options": ["All notes", "Major", "Minor", "Dorian", "Mixolydian", "Harmonic minor", "Pentatonic major", "Pentatonic minor", "Blues", "Chromatic"], "default": 1, "group": "Notes" },
+    { "id": "vertical", "name": "Up/down", "type": "choice", "options": ["Loudness + tone", "Tone", "Loudness"], "default": 0, "group": "Touch" },
+    { "id": "fade", "name": "Fade to silence", "type": "choice", "options": ["None", "Short", "Medium", "Long", "Whole pad"], "default": 2, "group": "Touch" },
+    { "id": "glide", "name": "Glide", "type": "number", "min": 0, "max": 1, "step": 0.05, "default": 0, "group": "Touch" },
+    { "id": "vibrato", "name": "Vibrato", "type": "choice", "options": ["Off", "Light", "Normal", "Wide"], "default": 2, "group": "Touch" },
+    { "id": "vibSense", "name": "Vibrato sensitivity", "type": "choice", "options": ["Low", "Medium", "High", "Very high"], "default": 1, "group": "Touch" },
+    { "id": "locked", "name": "Lock (the strip plays)", "type": "switch", "default": false, "group": "Playing" },
+    { "id": "theme", "name": "Look", "type": "choice", "options": ["Night", "Sunset", "Ocean", "Forest", "Contrast", "Daylight"], "default": 0, "group": "Look" },
+    { "id": "lines", "name": "Lines", "type": "choice", "options": ["Soft", "Clear", "Bold"], "default": 1, "group": "Look" },
+    { "id": "drums", "name": "Drum kit", "type": "switch", "default": false, "group": "Playing" }
   ]
 }
