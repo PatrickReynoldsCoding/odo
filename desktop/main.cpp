@@ -2,7 +2,7 @@
 // with controller packages (.odoc, run in wasm3) on a touch screen, from the same files as odo
 // on Android. Linux and Windows (SDL3).
 //
-//   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--no-update]
+//   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--config FILE] [--no-update]
 //       [--version] [--self-update] [--setting [SIDE:]INDEX=VALUE]...
 //       [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]
 //
@@ -14,7 +14,9 @@
 // taps there, in window points, before its touches). The rest of
 // the window is the controllers: whole, or split side by side, above and below, in three or in
 // four, each side playing its own sound. (--controller and --sound repeat: the first is the
-// first side's, the next the second's.) Keys: Tab hides the rail, F11 full screen, Esc quits.
+// first side's, the next the second's.) Presets, as Android's, keep all of that under a name; and
+// on GNOME, odo can keep the desktop's three-finger swipes off it while it has focus (gestures.h).
+// Keys: Tab hides the rail, F11 full screen, Esc quits.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <algorithm>
@@ -34,6 +36,7 @@
 #include <thread>
 #include <vector>
 #include "draw.h"
+#include "gestures.h"
 #include "tokens.h"
 #include "update.h"
 #include "mpe/controller.h"
@@ -182,6 +185,22 @@ struct App {
         railHidden = j["railHidden"].boolean();
         savedFullscreen = j["fullscreen"].boolean();
         eink = j["eink"].boolean();
+        blockGestures = j["blockGestures"].boolean();
+        presetName = j["preset"].str();
+        const mpe::Json& ps = j["presets"];
+        for (size_t i = 0; i < ps.size(); i++) {
+            Preset p;
+            p.name = ps[i]["name"].str();
+            if (p.name.empty()) continue;
+            p.split = std::clamp(int(ps[i]["split"].num(0)), 0, kSplitCount - 1);
+            const mpe::Json& sd = ps[i]["sides"];
+            for (size_t k = 0; k < sd.size() && k < size_t(kSides); k++) {
+                PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), sd[k]["sound2"].str(), {}};
+                for (const auto& kv : sd[k]["settings"].o) s.settings[kv.first] = kv.second.num();
+                p.sides.push_back(std::move(s));
+            }
+            userPresets.push_back(std::move(p));
+        }
         const mpe::Json& c = j["controllers"];
         for (const auto& kv : c.o)
             for (const auto& sv : kv.second.o) saved[kv.first][sv.first] = sv.second.num();
@@ -206,6 +225,7 @@ struct App {
     std::string settingsKey(int k) const { return k == 0 ? controllerId(0) : controllerId(k) + "#" + std::to_string(k + 1); }
 
     void saveConfig() {
+        if (!loadingPreset) keepInPreset();
         if (!persist) return;
         std::error_code ec;
         fs::create_directories(fs::path(configPath).parent_path(), ec);
@@ -218,6 +238,7 @@ struct App {
               << ", \"sound2\": " << quoted(sound2Id(k)) << "}";
         f << "],\n  \"railHidden\": " << (railHidden ? "true" : "false")
           << ",\n  \"eink\": " << (eink ? "true" : "false")
+          << ",\n  \"blockGestures\": " << (blockGestures ? "true" : "false")
           << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
           << ",\n  \"controllers\": {";
         bool first = true;
@@ -228,7 +249,21 @@ struct App {
             f << "}";
             first = false;
         }
-        f << "\n  }\n}\n";
+        f << "\n  },\n  \"preset\": " << quoted(presetName) << ",\n  \"presets\": [";
+        for (size_t i = 0; i < userPresets.size(); i++) {
+            const Preset& p = userPresets[i];
+            f << (i ? ",\n    " : "\n    ") << "{\"name\": " << quoted(p.name) << ", \"split\": " << p.split << ", \"sides\": [";
+            for (size_t k = 0; k < p.sides.size(); k++) {
+                const PresetSide& s = p.sides[k];
+                f << (k ? ", " : "") << "{\"controller\": " << quoted(s.controller) << ", \"sound\": " << quoted(s.sound)
+                  << ", \"sound2\": " << quoted(s.sound2) << ", \"settings\": {";
+                bool f2 = true;
+                for (const auto& sv : s.settings) { f << (f2 ? "" : ", ") << quoted(sv.first) << ": " << sv.second; f2 = false; }
+                f << "}}";
+            }
+            f << "]}";
+        }
+        f << (userPresets.empty() ? "]\n}\n" : "\n  ]\n}\n");
         f.close();
         fs::rename(configPath + ".tmp", configPath, ec);
     }
@@ -244,6 +279,196 @@ struct App {
     void setFullscreen(bool on) { SDL_SetWindowFullscreen(window, on); saveConfig(); }
     bool fullscreen() const { return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0; }
     bool railHidden = false, eink = false, logMidi = false;
+
+    // Block system gestures (gestures.h): on, and what to tell the user about it ("" when it works).
+    bool blockGestures = false;
+    std::string gestureNote;
+    void setBlockGestures(bool on) {
+        blockGestures = on;
+        gestureNote = gestures::set(on);
+        saveConfig();
+    }
+
+    // ---- presets ---------------------------------------------------------------------------------
+
+    // As odo on Android's: a preset is the split and, for each side, its controller, its sound (and
+    // a split controller's second sound) and the controller's settings. A built-in one is a starting
+    // point: each side's settings only those it names, the rest left as they are. Yours keep all of
+    // them, and what you change while one of yours is on view is kept in it (as Android's). The one
+    // on view and yours are saved with the rest of the settings.
+    struct PresetSide { std::string controller, sound, sound2; std::map<std::string, double> settings; };
+    struct Preset { std::string name; int split = 0; std::vector<PresetSide> sides; bool builtIn = false; };
+    std::vector<Preset> userPresets;
+    std::string presetName;               // the one on view, or ""
+    bool loadingPreset = false;
+    bool confirmDelete = false;           // "Delete" was tapped once: the next tap deletes
+
+    static std::vector<Preset> builtInPresets() {
+        auto side = [](const char* c, const char* s, std::map<std::string, double> st = {}, const char* s2 = "") {
+            return PresetSide{std::string("patrickreynolds/") + c, std::string("patrickreynolds/") + s,
+                              *s2 ? std::string("patrickreynolds/") + s2 : std::string(), std::move(st)};
+        };
+        return {
+            {"Grand piano", 0, {side("grid", "piano", {{"split", 0}, {"slide", 0}})}, true},
+            {"Slide a flute", 0, {side("grid", "flute", {{"split", 0}, {"slide", 1}})}, true},
+            {"Bass below, lead above", 0, {side("grid", "bass-guitar", {{"split", 1}, {"slide", 0}}, "lead")}, true},
+            {"Cello chords", 0, {side("tonnetz", "cello")}, true},
+            {"Dreamy pad", 0, {side("touchpad", "pad", {{"split", 0}})}, true},
+            {"Keys over drums", 2, {side("grid", "rhodes", {{"split", 0}, {"slide", 0}}), side("grid", "kit", {{"split", 0}, {"slide", 0}})}, true},
+        };
+    }
+
+    int controllerIndex(const std::string& id) const {
+        for (size_t i = 0; i < lib.controllers.size(); i++) if (lib.controllers[i]->id() == id) return int(i);
+        return -1;
+    }
+    int soundIndex(const std::string& id) const {
+        for (size_t i = 0; i < lib.instruments.size(); i++) {
+            const auto& p = *lib.instruments[i].pkg;
+            if (p.id() == id || p.manifest["aliases"][size_t(0)].str() == id) return int(i);
+        }
+        return -1;
+    }
+    // Built-in ones whose controllers and sounds are all in the library, then yours.
+    std::vector<Preset> allPresets() const {
+        std::vector<Preset> out;
+        for (Preset& p : builtInPresets()) {
+            bool ok = true;
+            for (const PresetSide& s : p.sides)
+                ok = ok && controllerIndex(s.controller) >= 0 && soundIndex(s.sound) >= 0 && (s.sound2.empty() || soundIndex(s.sound2) >= 0);
+            if (ok) out.push_back(std::move(p));
+        }
+        out.insert(out.end(), userPresets.begin(), userPresets.end());
+        return out;
+    }
+    Preset* userPreset(const std::string& name) {
+        for (Preset& p : userPresets) if (p.name == name) return &p;
+        return nullptr;
+    }
+
+    // What is playing now, as a preset.
+    Preset current(const std::string& name) const {
+        Preset p;
+        p.name = name;
+        p.split = split;
+        for (int k = 0; k < count(); k++) {
+            PresetSide s{controllerId(k), soundId(k), sound2Id(k), {}};
+            if (sides[k].host) {
+                const mpe::Json& st = sides[k].host->manifest()["settings"];
+                for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) s.settings[st[i]["id"].str()] = sides[k].settings[i];
+            }
+            p.sides.push_back(std::move(s));
+        }
+        return p;
+    }
+
+    // What plays now is as the preset has it (only the settings it names).
+    bool matches(const Preset& p) const {
+        if (p.split != split || p.sides.size() != size_t(count())) return false;
+        for (int k = 0; k < count(); k++) {
+            const PresetSide& s = p.sides[size_t(k)];
+            if (s.controller != controllerId(k) || s.sound != soundId(k) || s.sound2 != sound2Id(k)) return false;
+            if (!sides[k].host) continue;
+            const mpe::Json& st = sides[k].host->manifest()["settings"];
+            for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) {
+                auto it = s.settings.find(st[i]["id"].str());
+                if (it != s.settings.end() && std::fabs(it->second - sides[k].settings[i]) > 1e-9) return false;
+            }
+        }
+        return true;
+    }
+
+    // A built-in preset on view, changed since it was loaded.
+    bool presetEdited() const {
+        if (presetName.empty()) return false;
+        for (const Preset& p : allPresets()) if (p.name == presetName) return p.builtIn && !matches(p);
+        return false;
+    }
+
+    // Something changed: kept in your preset on view.
+    void keepInPreset() {
+        Preset* p = userPreset(presetName);
+        if (p && !matches(*p)) *p = current(p->name);
+    }
+
+    void loadPreset(const Preset& p) {
+        loadingPreset = true;
+        bool keep = persist;
+        persist = false;
+        for (size_t k = 0; k < p.sides.size() && k < size_t(kSides); k++) {
+            const PresetSide& s = p.sides[k];
+            Side& sd = sides[k];
+            if (int c = controllerIndex(s.controller); c >= 0) sd.controller = c;
+            if (int n = soundIndex(s.sound); n >= 0) sd.sound = n;
+            sd.sound2 = s.sound2.empty() ? -1 : soundIndex(s.sound2);
+            // Its settings over the ones kept for that controller (a side after the first starts
+            // from the first side's, as when a controller is chosen); then it starts again with them.
+            int ki = int(k);
+            auto& mine = saved[settingsKey(ki)];
+            if (mine.empty() && ki > 0) mine = saved[controllerId(ki)];
+            for (const auto& kv : s.settings) mine[kv.first] = kv.second;
+            if (sd.host) sd.host->stop();
+            sd.host.reset();
+        }
+        setSplit(p.split);
+        presetName = p.name;
+        confirmDelete = false;
+        persist = keep;
+        loadingPreset = false;
+        saveConfig();
+    }
+
+    // A name not yet taken: "Cello", then "Cello 2", "Cello 3"...
+    std::string freeName(std::string base, const std::string& except = "") const {
+        while (!base.empty() && base.back() == ' ') base.pop_back();
+        while (!base.empty() && base.front() == ' ') base.erase(base.begin());
+        if (base.empty()) base = "Preset";
+        auto taken = [&](const std::string& n) {
+            if (n == except) return false;
+            for (const Preset& p : allPresets()) if (p.name == n) return true;
+            return false;
+        };
+        if (!taken(base)) return base;
+        std::string stem = base;
+        size_t sp = stem.find_last_of(' ');
+        if (sp != std::string::npos && sp + 1 < stem.size() && stem.find_first_not_of("0123456789", sp + 1) == std::string::npos) stem.resize(sp);
+        for (int n = 2;; n++) if (!taken(stem + " " + std::to_string(n))) return stem + " " + std::to_string(n);
+    }
+
+    // What plays now, as a name: each side's sound (and second sound), joined.
+    std::string soundsName() const {
+        std::string out;
+        for (int k = 0; k < count() && !lib.instruments.empty(); k++)
+            for (int j = 0; j < partsOf(k); j++)
+                out += (out.empty() ? "" : " + ") + lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].pkg->name();
+        return out;
+    }
+
+    // Keep what plays now as a new preset of yours, after the one on view, and switch to it.
+    void newPreset() {
+        Preset p = current(freeName(soundsName()));
+        size_t at = userPresets.size();
+        for (size_t i = 0; i < userPresets.size(); i++) if (userPresets[i].name == presetName) at = i + 1;
+        presetName = p.name;
+        userPresets.insert(userPresets.begin() + long(at), std::move(p));
+        confirmDelete = false;
+        saveConfig();
+    }
+
+    void renamePreset(const std::string& from, const std::string& to) {
+        Preset* p = userPreset(from);
+        if (!p) return;
+        p->name = freeName(to, from);
+        if (presetName == from) presetName = p->name;
+        saveConfig();
+    }
+
+    void deletePreset(const std::string& name) {
+        userPresets.erase(std::remove_if(userPresets.begin(), userPresets.end(), [&](const Preset& p) { return p.name == name; }), userPresets.end());
+        if (presetName == name) presetName.clear();
+        confirmDelete = false;
+        saveConfig();
+    }
 
     // Compiling an instrument takes a moment: done on a worker, handed back to the main thread.
     std::thread worker;
@@ -561,7 +786,8 @@ struct App {
     static constexpr float kItem = 40, kHeading = 26, kToggle = 42, kDivider = 13;
 
     // What a row opens or flips: a controller setting by its place in the manifest (0 and up), or one of these.
-    enum Key { kNone = -100, kSplitKey = -1, kControllerKey = -2, kSoundKey = -3, kSound2Key = -4, kLookKey = -5 };
+    enum Key { kNone = -100, kSplitKey = -1, kControllerKey = -2, kSoundKey = -3, kSound2Key = -4, kLookKey = -5,
+               kPresetKey = -6, kRenameKey = -7, kGesturesKey = -8 };
 
     struct RailItem {
         enum Kind { Row, Heading, Toggle, Divider } kind;
@@ -587,6 +813,7 @@ struct App {
             y += h;
         };
         Side& sd = cur();
+        add(RailItem::Row, kPresetKey, "Preset", presetName.empty() ? "None" : presetName + (presetEdited() ? " (changed)" : ""), kItem);
         add(RailItem::Row, kSplitKey, "Split", kSplits[split].name, kItem);
         if (count() > 1) add(RailItem::Toggle, kNone, "", "", kToggle);
         add(RailItem::Row, kControllerKey, "Controller", sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", kItem);
@@ -597,6 +824,9 @@ struct App {
             if (two) add(RailItem::Row, kSound2Key, "Sound: " + parts[size_t(1)].str(), soundName(sound2Of(active)), kItem);
         }
         add(RailItem::Row, kLookKey, "Look", eink ? "E-ink" : "Dark", kItem);
+        if (gestures::supported())
+            add(RailItem::Row, kGesturesKey, "Block system gestures", !blockGestures ? "Off" : gestureNote.empty() ? "On" : gestureNote,
+                kItem, true, blockGestures);
         if (sd.host) {
             add(RailItem::Divider, kNone, "", "", kDivider);
             for (auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) {
@@ -626,7 +856,7 @@ struct App {
         bool open = false;
         float x = 0, y = 0, w = 0, h = 0;          // the card, in the window
         std::string title;
-        enum Kind { Chips, List, Slider } kind = Chips;
+        enum Kind { Chips, List, Slider, Text } kind = Chips;
         struct Item { std::string text; float x, y, w, h; };   // y from the content's top, unscrolled
         std::vector<Item> items;
         int chosen = -1;
@@ -651,6 +881,18 @@ struct App {
         } else if (panelKey == kControllerKey) {
             p.title = "Controller"; p.kind = PanelLayout::List; p.chosen = sd.controller;
             for (const auto& c : lib.controllers) names.push_back(c->name());
+        } else if (panelKey == kPresetKey) {
+            // The presets, then what can be done with them.
+            p.title = "Preset"; p.kind = PanelLayout::List;
+            std::vector<Preset> all = allPresets();
+            for (size_t i = 0; i < all.size(); i++) {
+                names.push_back(all[i].name);
+                if (all[i].name == presetName) p.chosen = int(i);
+            }
+            for (const std::string& a : presetActions()) names.push_back(a);
+        } else if (panelKey == kRenameKey) {
+            if (!userPreset(presetName)) { panelKey = kNone; return p; }
+            p.title = "Rename"; p.kind = PanelLayout::Text;
         } else if (panelKey == kLookKey) {
             p.title = "Look"; p.kind = PanelLayout::Chips; p.chosen = eink ? 1 : 0;
             names = {"Dark", "E-ink"};
@@ -698,6 +940,8 @@ struct App {
         } else if (p.kind == PanelLayout::List) {
             for (size_t i = 0; i < names.size(); i++) p.items.push_back({names[i], p.x + kPad, float(i) * kListH, inner, kListH});
             p.contentH = float(names.size()) * kListH;
+        } else if (p.kind == PanelLayout::Text) {
+            p.contentH = 44;
         } else {
             p.contentH = kSliderH;
             p.trackX = p.x + kPad + 9;
@@ -710,7 +954,42 @@ struct App {
         return p;
     }
 
+    // Below the presets in their panel: keep this as a new one; for one of yours, rename or delete it.
+    std::vector<std::string> presetActions() {
+        std::vector<std::string> a = {"+ Keep this as a new preset"};
+        if (userPreset(presetName)) {
+            a.push_back("Rename \u201C" + presetName + "\u201D");
+            a.push_back(confirmDelete ? "Tap again to delete \u201C" + presetName + "\u201D" : "Delete \u201C" + presetName + "\u201D");
+        }
+        return a;
+    }
+
+    // Renaming: the name being typed, from the keyboard (Enter or Done keeps it, Esc does not).
+    std::string editText;
+    bool typing() const { return panelKey == kRenameKey; }
+    void startRename() {
+        panelKey = kRenameKey;
+        editText = presetName;
+        SDL_StartTextInput(window);
+    }
+    void endRename(bool keep) {
+        if (keep && panelKey == kRenameKey) renamePreset(presetName, editText);
+        panelKey = kPresetKey;
+        SDL_StopTextInput(window);
+    }
+
+    void presetTap(int n) {
+        std::vector<Preset> all = allPresets();
+        if (n < int(all.size())) { loadPreset(all[size_t(n)]); return; }
+        n -= int(all.size());
+        if (n == 0) newPreset();
+        else if (n == 1) startRename();
+        else if (n == 2) { if (confirmDelete) deletePreset(presetName); else confirmDelete = true; }
+    }
+
     void openPanel(int key) {
+        if (typing()) SDL_StopTextInput(window);
+        confirmDelete = false;
         panelKey = panelKey == key ? kNone : key;
         panelScroll = 0;
         // A long list opens with the chosen one in sight.
@@ -723,14 +1002,15 @@ struct App {
     void panelTap(float x, float y) {
         PanelLayout p = panelLayout();
         if (!p.open) return;
-        if (p.onDone(x, y)) { panelKey = kNone; return; }
+        if (p.onDone(x, y)) { if (typing()) endRename(true); else panelKey = kNone; return; }
         if (y < p.top || y >= p.top + p.room) return;
         for (size_t i = 0; i < p.items.size(); i++) {
             const auto& it = p.items[i];
             float iy = p.top + it.y - panelScroll;
             if (x < it.x || x >= it.x + it.w || y < iy || y >= iy + it.h) continue;
             int n = int(i);
-            if (panelKey == kSplitKey) { setSplit(n); panelKey = kNone; }
+            if (panelKey == kPresetKey) presetTap(n);
+            else if (panelKey == kSplitKey) { setSplit(n); panelKey = kNone; }
             else if (panelKey == kControllerKey) { chooseController(active, n); panelKey = kNone; }
             else if (panelKey == kSoundKey) chooseSound(active, n);
             else if (panelKey == kSound2Key) chooseSound2(active, n);
@@ -771,7 +1051,8 @@ struct App {
                 int n = count(), k = std::clamp(int((x - 8) / ((kRail - 16) / float(n))), 0, n - 1);
                 if (k != active) { setActive(k); panelKey = kNone; }
             } else if (it.kind == RailItem::Row) {
-                if (it.isSwitch) { setSetting(size_t(it.key), mpe::rail::stepped(settingOf(size_t(it.key)), cur().settings[size_t(it.key)], 1)); }
+                if (it.isSwitch && it.key == kGesturesKey) setBlockGestures(!blockGestures);
+                else if (it.isSwitch) { setSetting(size_t(it.key), mpe::rail::stepped(settingOf(size_t(it.key)), cur().settings[size_t(it.key)], 1)); }
                 else openPanel(it.key);
             }
             return;
@@ -883,7 +1164,19 @@ struct App {
                 else if (mx < railW()) scrollRail(-e.wheel.y * 40, float(wh));
                 return;
             }
+            case SDL_EVENT_TEXT_INPUT:
+                if (typing() && editText.size() < 60) editText += e.text.text;
+                return;
             case SDL_EVENT_KEY_DOWN:
+                if (typing()) {
+                    if (e.key.key == SDLK_BACKSPACE && !editText.empty()) {
+                        size_t n = editText.size() - 1;      // a whole UTF-8 character
+                        while (n > 0 && (static_cast<unsigned char>(editText[n]) & 0xC0) == 0x80) n--;
+                        editText.resize(n);
+                    } else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) endRename(true);
+                    else if (e.key.key == SDLK_ESCAPE) endRename(false);
+                    return;
+                }
                 if (e.key.key == SDLK_TAB) setRailHidden(!railHidden);
                 else if (e.key.key == SDLK_F11) setFullscreen(!fullscreen());
                 else if (e.key.key == SDLK_RIGHT) chooseSound(active, cur().sound + 1);
@@ -998,6 +1291,15 @@ struct App {
         else draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, rgba(tokens::alpha(p.line, 0xC0)), 1, tokens::radius::card);
         draw::text(renderer, pl.x + kPad, pl.y + 31, 17, text, draw::fit(pl.title, 17, pl.w - 2 * kPad - 70, true), 0, true);
         draw::text(renderer, pl.x + pl.w - kPad - 6, pl.y + 31, tokens::type::body + 1, accent, "Done", 2, true);
+        if (pl.kind == PanelLayout::Text) {              // the name being typed, with a cursor
+            float fy = pl.top + 4, fw = pl.w - 2 * kPad;
+            draw::strokeRect(renderer, pl.x + kPad, fy, fw, 36, accent, p.eink ? 2 : 1.5f, 8);
+            std::string shown = draw::fit(editText, 15, fw - 24);
+            draw::text(renderer, pl.x + kPad + 10, fy + 23, 15, text, shown);
+            float cx = pl.x + kPad + 10 + draw::textWidth(15, shown) + 1;
+            if ((SDL_GetTicks() / 500) % 2 == 0) draw::fillRect(renderer, cx, fy + 9, 2, 18, accent);
+            return;
+        }
         if (pl.kind == PanelLayout::Slider) {            // its name and value, then the slider
             float y = pl.top;
             draw::text(renderer, pl.x + kPad, y + 16, 14, text, draw::fit(pl.label, 14, pl.w - 2 * kPad - 70));
@@ -1033,6 +1335,7 @@ struct App {
 
     void frame() {
         collectCompiled();
+        if (!typing() && SDL_TextInputActive(window)) SDL_StopTextInput(window);   // the rename panel was closed
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         layoutSides();
@@ -1184,6 +1487,7 @@ int selftest(App& app, const char* out, Selftest t) {
 int main(int argc, char** argv) {
     std::vector<std::string> dirs;
     const char* selftestOut = nullptr;
+    const char* configArg = nullptr;                     // --config FILE: settings from and to it, even in a self-test
     std::vector<std::string> controllerIds, soundIds;    // each --controller / --sound: the next side's
     Selftest test;
     struct Preset { int side, index; double value; };
@@ -1201,6 +1505,7 @@ int main(int argc, char** argv) {
         else if (a == "--split" && more) splitArg = std::clamp(std::atoi(argv[++i]), 0, kSplitCount - 1);
         else if (a == "--log-midi") logMidi = true;
         else if (a == "--eink") einkArg = true;
+        else if (a == "--config" && more) configArg = argv[++i];
         else if (a == "--no-update") checkUpdates = false;
         else if (a == "--version") { std::printf("odo %s\n", ODO_DESKTOP_VERSION); return 0; }
         else if (a == "--self-update") {
@@ -1224,7 +1529,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
-            std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--no-update] [--version]\n"
+            std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--config FILE] [--no-update] [--version]\n"
                                  "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
@@ -1265,7 +1570,8 @@ int main(int argc, char** argv) {
 
     // Where you left off (not for a self-test, which neither reads nor writes it): the split, each
     // side's controller and sound, each controller's settings, the rail and full screen.
-    app.persist = !selftestOut;
+    app.persist = !selftestOut || configArg;
+    if (configArg) app.configPath = configArg;
     if (app.persist) {
         app.loadConfig();
         if (app.savedFullscreen) SDL_SetWindowFullscreen(app.window, true);
@@ -1273,6 +1579,7 @@ int main(int argc, char** argv) {
     // Saving waits until everything is chosen, so a half-made start doesn't overwrite the file.
     bool persist = app.persist;
     app.persist = false;
+    app.loadingPreset = true;                    // nor is a half-made start kept in the preset on view
     for (int k = 0; k < kSides; k++) {
         // The command line's, else where you left off, else the flute (or the first side's) and the first controller.
         std::string cid = k < int(controllerIds.size()) ? controllerIds[size_t(k)] : app.savedController[k];
@@ -1300,7 +1607,9 @@ int main(int argc, char** argv) {
         }
     }
     app.reroute();                               // a --setting may have split a controller
+    app.loadingPreset = false;
     app.persist = persist;
+    if (app.persist && app.blockGestures) app.gestureNote = gestures::set(true);   // and brings the extension up to date
     app.saveConfig();
 
     if (selftestOut) { int rc = selftest(app, selftestOut, test); app.shutdown(); SDL_Quit(); return rc; }
@@ -1308,7 +1617,7 @@ int main(int argc, char** argv) {
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)) running = false;
+            if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE && !app.typing())) running = false;
             else app.handle(e);
         }
         app.frame();

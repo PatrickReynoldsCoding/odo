@@ -35,6 +35,10 @@ Needs:    Linux x86-64 with SDL 3 and Faust's libfaust (Ubuntu 26.04: sudo apt i
 Updates:  odo checks GitHub for a newer version when it opens; tap the update line at the
           bottom of the rail to install it. ./odo --no-update turns the check off.
 Keys:     Tab hides the rail, F11 full screen, Left/Right change the sound, Esc quits.
+Presets:  the rail's top row. A preset of yours keeps what you change while it is on view.
+Gestures: on GNOME, the rail's Block system gestures keeps three-finger swipes (overview,
+          workspaces) off odo while it has focus. It installs a small GNOME Shell extension
+          (odo-no-gestures@odo); log out and in once the first time.
 Fonts:    Roboto and Noto Sans Symbols, under the SIL Open Font License (licenses/).
 More:     https://github.com/PatrickReynoldsCoding/odo
 TXT

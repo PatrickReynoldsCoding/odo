@@ -14,7 +14,7 @@ add_subdirectory(../engine engine)
 
 find_package(SDL3 REQUIRED CONFIG)
 # odo for computers' own version (its releases are tagged desktop-v<version>).
-set(ODO_DESKTOP_VERSION "0.0.17")
+set(ODO_DESKTOP_VERSION "0.0.18")
 # -DODO_TEST_VERSION=0.0.0: an older-numbered build, to try the updater with.
 if(ODO_TEST_VERSION)
   set(ODO_DESKTOP_VERSION "${ODO_TEST_VERSION}")
@@ -40,7 +40,7 @@ add_library(odo_stb STATIC stb_truetype.cpp)
 target_include_directories(odo_stb PUBLIC third_party)
 target_compile_options(odo_stb PRIVATE -w)
 
-add_executable(odo main.cpp draw.cpp update.cpp "${CMAKE_CURRENT_BINARY_DIR}/fonts.cpp")
+add_executable(odo main.cpp draw.cpp update.cpp gestures.cpp "${CMAKE_CURRENT_BINARY_DIR}/fonts.cpp")
 target_compile_definitions(odo PRIVATE ODO_DESKTOP_VERSION="${ODO_DESKTOP_VERSION}")
 target_link_libraries(odo PRIVATE mpe_engine odo_stb SDL3::SDL3)
 target_compile_options(odo PRIVATE -Wall -Wextra)

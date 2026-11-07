@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row, or up each column on its own; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -614,6 +614,7 @@
       "default": false,
       "hidden": true,
       "group": "Touch"
-    }
+    },
+    {"id": "slide", "name": "Slide between notes", "type": "switch", "default": false, "group": "Touch"}
   ]
 }

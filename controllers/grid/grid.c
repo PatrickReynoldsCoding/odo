@@ -17,6 +17,10 @@
  * Controls can sit in strips either side: Latch, Hold, Bend, Tone. The colours can mark notes
  * by their place in the key (the 4th always blue, say).
  *
+ * Slide between notes: a finger plays whichever square it is on. Move onto another and its note
+ * starts (the last one stops), without lifting: no strike zones, nothing across or up and down,
+ * no vibrato; every note as loud as the Dynamics fader says.
+ *
  * A port of odo's built-in Grid (GridUi.kt, KeyGrid.kt), one section (no split).
  */
 #include "mesh.h"
@@ -34,14 +38,16 @@ enum {
     /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
     S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4,
     /* the axes' shaping, set in the touch panel: amount and sensitivity in %, flip */
-    S_AX_AMOUNT, S_AX_SENS, S_AX_FLIP, S_UD_AMOUNT, S_UD_SENS, S_UD_FLIP, S_COUNT
+    S_AX_AMOUNT, S_AX_SENS, S_AX_FLIP, S_UD_AMOUNT, S_UD_SENS, S_UD_FLIP,
+    /* Slide between notes: a finger plays the square under it, whichever, until it lifts */
+    S_SLIDE, S_COUNT
 };
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 0,
                                ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1,
-                               100, 100, 0, 100, 100, 0};
+                               100, 100, 0, 100, 100, 0, 0};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
@@ -378,6 +384,7 @@ static float strike_level(float u, float v) {
 }
 
 typedef struct { float pitch, pressure, slide, volume; } Expr;
+#define SLIDE_STRIKE 0.85f      /* how hard a slid-onto note is played: f */
 
 /* The axes, from how far the finger has moved (slowly) from where it came down; vibrato from the
    rest. Loudness, tone and volume reach their full change half a square away (the squares are big:
@@ -430,7 +437,15 @@ static Expr expression(const Finger* f) {
     return e;
 }
 
+static int sliding(void) { return set_[S_SLIDE] != 0; }
+
 static Expr expression_in(const Finger* f) {
+    if (sliding()) {
+        /* Sliding: every note the same, firm and full; only the side controls change it. */
+        float dyn = clampf((float)set_[S_DYN], 0, 1);
+        Expr s = {(float)f->note + side_bend, SLIDE_STRIKE * (0.4f + 0.6f * dyn), clampf(0.5f + side_tone, 0, 1), dyn};
+        return s;
+    }
     /* Where nothing moves them: a firm press, the tone in the middle, full volume (or Volume's 0.7). */
     Expr e = {0, f->strike, 0.5f, 1};
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
@@ -527,10 +542,39 @@ static void down_in(int id, float x, float y, int h) {
     f->x0 = f->x = f->sx = x; f->y0 = f->y = f->sy = y;
     /* Where in its square it was struck, as the square looks on screen (turned or not). */
     float side = cell - gap, u = (x - square_x(n)) / side, w = (y - square_y(n)) / side;
-    f->strike = turned ? strike_level(1 - w, u) : strike_level(u, w);
+    f->strike = sliding() ? SLIDE_STRIKE : turned ? strike_level(1 - w, u) : strike_level(u, w);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
+    mesh_note_on(f->voice, h, e.pitch, e.pressure, e.slide, f->strike, now);
+    dirty = 1;
+}
+
+/* Sliding: the finger has moved onto another square (well inside it, so a finger resting on the
+   line between two does not flicker between them). Its note stops and the new square's starts,
+   on a voice of its own; a held (latched) note there is played again, not doubled. */
+static void slide_to(Finger* f, float x, float y) {
+    int h = half_at(y);
+    if (h < 0) h = f->half;
+    Half* was = hv;
+    hv = &halves[h];
+    int n = square_at(x, y);
+    if (n == -100000 || (h == f->half && n == f->n)) { hv = was; return; }
+    if (h == f->half) {
+        /* Past the old square's edge by a little more than the gap. */
+        float m = gap / 2 + cell * 0.08f, sx = square_x(f->n), sy = square_y(f->n), side = cell - gap;
+        if (x > sx - m && x < sx + side + m && y > sy - m && y < sy + side + m) { hv = was; return; }
+    }
+    let_go(f);
+    int k = find_latched(h, n);
+    if (k >= 0) unlatch(k);
+    f->voice = next_voice++; f->n = n; f->note = note_of(n); f->half = h;
+    f->x0 = f->sx = x; f->y0 = f->sy = y;
+    f->strike = SLIDE_STRIKE;
+    for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
+    hv = was;
+    Expr e = expression(f);
+    if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);
     mesh_note_on(f->voice, h, e.pitch, e.pressure, e.slide, f->strike, now);
     dirty = 1;
 }
@@ -1257,6 +1301,7 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
         Finger* f = find(id);
         if (!f) return;
         f->x = x; f->y = y;
+        if (sliding()) slide_to(f, x, y);
         send(f);
     } else {
         SideTouch* s = side_find(id);
