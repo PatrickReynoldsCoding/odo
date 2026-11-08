@@ -82,18 +82,21 @@ enum {
     /* The controls moved off their gutters (hidden): 0 in the gutter, else where (packed: place()) */
     S_PLACE0, S_PLACE_RESET = S_PLACE0 + 7,
     /* Two fingers on a control move, size and turn it */
-    S_MOVE_CTL, S_COUNT
+    S_MOVE_CTL,
+    /* Inside a square (its dynamics and tone) and sliding out past it, each on or off as a whole
+       (their own settings kept); the buttons' places; the two new controls' moved places */
+    S_INSIDE_ON, S_OUT_ON, S_SIDE_INSIDE, S_SIDE_OUT, S_PLACE7, S_PLACE8, S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1, [S_MOVE_CTL] = 1};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1, [S_MOVE_CTL] = 1, [S_INSIDE_ON] = 1, [S_OUT_ON] = 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
-enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_SLIDE, C_COUNT };   /* the side controls */
+enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_SLIDE, C_INSIDE, C_OUT, C_COUNT };   /* the side controls */
 enum { COL_PLAIN, COL_DEGREES, COL_CHORD, COL_PILLARS, COL_NAMES };
 /* Same notes elsewhere: how the other squares of a held note's pitch, in any octave, are marked. */
 enum { ECHO_OFF, ECHO_RING, ECHO_GLOW };
@@ -205,19 +208,29 @@ static int locked(void) { return set_[S_LOCK] != 0; }
 /* The Lock button only means something with the columns. */
 static int side_of(int c) {
     if (c == C_LOCK && !columns()) return SIDE_OFF;
-    return (int)set_[c == C_SLIDE ? S_SIDE_SLIDE : S_SIDE0 + c];
+    return (int)set_[c == C_SLIDE ? S_SIDE_SLIDE : c == C_INSIDE ? S_SIDE_INSIDE : c == C_OUT ? S_SIDE_OUT : S_SIDE0 + c];
 }
-static int is_button(int c) { return c <= C_HOLD || c == C_LOCK || c == C_SLIDE; }
+static int is_button(int c) { return c <= C_HOLD || c == C_LOCK || c >= C_SLIDE; }
+/* The toggles (Slide only, Inside, Slide out): a double tap changes one; held, it is the other way
+   only while held (flipped[c]). */
+static int is_toggle(int c) { return c >= C_SLIDE; }
+static int flipped[C_COUNT];
+static int toggle_setting(int c) { return c == C_SLIDE ? S_SLIDE_ONLY : c == C_INSIDE ? S_INSIDE_ON : S_OUT_ON; }
+static int toggle_on(int c) { return (set_[toggle_setting(c)] != 0) != (flipped[c] != 0); }
 /* Only slide between notes. */
-static int slide_only(void) { return set_[S_SLIDE_ONLY] != 0; }
+static int slide_only(void) { return toggle_on(C_SLIDE); }
+/* Inside a square and sliding out past it: on as a whole. */
+static int inside_on(void) { return toggle_on(C_INSIDE) && !slide_only(); }
+static int out_on(void) { return toggle_on(C_OUT); }
 
 /* ---- a control moved off its gutter --------------------------------------------------------------- */
 /* Where a moved control is, on the surface: its middle (as a share of the surface), its size and
    its turn (degrees). Kept in one number: 0 is "in its gutter". */
 typedef struct { float fx, fy, scale, deg; } Place;
-static int placed(int c) { return set_[S_PLACE0 + c] != 0; }
+static int place_index(int c) { return c < 7 ? S_PLACE0 + c : S_PLACE7 + (c - 7); }
+static int placed(int c) { return set_[place_index(c)] != 0; }
 static Place place_of(int c) {
-    double v = set_[S_PLACE0 + c] - 1;
+    double v = set_[place_index(c)] - 1;
     Place p = {0.5f, 0.5f, 1, 0};
     if (v < 0) return p;
     unsigned long long u = (unsigned long long)v;
@@ -497,11 +510,11 @@ static float down_of(const Finger* f, float x) { return (x - f->rx) / f->rs; }
 static float level_at(const Finger* f, float x, float y) {
     (void)y;
     float lo = dyn_low(), hi = dyn_high();
-    if (set_[S_IN_DYN] == 0 || slide_only()) return hi;
+    if (set_[S_IN_DYN] == 0 || !inside_on()) return hi;
     return lo + (hi - lo) * (1 - clampf(down_of(f, x), 0, 1));
 }
 static float tone_at(const Finger* f, float y) {
-    if (set_[S_IN_TONE] == 0 || slide_only()) return 0.5f;
+    if (set_[S_IN_TONE] == 0 || !inside_on()) return 0.5f;
     return clampf(across_of(f, y), 0, 1);
 }
 
@@ -575,7 +588,7 @@ static Expr expression_in(const Finger* f) {
     float semis = 0;
     /* Out past the line: what each way is set to do; sliding between notes, nothing (the next
        square plays instead). */
-    if (!sliding()) {
+    if (!sliding() && out_on()) {
         apply(&e, (int)set_[S_ACROSS], past(down_of(f, f->sx)), 1, f, &semis);
         apply(&e, (int)set_[S_UPDOWN], past(across_of(f, f->sy)), 0, f, &semis);
     }
@@ -918,6 +931,25 @@ static void col_down(int id, float x, float y) {
     dirty = 1;
 }
 
+/* A toggle: down, it is the other way at once (held, it stays so until let go); a second tap
+   soon after a short first one changes it for good. */
+static double toggle_last_up[C_COUNT], toggle_last_down[C_COUNT];
+static int toggle_kept[MAX_FINGERS + 1];        /* by side touch: this press changed it for good */
+static void toggle_down(SideTouch* s, int c) {
+    int j = (int)(s - side_touches);
+    int quick = toggle_last_up[c] > 0 && toggle_last_up[c] - toggle_last_down[c] < 300 && now - toggle_last_up[c] < 350;
+    toggle_last_down[c] = now;
+    toggle_kept[j] = quick;
+    if (quick) keep(toggle_setting(c), toggle_on(c) ? 0 : 1);    /* double tap: for good */
+    else { flipped[c] = 1; resend_all(); }                         /* held: for now */
+}
+static void toggle_up(SideTouch* s, int c) {
+    int j = (int)(s - side_touches);
+    toggle_last_up[c] = toggle_kept[j] ? 0 : now;              /* a double tap does not start another */
+    if (!toggle_kept[j]) flipped[c] = 0;
+    resend_all();
+}
+
 /* A finger down on control r, at upright height y in its rect. */
 static void side_start(int id, SideRect* r, float y, float sx, float sy) {
     for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
@@ -926,6 +958,7 @@ static void side_start(int id, SideRect* r, float y, float sx, float sy) {
         s->from = frac(s, y);
         touched[r->control]++;
         if (r->control == C_HOLD) hold(1);
+        if (is_toggle(r->control)) toggle_down(s, r->control);
         side_drag(s, s->from);
         break;
     }
@@ -972,6 +1005,14 @@ static SideRect* rect_of(int c) {
 /* A second finger near a control a finger is on: the control is picked up. */
 static int gesture_down(int id, float x, float y, float sx, float sy) {
     if (set_[S_MOVE_CTL] == 0 || gest.on) return 0;
+    /* On another control: that one is pressed (two buttons side by side, one finger each). */
+    for (int k = 0; k < nsides; k++) {
+        float ly;
+        if (!in_control(&sides[k], x, y, sx, sy, 0, &ly)) continue;
+        int held = 0;
+        for (int j = 0; j < MAX_FINGERS; j++) held |= side_touches[j].id && !side_touches[j].cancel && side_touches[j].control == sides[k].control;
+        if (!held) return 0;
+    }
     for (int j = 0; j < MAX_FINGERS; j++) {
         SideTouch* s1 = &side_touches[j];
         if (s1->id == 0 || s1->cancel || s1->control >= C_COUNT) continue;
@@ -992,6 +1033,7 @@ static int gesture_down(int id, float x, float y, float sx, float sy) {
         s1->cancel = 1;
         if (s1->control == C_HOLD) hold(0);
         if (s1->control == C_BEND) { side_bend = 0; resend_all(); }
+        if (is_toggle(s1->control)) { flipped[s1->control] = 0; resend_all(); }
         for (int k = 0; k < MAX_FINGERS; k++) if (side_touches[k].id == 0) {
             SideTouch* s2 = &side_touches[k];
             s2->id = id; s2->control = s1->control; s2->cancel = 1; s2->sx = sx; s2->sy = sy;
@@ -1020,13 +1062,13 @@ static void gesture_move(void) {
     float q = 90 * floorf_(deg / 90 + 0.5f);              /* square to the screen when nearly so */
     if (absf(deg - q) < 6) deg = q;
     Place out = {clampf(cx, 0, SW) / SW, clampf(cy, 0, SH) / SH, scale, deg};
-    set_[S_PLACE0 + gest.c] = pack_place(out);
+    set_[place_index(gest.c)] = pack_place(out);
     layout();
     dirty = 1;
 }
 
 static void gesture_up(void) {
-    keep(S_PLACE0 + gest.c, set_[S_PLACE0 + gest.c]);    /* kept, and in presets */
+    keep(place_index(gest.c), set_[place_index(gest.c)]);    /* kept, and in presets */
     gest.on = 0;
 }
 
@@ -1054,7 +1096,7 @@ static void side_up(SideTouch* s) {
     else if (s->control == C_BEND) { side_bend = 0; resend_all(); }
     else if (s->control == C_DYN) mesh_set_setting(S_DYN, set_[S_DYN]);   /* remembered */
     else if (s->control == C_LOCK) keep(S_LOCK, locked() ? 0 : 1);         /* the rail shows it */
-    else if (s->control == C_SLIDE) keep(S_SLIDE_ONLY, slide_only() ? 0 : 1);
+    else if (is_toggle(s->control)) toggle_up(s, s->control);
     s->id = 0;
     dirty = 1;
 }
@@ -1133,7 +1175,9 @@ static void draw_sides(const Theme* th) {
             break;
         case C_HOLD: draw_button(r, "Hold", holding ? "holding" : "press", holding, th, ink); break;
         case C_LOCK: draw_button(r, "Lock", locked() ? "on" : "off", !locked(), th, ink); break;
-        case C_SLIDE: draw_button(r, "Slide", slide_only() ? "only" : "all", slide_only(), th, ink); break;
+        case C_SLIDE: draw_button(r, "Slide", flipped[C_SLIDE] ? "for now" : slide_only() ? "only" : "all", slide_only(), th, ink); break;
+        case C_INSIDE: draw_button(r, "Inside", flipped[C_INSIDE] ? "for now" : toggle_on(C_INSIDE) ? "on" : "off", toggle_on(C_INSIDE), th, ink); break;
+        case C_OUT: draw_button(r, "Slide out", flipped[C_OUT] ? "for now" : out_on() ? "on" : "off", out_on(), th, ink); break;
         case C_BEND: {
             int tenths = roundi(side_bend * 10);
             if (tenths == 0) put(v, "0");
@@ -1168,7 +1212,7 @@ static void draw_sides(const Theme* th) {
    round it is where sliding starts. Below: what moving inside a square does, what sliding out each
    way does (how much, how readily, which way is more; bend's range and snap), and vibrato, with
    how readily a wiggle is taken for it. Scrolled by dragging its background. */
-enum { K_DONE, K_SLIDE, K_SLIDE_ONLY, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL, K_GLIDE_WAY };
+enum { K_DONE, K_SLIDE, K_SLIDE_ONLY, K_INSIDE_ON, K_OUT_ON, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL, K_GLIDE_WAY };
 typedef struct { float x, y, w, h; int kind, arg; } Hit;
 #define MAX_HITS 64
 static Hit hits[MAX_HITS];
@@ -1388,6 +1432,13 @@ static void ed_draw(const Theme* th) {
     chip(x, y, cw, 32, slide_only() ? "Only slide between notes: on" : "Only slide between notes: off", slide_only(), th, K_SLIDE_ONLY, 0);
     y += 40;
     {
+        float hw = (cw - 6) / 2;
+        int in = set_[S_INSIDE_ON] != 0, out = set_[S_OUT_ON] != 0;
+        chip(x, y, hw, 30, in ? "Inside a square: on" : "Inside a square: off", in, th, K_INSIDE_ON, 0);
+        chip(x + hw + 6, y, hw, 30, out ? "Sliding out: on" : "Sliding out: off", out, th, K_OUT_ON, 0);
+        y += 38;
+    }
+    {
         y = demo_part(x, y, cw, th);
         y = section(x, y, "INSIDE A SQUARE", th);
         int dyn = set_[S_IN_DYN] != 0, tone = set_[S_IN_TONE] != 0;
@@ -1486,7 +1537,9 @@ static void ed_touch(int id, int phase, float x, float y) {
         switch (h->kind) {
         case K_DONE: keep(S_TOUCH_EDIT, 0); break;
         case K_SLIDE: keep(S_SLIDE, set_[S_SLIDE] != 0 ? 0 : 1); break;
-        case K_SLIDE_ONLY: keep(S_SLIDE_ONLY, slide_only() ? 0 : 1); break;
+        case K_SLIDE_ONLY: keep(S_SLIDE_ONLY, set_[S_SLIDE_ONLY] != 0 ? 0 : 1); break;
+        case K_INSIDE_ON: keep(S_INSIDE_ON, set_[S_INSIDE_ON] != 0 ? 0 : 1); break;
+        case K_OUT_ON: keep(S_OUT_ON, set_[S_OUT_ON] != 0 ? 0 : 1); break;
         case K_INSIDE: { int s = h->arg ? S_IN_TONE : S_IN_DYN; keep(s, set_[s] != 0 ? 0 : 1); break; }
         case K_AXIS: te_axis = h->arg; break;
         case K_TARGET: keep(h->arg >= 8 ? S_ACROSS : S_UPDOWN, h->arg % 8); break;
@@ -1921,7 +1974,7 @@ MESH_EXPORT(tick) void tick(double t) {
     now = t;
     if (reset_places) {
         reset_places = 0;
-        for (int c = 0; c < 7; c++) if (set_[S_PLACE0 + c] != 0) keep(S_PLACE0 + c, 0);
+        for (int c = 0; c < C_COUNT; c++) if (placed(c)) keep(place_index(c), 0);
         keep(S_PLACE_RESET, 0);
         layout();
     }
@@ -1957,6 +2010,7 @@ MESH_EXPORT(stop) void stop(void) {
     for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) { let_go(&fingers[k]); fingers[k].used = 0; }
     for (int k = 0; k < MAX_FINGERS; k++) side_touches[k].id = 0;
     gest.on = 0;
+    for (int c = 0; c < C_COUNT; c++) flipped[c] = 0;
     for (int c = 0; c < C_COUNT; c++) touched[c] = 0;
     nspent = 0;
     holding = 0;

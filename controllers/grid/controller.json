@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -1040,6 +1040,66 @@
       "name": "Move controls with two fingers",
       "type": "switch",
       "default": true,
+      "group": "Controls"
+    },
+    {
+      "id": "insideOn",
+      "name": "Inside a square (dynamics, tone)",
+      "type": "switch",
+      "default": true,
+      "group": "Touch"
+    },
+    {
+      "id": "outOn",
+      "name": "Sliding out past a square",
+      "type": "switch",
+      "default": true,
+      "group": "Touch"
+    },
+    {
+      "id": "sideInside",
+      "name": "Inside button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "sideOut",
+      "name": "Slide out button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "place7",
+      "name": "Moved control 8",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place8",
+      "name": "Moved control 9",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
       "group": "Controls"
     }
   ]
