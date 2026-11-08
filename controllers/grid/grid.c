@@ -69,7 +69,9 @@ enum {
     /* Intervals: how far apart the rows of notes are */
     S_INTERVAL,
     /* left/right in a square sets the tone (up/down, the dynamics: S_IN_DYN) */
-    S_IN_TONE, S_COUNT
+    S_IN_TONE,
+    /* Slide between notes: the glide from one square's note to the next, 0 (each a new note) to 1 */
+    S_GLIDE, S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
@@ -396,6 +398,7 @@ typedef struct {
     float x0, y0, x, y, sx, sy;   /* where it came down, where it is, and its slow position */
     float rx, ry, rs;             /* its square (upright: left, top, side) */
     float ux, uy;                 /* the way it wiggles, learnt as it goes (a unit vector, either sign) */
+    float glide;                  /* sliding with a glide: semitones toward the squares beside it */
     float strike;                 /* how loud it started */
 } Finger;
 #define DEMO_N (-99999)           /* the square in the Touch panel, not one of the grid's */
@@ -549,7 +552,7 @@ static Expr expression_in(const Finger* f) {
         float h = along > th ? along - th : along < -th ? along + th : 0;
         semis += clampf(h * 0.08f * depth / 0.5f * sens, -depth, depth);
     }
-    e.pitch = (float)f->note + semis;
+    e.pitch = (float)f->note + semis + f->glide;
     return e;
 }
 
@@ -618,7 +621,7 @@ static void down_in(int id, float x, float y, int h) {
     f->used = 1; f->id = id; f->voice = next_voice++; f->n = n; f->note = note_of(n); f->half = h;
     f->x0 = f->x = f->sx = x; f->y0 = f->y = f->sy = y;
     f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
-    f->ux = 1; f->uy = 0;
+    f->ux = 1; f->uy = 0; f->glide = 0;
     f->strike = level_at(f, x, y);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
@@ -630,6 +633,37 @@ static void down_in(int id, float x, float y, int h) {
 /* Sliding: the finger has moved onto another square (well inside it, so a finger resting on the
    line between two does not flicker between them). Its note stops and the new square's starts,
    on a voice of its own; a held (latched) note there is played again, not doubled. */
+/* Sliding with a glide (as the touch pad's): one note follows the finger. Its square is the one
+   under it (its note, and its dynamics); toward the square beside it, each way, the pitch moves
+   toward that square's note: none of the way in the middle of the square, half at the border, all
+   of it at the next square's middle. Glide 1: evenly; less: held on the note longer, the move
+   squeezed toward the border. */
+static float glide_curve(float t, float g) { return g >= 0.995f ? t : clampf((t - (1 - g) / 2) / g, 0, 1); }
+static void glide_to(Finger* f, float x, float y) {
+    float g = clampf((float)set_[S_GLIDE], 0.05f, 1);
+    Half* was = hv;
+    hv = &halves[f->half < nhalves ? f->half : 0];
+    int n = square_at(x, y);
+    if (n != -100000 && note_of(n) >= 0) {
+        if (n != f->n) {
+            f->n = n; f->note = note_of(n);
+            f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
+        }
+        float half_ = (cell - gap) / 2;
+        float du = (x - (f->rx + half_)) / cell, dv = (y - (f->ry + half_)) / cell;
+        float semis = 0;
+        /* across the upright grid (on screen: up and down): the square beside it */
+        int across = beside(n, du >= 0 ? 1 : -1);
+        if (note_of(across) >= 0) semis += glide_curve(absf(du), g) * (float)(note_of(across) - f->note);
+        /* up and down the upright grid (on screen: left and right): the next row */
+        int row = n + ((dv >= 0) != (flipped_y() != 0) ? -cols : cols);
+        if (note_of(row) >= 0) semis += glide_curve(absf(dv), g) * (float)(note_of(row) - f->note);
+        f->glide = semis;
+    }
+    hv = was;
+    dirty = 1;
+}
+
 static void slide_to(Finger* f, float x, float y) {
     int h = half_at(y);
     if (h < 0) h = f->half;
@@ -649,6 +683,7 @@ static void slide_to(Finger* f, float x, float y) {
     f->voice = next_voice++; f->n = n; f->note = note_of(n); f->half = h;
     f->x0 = f->sx = x; f->y0 = f->sy = y;
     f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
+    f->glide = 0;
     f->strike = level_at(f, x, y);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     hv = was;
@@ -938,12 +973,13 @@ static const char* BEND_NAME[7] = {"Next note", "\xC2\xB1" "1", "\xC2\xB1" "2", 
 static const char* VIB_NAME[4] = {"Off", "Light", "Normal", "Wide"};
 
 /* The sliders: the setting each moves, its range and step, and how its value reads. */
-typedef struct { int index; float min, max, step; const char* label; int kind; } Slider;   /* kind 1 %, 2 dB */
-enum { SL_AX_AMOUNT, SL_AX_SENS, SL_UD_AMOUNT, SL_UD_SENS, SL_BEND_SNAP, SL_VIB_SENS, SL_COUNT };
+typedef struct { int index; float min, max, step; const char* label; int kind; } Slider;   /* kind 1 %, 2 dB, 3 two decimals */
+enum { SL_AX_AMOUNT, SL_AX_SENS, SL_UD_AMOUNT, SL_UD_SENS, SL_BEND_SNAP, SL_VIB_SENS, SL_GLIDE, SL_COUNT };
 static const Slider SLIDERS[SL_COUNT] = {
     {S_AX_AMOUNT, 0, 100, 5, "Strength", 1}, {S_AX_SENS, 25, 400, 5, "Sensitivity", 1},
     {S_UD_AMOUNT, 0, 100, 5, "Strength", 1}, {S_UD_SENS, 25, 400, 5, "Sensitivity", 1},
     {S_BEND_SNAP, 0, 100, 5, "Snap to semitones", 1}, {S_VIB_SENS, 25, 400, 5, "Wiggle sensitivity", 1},
+    {S_GLIDE, 0, 1, 0.05f, "Glide", 3},
 };
 
 static int editing(void) { return set_[S_TOUCH_EDIT] != 0; }
@@ -977,8 +1013,14 @@ static float slider(float x, float y, float w, int id, const Theme* th) {
     unsigned ink = eink ? BLACK : th->light;
     float v = (float)set_[sl->index], t = clampf((v - sl->min) / (sl->max - sl->min), 0, 1);
     char val[24];
-    char* p = put_int(val, roundi(v), 0);
-    put(p, sl->kind == 1 ? "%" : sl->kind == 2 ? " dB" : "");
+    if (sl->kind == 3) {                 /* 0 to 1 in hundredths, as the rail shows a number: 0, 0.35, 1 */
+        int c = roundi(v * 100);
+        char* p = put_int(val, c / 100, 0);
+        if (c % 100) { *p++ = '.'; *p++ = (char)('0' + (c % 100) / 10); if (c % 10) *p++ = (char)('0' + c % 10); *p = 0; }
+    } else {
+        char* p = put_int(val, roundi(v), 0);
+        put(p, sl->kind == 1 ? "%" : sl->kind == 2 ? " dB" : "");
+    }
     mesh_text(x, y + 13, 11, mesh_alpha(ink, 0.85f), 0, sl->label);
     mesh_text(x + w, y + 13, 11, ink, MESH_TEXT_RIGHT | MESH_TEXT_BOLD, val);
     float ty = y + 28;
@@ -1154,8 +1196,10 @@ static void ed_draw(const Theme* th) {
         }
         if (sliding_) {
             y = section(x, y, "SLIDING OUT", th);
-            mesh_text(x, y + 10, 11, mesh_alpha(ink, 0.8f), 0, "Sliding between notes: out of a square, the next one plays.");
-            y += 26;
+            mesh_text(x, y + 10, 11, mesh_alpha(ink, 0.8f), 0, set_[S_GLIDE] > 0.001 ? "Sliding between notes: one note glides to the next square's."
+                                                                                   : "Sliding between notes: out of a square, the next one plays.");
+            y += 22;
+            y = slider(x, y, cw, SL_GLIDE, th);
         } else {
             y = section(x, y, "SLIDING OUT, PAST THE LINE", th);
             static const char* AXIS[2] = {"Left/right", "Up/down"};
@@ -1255,7 +1299,7 @@ static void demo_down(int id, float x, float y) {
     f->note = note < 0 ? 0 : note > 127 ? 127 : note;
     f->x0 = f->x = f->sx = y; f->y0 = f->y = f->sy = H - x;     /* upright, as every finger */
     f->rx = te_y; f->ry = H - te_x - te_s; f->rs = te_s;
-    f->ux = 1; f->uy = 0;
+    f->ux = 1; f->uy = 0; f->glide = 0;
     f->strike = level_at(f, f->x, f->y);
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);
@@ -1625,7 +1669,7 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
         Finger* f = find(id);
         if (!f) return;
         f->x = x; f->y = y;
-        if (sliding() && !note_editing()) slide_to(f, x, y);
+        if (sliding() && !note_editing()) { if (set_[S_GLIDE] > 0.001) glide_to(f, x, y); else slide_to(f, x, y); }
         send(f);
     } else {
         SideTouch* s = side_find(id);

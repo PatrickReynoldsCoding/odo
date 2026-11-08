@@ -186,10 +186,10 @@ static void grid() {
     CHECK(noHidden && !find(rs, "notes0") && !find(rs, "bendSnap") && !find(rs, "dynamics"), "no hidden setting is on the rail");
     size_t shown = 0, ruledOut = 0;
     for (size_t i = 0; i < ss.size(); i++) if (!ss[i]["hidden"].boolean()) { shown++; ruledOut += !rail::shown(m, ss[i], v); }
-    CHECK(rs.size() == shown - ruledOut && ruledOut == 11, "every other one is, but the 11 its mode rules out (%zu shown)", rs.size());
+    CHECK(rs.size() == shown - ruledOut && ruledOut == 12, "every other one is, but the 12 its mode rules out (%zu shown)", rs.size());
     int counted = 0;
     for (auto& g : gs) counted += g.hiddenNow;
-    CHECK(counted == 11, "the groups count what their modes hide (%d)", counted);
+    CHECK(counted == 12, "the groups count what their modes hide (%d)", counted);
     for (auto& r : rs) if (r.id != ss[r.index]["id"].str()) { CHECK(false, "%s's index is wrong", r.id.c_str()); }
     auto cols = find(rs, "cols");
     CHECK(cols && cols->widget == Widget::Chips && cols->choices.size() == 7 && cols->chosen == 1 && cols->display == "3",
@@ -231,6 +231,7 @@ static void grid() {
     auto vl = v;
     vl[idx(m, "slide")] = 1;
     CHECK(find(rs, "vibrato") && find(rail::rows(m, vl), "vibrato"), "Slide between notes: vibrato still there (only slides go)");
+    CHECK(!find(rs, "slideGlide") && find(rail::rows(m, vl), "slideGlide") && find(rail::rows(m, vl), "slideGlide")->widget == Widget::Slider, "Slide between notes: its Glide, a slider as the touch pad's");
     vl[idx(m, "latch")] = 1;
     CHECK(!find(rs, "latchMode") && find(rail::rows(m, vl), "latchMode"), "Latch on: its next-touch choice");
     auto te = find(rs, "touchEdit");
