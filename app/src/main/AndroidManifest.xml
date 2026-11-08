@@ -39,7 +39,30 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- A preset file (PRESET_FORMAT.md) opened with odo, or shared to it: one of yours. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/vnd.odo.preset+json" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.odo.preset+json" />
+            </intent-filter>
         </activity>
+
+        <!-- The preset file Share sends, read by the app it is sent to. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.presets"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/preset_paths" />
+        </provider>
 
         <!-- What Android's installer says about an update, and the note shown after one. -->
         <receiver android:name=".UpdateReceiver" android:exported="false" />

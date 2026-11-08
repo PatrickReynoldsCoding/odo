@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
         Updater.checkIfDue(applicationContext)
         MidiConnector.onChange = { runOnUiThread { midiTick++ } }
         SynthService.onStopped = { runOnUiThread { finishAndRemoveTask() } }
+        if (savedInstanceState == null) openPresetIn(intent)
         setContent {
             // Status and navigation bar icons dark on the e-ink theme's white, light on the dark one.
             LaunchedEffect(AppState.eink) {
@@ -105,6 +106,14 @@ class MainActivity : ComponentActivity() {
             }
             MpeTheme { App() }
         }
+    }
+
+    // A preset file another app opened with odo or shared to it (PresetFiles): one of yours, on view.
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openPresetIn(intent) }
+    private fun openPresetIn(intent: Intent?) {
+        val uri = PresetFiles.uriIn(intent) ?: return
+        android.widget.Toast.makeText(this, PresetFiles.open(this, uri), android.widget.Toast.LENGTH_LONG).show()
+        intent?.action = null                     // not again when the activity is made again
     }
 
     override fun onPause() { ble?.stop(); scanning = false; Motion.setResumed(this, false); super.onPause() }

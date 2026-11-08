@@ -45,6 +45,7 @@
 #include "mpe/engine.h"
 #include "mpe/faust_loader.h"
 #include "mpe/package.h"
+#include "mpe/preset.h"
 #include "mpe/rail.h"
 
 namespace fs = std::filesystem;
@@ -252,10 +253,13 @@ struct App {
             p.split = std::clamp(int(ps[i]["split"].num(0)), 0, kSplitCount - 1);
             const mpe::Json& sd = ps[i]["sides"];
             for (size_t k = 0; k < sd.size() && k < size_t(kSides); k++) {
-                PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), sd[k]["sound2"].str(), {}};
+                PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), sd[k]["sound2"].str(), {}, {}};
                 for (const auto& kv : sd[k]["settings"].o) s.settings[kv.first] = kv.second.num();
+                for (size_t j = 0; j < sd[k]["parts"].size(); j++) s.parts.push_back(mpe::preset::partFrom(sd[k]["parts"][j]));
                 p.sides.push_back(std::move(s));
             }
+            p.layered = ps[i]["layered"].boolean();
+            if (ps[i]["effects"].type == mpe::Json::Object) { p.hasEffects = true; p.effects = mpe::preset::effectsFrom(ps[i]["effects"]); }
             userPresets.push_back(std::move(p));
         }
         const mpe::Json& c = j["controllers"];
@@ -317,9 +321,18 @@ struct App {
                   << ", \"sound2\": " << quoted(s.sound2) << ", \"settings\": {";
                 bool f2 = true;
                 for (const auto& sv : s.settings) { f << (f2 ? "" : ", ") << quoted(sv.first) << ": " << sv.second; f2 = false; }
-                f << "}}";
+                f << "}";
+                if (!s.parts.empty()) {
+                    f << ", \"parts\": [";
+                    for (size_t j = 0; j < s.parts.size(); j++) f << (j ? ", " : "") << mpe::preset::toJson(mpe::preset::partJson(s.parts[j]));
+                    f << "]";
+                }
+                f << "}";
             }
-            f << "]}";
+            f << "]";
+            if (p.layered) f << ", \"layered\": true";
+            if (p.hasEffects) f << ", \"effects\": " << mpe::preset::toJson(mpe::preset::effectsJson(p.effects));
+            f << "}";
         }
         f << (userPresets.empty() ? "]\n}\n" : "\n  ]\n}\n");
         f.close();
@@ -362,8 +375,13 @@ struct App {
     // point: each side's settings only those it names, the rest left as they are. Yours keep all of
     // them, and what you change while one of yours is on view is kept in it (as Android's). The one
     // on view and yours are saved with the rest of the settings.
-    struct PresetSide { std::string controller, sound, sound2; std::map<std::string, double> settings; };
-    struct Preset { std::string name; int split = 0; std::vector<PresetSide> sides; bool builtIn = false; };
+    // A preset opened from a file (mpe::preset) may carry what this app has no settings for: each
+    // part's own settings (its volume, effects, arp), layering and the shared effects, as odo on
+    // Android has them. They are kept, and given back when the preset is shared, while its sounds stay.
+    struct PresetSide { std::string controller, sound, sound2; std::map<std::string, double> settings;
+                        std::vector<mpe::preset::Part> parts; };
+    struct Preset { std::string name; int split = 0; std::vector<PresetSide> sides; bool builtIn = false;
+                    bool layered = false, hasEffects = false; mpe::preset::Effects effects; };
     std::vector<Preset> userPresets;
     std::string presetName;               // the one on view, or ""
     bool loadingPreset = false;
@@ -372,15 +390,18 @@ struct App {
     static std::vector<Preset> builtInPresets() {
         auto side = [](const char* c, const char* s, std::map<std::string, double> st = {}, const char* s2 = "") {
             return PresetSide{std::string("patrickreynolds/") + c, std::string("patrickreynolds/") + s,
-                              *s2 ? std::string("patrickreynolds/") + s2 : std::string(), std::move(st)};
+                              *s2 ? std::string("patrickreynolds/") + s2 : std::string(), std::move(st), {}};
+        };
+        auto built = [](const char* name, int split, std::vector<PresetSide> sides) {
+            Preset p; p.name = name; p.split = split; p.sides = std::move(sides); p.builtIn = true; return p;
         };
         return {
-            {"Grand piano", 0, {side("grid", "piano", {{"split", 0}, {"slide", 0}})}, true},
-            {"Slide a flute", 0, {side("grid", "flute", {{"split", 0}, {"slide", 1}})}, true},
-            {"Bass below, lead above", 0, {side("grid", "bass-guitar", {{"split", 1}, {"slide", 0}}, "lead")}, true},
-            {"Cello chords", 0, {side("tonnetz", "cello")}, true},
-            {"Dreamy pad", 0, {side("touchpad", "pad", {{"split", 0}})}, true},
-            {"Keys over drums", 2, {side("grid", "rhodes", {{"split", 0}, {"slide", 0}}), side("grid", "kit", {{"split", 0}, {"slide", 0}})}, true},
+            built("Grand piano", 0, {side("grid", "piano", {{"split", 0}, {"slide", 0}})}),
+            built("Slide a flute", 0, {side("grid", "flute", {{"split", 0}, {"slide", 1}})}),
+            built("Bass below, lead above", 0, {side("grid", "bass-guitar", {{"split", 1}, {"slide", 0}}, "lead")}),
+            built("Cello chords", 0, {side("tonnetz", "cello")}),
+            built("Dreamy pad", 0, {side("touchpad", "pad", {{"split", 0}})}),
+            built("Keys over drums", 2, {side("grid", "rhodes", {{"split", 0}, {"slide", 0}}), side("grid", "kit", {{"split", 0}, {"slide", 0}})}),
         };
     }
 
@@ -417,8 +438,12 @@ struct App {
         Preset p;
         p.name = name;
         p.split = split;
+        const Preset* was = nullptr;         // yours of that name: what it carries from a file stays
+        for (const Preset& u : userPresets) if (u.name == name) was = &u;
+        if (was) { p.layered = was->layered; p.hasEffects = was->hasEffects; p.effects = was->effects; }
         for (int k = 0; k < count(); k++) {
-            PresetSide s{controllerId(k), soundId(k), sound2Id(k), {}};
+            PresetSide s{controllerId(k), soundId(k), sound2Id(k), {}, {}};
+            if (was && size_t(k) < was->sides.size()) s.parts = was->sides[size_t(k)].parts;
             if (sides[k].host) {
                 const mpe::Json& st = sides[k].host->manifest()["settings"];
                 for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) s.settings[st[i]["id"].str()] = sides[k].settings[i];
@@ -534,6 +559,142 @@ struct App {
         if (presetName == name) presetName.clear();
         confirmDelete = false;
         saveConfig();
+    }
+
+    // ---- preset files (PRESET_FORMAT.md) ------------------------------------------------------
+
+    // A preset as a file: each side's controller, its settings and its parts (the sound, the
+    // second sound, then what the preset carries from a file).
+    mpe::preset::Preset toFile(const Preset& p) const {
+        mpe::preset::Preset f;
+        f.name = p.name;
+        f.madeBy = std::string("odo ") + ODO_DESKTOP_VERSION + " (computer)";
+        f.split = p.split;
+        f.layered = p.layered;
+        f.hasEffects = p.hasEffects;
+        f.effects = p.effects;
+        for (const PresetSide& s : p.sides) {
+            mpe::preset::Side fs;
+            fs.controller = s.controller;
+            fs.settings.type = mpe::Json::Object;
+            for (const auto& kv : s.settings) {
+                mpe::Json v; v.type = mpe::Json::Number; v.n = kv.second;
+                fs.settings.o.emplace_back(kv.first, v);
+            }
+            fs.parts = s.parts;
+            auto put = [&](size_t j, const std::string& sound) {
+                if (fs.parts.size() <= j) fs.parts.resize(j + 1);
+                if (fs.parts[j].sound != sound) { fs.parts[j] = mpe::preset::Part(); fs.parts[j].sound = sound; }
+            };
+            put(0, s.sound);
+            if (!s.sound2.empty()) put(1, s.sound2);
+            f.sides.push_back(std::move(fs));
+        }
+        return f;
+    }
+
+    // A preset file's text as one of yours, after the rest, and on view. A controller or sound
+    // this computer doesn't have: what that side plays now, and `note` says so.
+    bool openPresetText(const std::string& text, std::string& note) {
+        mpe::preset::Preset f;
+        std::string err;
+        if (!mpe::preset::parse(text, f, &err)) { note = err; return false; }
+        Preset p;
+        p.name = freeName(f.name);
+        p.split = std::clamp(f.split, 0, kSplitCount - 1);
+        p.layered = f.layered;
+        p.hasEffects = f.hasEffects;
+        p.effects = f.effects;
+        int missingCtl = 0, missingSound = 0;
+        size_t sidesNow = size_t(kSplits[p.split].sides);     // a split's sides; a file may give more
+        for (size_t k = 0; k < f.sides.size() && k < sidesNow; k++) {
+            const mpe::preset::Side& fs = f.sides[k];
+            PresetSide s;
+            int ki = int(k) < count() ? int(k) : 0;
+            s.controller = fs.controller;
+            if (s.controller.empty() || controllerIndex(s.controller) < 0) {
+                if (!s.controller.empty()) missingCtl++;
+                s.controller = controllerId(ki);
+            }
+            s.parts = fs.parts;
+            for (size_t j = 0; j < s.parts.size(); j++) {      // the sounds by their ids here
+                int n = soundIndex(s.parts[j].sound);
+                if (n >= 0) s.parts[j].sound = lib.instruments[size_t(n)].pkg->id();
+                else if (j < 2) missingSound++;
+            }
+            int n0 = s.parts.empty() ? -1 : soundIndex(s.parts[0].sound);
+            s.sound = n0 >= 0 ? s.parts[0].sound : soundId(ki);
+            int n1 = s.parts.size() < 2 ? -1 : soundIndex(s.parts[1].sound);
+            s.sound2 = n1 >= 0 ? s.parts[1].sound : "";
+            for (const auto& kv : fs.settings.o) s.settings[kv.first] = kv.second.num();
+            p.sides.push_back(std::move(s));
+        }
+        std::string name = p.name;
+        userPresets.push_back(p);
+        loadPreset(p);
+        note = "Opened \xE2\x80\x9C" + name + "\xE2\x80\x9D";
+        if (missingCtl) note += missingCtl == 1 ? ". Its controller isn't on this computer: the one in use plays it"
+                                                : ". Its controllers aren't on this computer: the ones in use play it";
+        if (missingSound) note += std::string(". ") + std::to_string(missingSound)
+                                + (missingSound == 1 ? " sound isn't" : " sounds aren't") + " here: what was playing plays instead";
+        if (f.sides.size() > sidesNow) note += ". Its sides after the " + std::string(sidesNow == 1 ? "first" : sidesNow == 2 ? "second" : sidesNow == 3 ? "third" : "fourth") + " are left out";
+        return true;
+    }
+
+    bool openPresetFile(const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        std::string note;
+        if (!in) { status = "Could not open " + path; return false; }
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        bool ok = openPresetText(text, note);
+        status = note;
+        return ok;
+    }
+
+    bool savePresetFile(const std::string& name, std::string path) {
+        // Yours as kept; a built-in one as it is, or (changed since it was loaded) what plays now.
+        const Preset* p = nullptr;
+        std::vector<Preset> all = allPresets();
+        for (const Preset& q : all) if (q.name == name) p = &q;
+        Preset now = p && (!p->builtIn || matches(*p)) ? *p : current(name.empty() ? freeName(soundsName()) : name);
+        if (path.size() < 10 || path.compare(path.size() - 10, 10, mpe::preset::kExtension) != 0) path += mpe::preset::kExtension;
+        std::ofstream out(path, std::ios::binary);
+        out << mpe::preset::write(toFile(now));
+        out.close();
+        status = out ? "Shared \xE2\x80\x9C" + now.name + "\xE2\x80\x9D as " + fs::path(path).filename().string()
+                     : "Could not write " + path;
+        return bool(out);
+    }
+
+    // The system's file dialogs answer on their own thread: what they chose waits here for the next frame.
+    std::mutex dialogLock;
+    std::vector<std::pair<bool, std::string>> dialogDone;   // (save?, path)
+    std::string sharing;                                     // the preset a save dialog is for
+    static void dialogAnswer(void* self, const char* const* files, int, bool save) {
+        if (!files || !files[0]) return;                     // an error, or cancelled
+        App* a = static_cast<App*>(self);
+        std::lock_guard<std::mutex> g(a->dialogLock);
+        a->dialogDone.emplace_back(save, files[0]);
+    }
+    static void openAnswer(void* self, const char* const* files, int filter) { dialogAnswer(self, files, filter, false); }
+    static void saveAnswer(void* self, const char* const* files, int filter) { dialogAnswer(self, files, filter, true); }
+    static constexpr SDL_DialogFileFilter kPresetFilter[] = {{"odo presets", "odopreset"}};
+
+    void askToShare() {
+        sharing = presetName;
+        mpe::preset::Preset f; f.name = presetName.empty() ? soundsName() : presetName;
+        std::string at = (fs::path(home()) / mpe::preset::fileName(f)).string();
+        SDL_ShowSaveFileDialog(saveAnswer, this, window, kPresetFilter, 1, at.c_str());
+    }
+    void askToOpen() { SDL_ShowOpenFileDialog(openAnswer, this, window, kPresetFilter, 1, home().c_str(), false); }
+
+    void collectDialogs() {
+        std::vector<std::pair<bool, std::string>> done;
+        { std::lock_guard<std::mutex> g(dialogLock); done.swap(dialogDone); }
+        for (const auto& d : done) {
+            if (d.first) savePresetFile(sharing, d.second);
+            else if (openPresetFile(d.second)) panelKey = kNone;
+        }
     }
 
     // Compiling an instrument takes a moment: done on a worker, handed back to the main thread.
@@ -940,7 +1101,7 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
+    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1025,6 +1186,9 @@ struct App {
             heading("THIS PRESET");
             auto action = [&](const std::string& t, int act) { PItem it{PItem::Row, t, "", x, y, in, 40}; it.act = act; it.rule = true; p.items.push_back(it); y += 40; };
             action("+ Keep what is playing as a new preset", aNewPreset);
+            action(presetName.empty() ? std::string("Share what is playing as a file\xE2\x80\xA6")
+                                      : "Share \xE2\x80\x9C" + presetName + "\xE2\x80\x9D as a file\xE2\x80\xA6", aShare);
+            action("Open a preset file\xE2\x80\xA6", aOpenFile);
             if (userPreset(presetName)) {
                 if (renaming) {
                     p.items.push_back({PItem::Field, editText, "", x, y + 4, in, 38}); y += 46;
@@ -1190,6 +1354,8 @@ struct App {
             switch (it.act) {
                 case aLoadPreset: { std::vector<Preset> all = allPresets(); if (it.arg < int(all.size())) loadPreset(all[size_t(it.arg)]); break; }
                 case aNewPreset: newPreset(); renaming = false; break;
+                case aShare: askToShare(); break;
+                case aOpenFile: askToOpen(); break;
                 case aRename: renaming = true; editText = presetName; break;
                 case aRenameOk: renamePreset(presetName, editText); renaming = false; break;
                 case aDelete: if (confirmDelete) deletePreset(presetName); else confirmDelete = true; break;
@@ -1362,6 +1528,9 @@ struct App {
                 else if (mx < railW()) scrollRail(-e.wheel.y * 40, float(wh));
                 return;
             }
+            case SDL_EVENT_DROP_FILE:                // a preset file dropped on the window
+                if (e.drop.data) openPresetFile(e.drop.data);
+                return;
             case SDL_EVENT_TEXT_INPUT: {
                 // a preset's new name, or the sound panel's search
                 std::string& to = renaming ? editText : search;
@@ -1685,6 +1854,7 @@ struct App {
 
     void frame() {
         collectCompiled();
+        collectDialogs();
         // Typing (a preset's name, a sound's search) while its panel is open, and only then.
         if (typing() != SDL_TextInputActive(window)) { if (typing()) SDL_StartTextInput(window); else SDL_StopTextInput(window); }
         int ww, wh;
@@ -1843,6 +2013,8 @@ int main(int argc, char** argv) {
     Selftest test;
     struct Preset { int side, index; double value; };
     std::vector<Preset> presetSettings;                  // --setting [SIDE:]INDEX=VALUE
+    std::vector<std::string> openPresets;                // --open-preset FILE, or a bare .odopreset path (the file manager's "Open with")
+    const char* sharePreset = nullptr;                   // --share-preset FILE: the preset on view into FILE, then quit
     int width = 1280, height = 720, splitArg = -1;
     bool logMidi = false, checkUpdates = true, einkArg = false;
     for (int i = 1; i < argc; i++) {
@@ -1858,6 +2030,9 @@ int main(int argc, char** argv) {
         else if (a == "--eink") einkArg = true;
         else if (a == "--config" && more) configArg = argv[++i];
         else if (a == "--no-update") checkUpdates = false;
+        else if (a == "--open-preset" && more) openPresets.push_back(argv[++i]);
+        else if (a == "--share-preset" && more) sharePreset = argv[++i];
+        else if (a.size() > 10 && a.compare(a.size() - 10, 10, mpe::preset::kExtension) == 0) openPresets.push_back(a);
         else if (a == "--version") { std::printf("odo %s\n", ODO_DESKTOP_VERSION); return 0; }
         else if (a == "--self-update") {
             // Without the window: check, install if newer, and say what happened.
@@ -1881,6 +2056,7 @@ int main(int argc, char** argv) {
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
             std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--config FILE] [--no-update] [--version]\n"
+                                 "           [--open-preset FILE]... [--share-preset FILE] [FILE.odopreset]...\n"
                                  "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
@@ -1964,6 +2140,13 @@ int main(int argc, char** argv) {
     app.persist = persist;
     if (app.persist && app.blockGestures) app.gestureNote = gestures::set(true);   // and brings the extension up to date
     app.saveConfig();
+    for (const auto& p : openPresets) { app.openPresetFile(p); std::printf("odo: %s\n", app.status.c_str()); }
+    if (sharePreset) {
+        bool ok = app.savePresetFile(app.presetName, sharePreset);
+        std::printf("odo: %s\n", app.status.c_str());
+        app.shutdown(); SDL_Quit();
+        return ok ? 0 : 1;
+    }
 
     if (selftestOut) { int rc = selftest(app, selftestOut, test); app.shutdown(); SDL_Quit(); return rc; }
     bool running = true;

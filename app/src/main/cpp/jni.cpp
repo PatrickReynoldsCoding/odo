@@ -5,6 +5,7 @@
 #include <string>
 #include "Synth.h"
 #include "mpe/package.h"
+#include "mpe/preset.h"
 
 static Synth& synth() { static Synth s; return s; }
 
@@ -271,4 +272,60 @@ FN(jdouble, nativeRailToFraction)(JNIEnv*, jobject, jint h, jint index, jdouble 
 }
 FN(jdouble, nativeRailChipValue)(JNIEnv*, jobject, jint h, jint index, jint k) {
     return mpe::rail::chipValue(railSetting(h, index), k);
+}
+
+// ---- preset files (PRESET_FORMAT.md, mpe::preset) ---------------------------------------------
+// Kotlin knows a controller package as "pkg:<id>" and a sound by its id from before packages (its
+// first alias, "strings/cello"); a file has the package ids. As UTF-8 bytes both ways: a name may
+// have characters NewStringUTF's modified UTF-8 cannot take.
+
+static std::string bytesIn(JNIEnv* env, jbyteArray a) {
+    std::string s(size_t(env->GetArrayLength(a)), '\0');
+    env->GetByteArrayRegion(a, 0, jsize(s.size()), reinterpret_cast<jbyte*>(s.data()));
+    return s;
+}
+static jbyteArray bytesOut(JNIEnv* env, const std::string& s) {
+    jbyteArray a = env->NewByteArray(jsize(s.size()));
+    env->SetByteArrayRegion(a, 0, jsize(s.size()), reinterpret_cast<const jbyte*>(s.data()));
+    return a;
+}
+static std::string soundForFile(const std::string& id) {
+    int i = mpe::findInstrument(id.c_str());
+    return i >= 0 ? mpe::instrumentAt(i).id : id;
+}
+static std::string soundForApp(const std::string& id) {
+    int i = mpe::findInstrument(id.c_str());
+    if (i < 0) return id;
+    const mpe::InstrumentInfo& in = mpe::instrumentAt(i);
+    return in.aliases.empty() ? in.id : in.aliases[0];
+}
+
+// The app's preset, in the file's shape (Kotlin's ids), to the file's text; "" if it is not one.
+FN(jbyteArray, nativePresetWrite)(JNIEnv* env, jobject, jbyteArray json) {
+    mpe::preset::Preset p;
+    if (!mpe::preset::parse(bytesIn(env, json), p)) return bytesOut(env, "");
+    for (auto& s : p.sides) {
+        if (s.controller.compare(0, 4, "pkg:") == 0) s.controller.erase(0, 4);
+        for (auto& q : s.parts) q.sound = soundForFile(q.sound);
+    }
+    return bytesOut(env, mpe::preset::write(p));
+}
+
+// A file's text to the same shape with Kotlin's ids; or "!" and why it can't be read.
+FN(jbyteArray, nativePresetRead)(JNIEnv* env, jobject, jbyteArray text) {
+    mpe::preset::Preset p;
+    std::string err;
+    if (!mpe::preset::parse(bytesIn(env, text), p, &err)) return bytesOut(env, "!" + err);
+    for (auto& s : p.sides) {
+        if (!s.controller.empty() && s.controller != "midi") s.controller = "pkg:" + s.controller;
+        for (auto& q : s.parts) q.sound = soundForApp(q.sound);
+    }
+    return bytesOut(env, mpe::preset::write(p));
+}
+
+// The file name for a preset of this name.
+FN(jbyteArray, nativePresetFileName)(JNIEnv* env, jobject, jbyteArray name) {
+    mpe::preset::Preset p;
+    p.name = bytesIn(env, name);
+    return bytesOut(env, mpe::preset::fileName(p));
 }

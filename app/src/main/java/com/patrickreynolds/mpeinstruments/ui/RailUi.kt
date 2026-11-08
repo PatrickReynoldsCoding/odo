@@ -305,6 +305,17 @@ private fun PresetsPanel() {
     PRow("+ Keep what is playing as a new preset") {
         AppState.newPreset(if (on?.builtIn == true) current else AppState.soundName()); renaming = false; confirmDelete = false
     }
+    // As a file, to another odo (PRESET_FORMAT.md): the same rows as odo for computers'.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val openFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) com.patrickreynolds.mpeinstruments.PresetFiles.open(context, uri)
+    }
+    PRow(if (current.isEmpty()) "Share what is playing as a file…" else "Share “$current” as a file…") {
+        com.patrickreynolds.mpeinstruments.PresetFiles.share(context); renaming = false; confirmDelete = false
+    }
+    PRow("Open a preset file…") { openFile.launch(arrayOf("*/*")); renaming = false; confirmDelete = false }
+    com.patrickreynolds.mpeinstruments.PresetFiles.note.takeIf { it.isNotEmpty() }?.let { PNote(it) }
     if (on != null && on.builtIn) {
         PRow("Copy “${on.name}” to yours") { AppState.duplicate(on) }
     } else if (on != null) {

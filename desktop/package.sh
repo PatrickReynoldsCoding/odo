@@ -40,6 +40,9 @@ Keys:     Tab hides the rail, F11 full screen, Left/Right change the sound, Esc 
 Rail:     the preset, split, controller and sound at the top, each opening its picker; then the
           controller's settings by group, each opening a panel. A preset of yours keeps what you
           change while it is on view. The Grid's Touch opens its own panel, with a square to play.
+Presets:  share one as a file (.odopreset) from the preset picker, and open one there, by dropping
+          it on the window, or (after ./install.sh) from your file manager. The same files work
+          in odo on Android.
 Gestures: on GNOME, the rail's Block system gestures keeps three-finger swipes (overview,
           workspaces) off odo while it has focus. It installs a small GNOME Shell extension
           (odo-no-gestures@odo); log out and in once the first time.

@@ -87,6 +87,14 @@ object Native {
     external fun nativeCaptureProgress(): Double
     external fun nativeCaptureSave(path: String): Boolean
 
+    // Preset files (PRESET_FORMAT.md): mpe::preset reads and writes them, with this app's ids
+    // ("pkg:" controllers, sounds by their first alias) changed to and from the files'. UTF-8 bytes.
+    /** The app's preset in the file's shape to the file's text; empty if it isn't one. */
+    external fun nativePresetWrite(json: ByteArray): ByteArray
+    /** A file's text to the file's shape with the app's ids; or "!" and why it can't be read. */
+    external fun nativePresetRead(text: ByteArray): ByteArray
+    external fun nativePresetFileName(name: ByteArray): ByteArray
+
     data class Instrument(val index: Int, val id: String, val group: String, val name: String, val description: String,
                           val lowHz: Float, val highHz: Float, val sound: String = "",
                           /** A held note keeps sounding (bowed, blown, sung, organs, most synths), or it fades on its own: mpe::sustains. */

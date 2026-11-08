@@ -412,6 +412,97 @@ object AppState {
         savePresets()
     }
 
+    // ---- preset files (PRESET_FORMAT.md), the same as odo for computers' -----------------------
+
+    /**
+     * What Share sends: the preset on view as it plays now; a built-in one for any controller as it
+     * is (its sound alone); with none on view, what plays now named for its sound.
+     */
+    fun presetToShare(): Preset {
+        val on = allPresets.firstOrNull { it.name == presetName }
+        return if (on != null && on.builtIn && on.controller == null && !presetEdited) on
+               else current(presetName.ifEmpty { soundName() })
+    }
+
+    /** [p] as a preset file's text (mpe::preset writes it). */
+    fun presetFileText(p: Preset): String {
+        // A Float as the number it reads as ("0.6", not 0.6000000238418579, its exact double).
+        fun d(f: Float) = f.toString().toDouble()
+        val pf = p.perf
+        val s = p.settings?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val settings = s?.optJSONObject("byId") ?: s ?: JSONObject()
+        val parts = JSONArray()
+        for (part in pf.parts) parts.put(JSONObject().put("sound", part.instrument).put("transpose", part.transpose)
+            .put("volume", d(part.volume)).put("brightness", d(part.brightness)).put("drive", d(part.drive))
+            .put("pressureCurve", d(part.pressureCurve)).put("reverb", d(part.reverb))
+            .put("delay", d(part.delay)).put("release", d(part.release))
+            .put("arp", JSONObject().put("on", part.arp.on).put("order", part.arp.order).put("rate", d(part.arp.rate))
+                .put("gate", d(part.arp.gate)).put("octaves", part.arp.octaves).put("latch", part.arp.latch)))
+        val o = JSONObject().put("format", "odo-preset/1").put("name", p.name)
+            .put("madeBy", "odo ${BuildConfig.VERSION_NAME} (Android)").put("split", 0).put("layered", pf.layered)
+            .put("effects", JSONObject().put("bpm", d(pf.bpm)).put("reverbSize", d(pf.reverbSize))
+                .put("reverbDamp", d(pf.reverbDamp)).put("delayBeats", d(pf.delayBeats))
+                .put("delayFeedback", d(pf.delayFeedback)).put("delayPingPong", pf.delayPingPong))
+            .put("sides", JSONArray().put(JSONObject().put("controller", p.controller ?: "").put("settings", settings).put("parts", parts)))
+        return String(Native.nativePresetWrite(o.toString().toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
+    }
+
+    fun presetFileName(p: Preset) = String(Native.nativePresetFileName(p.name.toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
+
+    /**
+     * A preset file's [text] as a new preset of yours, after the rest, and on view. Its first side
+     * only: a computer's split is its sides, which odo on Android has not. A controller or sound
+     * this phone has not: what plays now plays instead. What happened, in a sentence or two.
+     */
+    fun openPresetFile(text: String): String {
+        val out = String(Native.nativePresetRead(text.toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
+        if (out.startsWith("!")) return out.drop(1)
+        val f = runCatching { JSONObject(out) }.getOrNull() ?: return "This file is not an odo preset."
+        val sides = f.optJSONArray("sides") ?: return "This preset has nothing in it to play."
+        val side = sides.optJSONObject(0) ?: return "This preset has nothing in it to play."
+        val notes = mutableListOf<String>()
+
+        var ctl: String? = side.optString("controller").ifEmpty { null }
+        var settings = side.optJSONObject("settings")
+        if (ctl != null && Controllers.all.none { it.id == ctl }) {
+            notes += "Its controller isn't on this phone: the one in use plays it"
+            ctl = controller.id; settings = null
+        }
+        val c = ctl?.let { Controllers.byId(it) }
+        val s = settings?.let { if (c is com.patrickreynolds.mpeinstruments.controllers.PackageController) JSONObject().put("byId", it) else it }
+
+        var missing = 0
+        val a = side.optJSONArray("parts") ?: JSONArray()
+        val parts = (0 until minOf(a.length(), PARTS)).mapNotNull { k -> a.optJSONObject(k) }.mapIndexed { k, q ->
+            val id = q.optString("sound")
+            val known = instruments.any { it.id == id }
+            if (!known && k < 2) missing++
+            val sound = if (known) id else perf.part(k).instrument
+            // The file's arp says "on"; the app's own JSON (Arp.json) "arp".
+            val arp = q.optJSONObject("arp")?.let { JSONObject(it.toString()).put("arp", it.optBoolean("on")) } ?: Arp().json()
+            if (q.has("volume")) Part.from(q.put("instrument", sound).put("arpeggio", arp))
+            else com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(sound).applyTo(perf.part(k), sound)
+        }.ifEmpty { perf.parts }
+        if (missing > 0) notes += "$missing ${if (missing == 1) "sound isn't" else "sounds aren't"} here: what was playing plays instead"
+
+        val fx = f.optJSONObject("effects")
+        val room = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(parts[0].instrument)
+        val made = Perf(layered = f.optBoolean("layered"), parts = parts,
+            bpm = fx?.optDouble("bpm")?.toFloat() ?: perf.bpm,
+            reverbSize = fx?.optDouble("reverbSize")?.toFloat() ?: room.reverbSize,
+            reverbDamp = fx?.optDouble("reverbDamp")?.toFloat() ?: room.reverbDamp,
+            delayBeats = fx?.optDouble("delayBeats")?.toFloat() ?: perf.delayBeats,
+            delayFeedback = fx?.optDouble("delayFeedback")?.toFloat() ?: perf.delayFeedback,
+            delayPingPong = fx?.optBoolean("delayPingPong") ?: perf.delayPingPong)
+        if (sides.length() > 1) notes += "It splits the screen into ${sides.length()} sides, which odo on a phone doesn't: here is the first"
+
+        val p = Preset(freeName(f.optString("name")), made, controller = ctl, settings = s?.toString())
+        userPresets = userPresets + p
+        savePresets()
+        load(p)
+        return (listOf("Opened “${p.name}”") + notes).joinToString(". ")
+    }
+
     /**
      * Your first presets: a spread of sounds to loop together, on the touch pad (and the touch
      * pad's sound slots of 0.13, which become presets of their own).
