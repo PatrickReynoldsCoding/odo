@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -30,12 +30,13 @@
     },
     {
       "id": "layout",
-      "name": "Notes run",
+      "name": "Mode",
       "type": "choice",
       "options": [
-        "Up the columns",
-        "Along each row",
-        "Your own notes"
+        "Wrap",
+        "Sliding rows",
+        "Custom",
+        "Intervals"
       ],
       "default": 0,
       "group": "Layout"
@@ -441,7 +442,8 @@
       "showIf": {
         "layout": [
           0,
-          2
+          2,
+          3
         ]
       }
     },
@@ -611,7 +613,7 @@
     },
     {
       "id": "noteEdit",
-      "name": "Edit your own notes",
+      "name": "Edit custom notes",
       "type": "switch",
       "default": false,
       "group": "Layout",
@@ -871,6 +873,23 @@
       "default": 100,
       "hidden": true,
       "group": "Touch"
+    },
+    {
+      "id": "interval",
+      "name": "Interval",
+      "type": "choice",
+      "options": [
+        "3rds",
+        "4ths",
+        "5ths",
+        "6ths",
+        "Octaves"
+      ],
+      "default": 2,
+      "group": "Layout",
+      "showIf": {
+        "layout": 3
+      }
     }
   ]
 }

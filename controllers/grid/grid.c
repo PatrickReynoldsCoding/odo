@@ -17,7 +17,10 @@
  * root's octave marked) slides them up and down under the finger, as the touch pad's note strip
  * does. At full size the squares fill the width, edge to edge. Either axis can be flipped.
  *
- * Or, Up each column: the columns are each a scale of their own, climbing up the rows, and each
+ * Modes (as the rail names them, on the landscape screen): Wrap, the notes climbing up each
+ * column and on to the next; Intervals, each row climbing the scale left to right and each row an
+ * interval (3rds to octaves) above the one below; Custom, any square any note. Or Sliding rows:
+ * the rows are each a scale of their own, and each
  * scrolls on its own. A lock (the Lock button, or the rail) keeps them still while you play;
  * unlocked, a drag on a column slides it and plays nothing.
  * Controls can sit in strips either side: Latch, Hold, Bend, Tone. The colours can mark notes
@@ -62,12 +65,14 @@ enum {
     /* Your own notes: the editor open, and the notes (hidden) */
     S_NOTE_EDIT, S_NOTES0,
     /* the loudness at the top of a square (the bottom's is S_DYN_LOW), in % */
-    S_DYN_HIGH = S_NOTES0 + CUST_WORDS, S_COUNT
+    S_DYN_HIGH = S_NOTES0 + CUST_WORDS,
+    /* Intervals: how far apart the rows of notes are */
+    S_INTERVAL, S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
@@ -172,8 +177,12 @@ static int flipped_y(void) { return hv->flip; }
 static int split_on(void) { return set_[S_SPLIT] != 0; }
 /* Up each column: every column runs up the scale on its own, and scrolls on its own (while unlocked). */
 static int columns(void) { return (int)set_[S_LAYOUT] == 1; }
-/* Your own notes: each square the note it was given. */
+/* Custom: each square the note it was given. */
 static int custom(void) { return (int)set_[S_LAYOUT] == 2; }
+/* Intervals: along each row the scale climbs a note at a time (on screen: left to right); each
+   row is the interval above the one below it (on screen: the next row up). */
+static int intervals(void) { return (int)set_[S_LAYOUT] == 3; }
+static const int INTERVAL_SEMIS[5] = {4, 5, 7, 9, 12};      /* 3rds, 4ths, 5ths, 6ths, octaves */
 static int locked(void) { return set_[S_LOCK] != 0; }
 /* The Lock button only means something with the columns. */
 static int side_of(int c) { return c == C_LOCK && !columns() ? SIDE_OFF : (int)set_[S_SIDE0 + c]; }
@@ -199,6 +208,7 @@ static void strip(int where, float x) {
 }
 
 static int index_of(int note);
+static int interval_step(void);
 static void keep(int index, double v);
 
 static void layout(void) {
@@ -246,7 +256,9 @@ static void layout(void) {
         float c = bottom || !have_top ? center[0] : center[1];
         int oct = (int)set_[S_OCTAVE] + (bottom ? 0 : (int)set_[S_TOP_OCTAVE]);
         int target = roundi(c + 12.0f * (float)oct);
-        int mid = columns() ? (int)floorf_(a->shown / 2) : (int)floorf_(a->shown / 2) * cols + cols / 2;
+        int mid = columns() ? (int)floorf_(a->shown / 2)
+                : intervals() ? (int)floorf_(a->shown / 2) + (cols / 2) * interval_step()
+                : (int)floorf_(a->shown / 2) * cols + cols / 2;
         a->kshift = index_of(target) - mid;
     }
     hv = &halves[0];
@@ -295,8 +307,22 @@ static int cust_index(int k) {
 /* Your own notes are kept as the bottom grid has them; the top's are its octave apart. */
 static int top_shift(void) { return half_index() == 1 ? 12 * (int)set_[S_TOP_OCTAVE] : 0; }
 
-/* The note of square k, or -1 for none (Your own notes, outside its 16 rows). */
+/* Intervals: how many notes of the scale (or semitones) apart the rows are. */
+static int interval_step(void) {
+    int i = (int)set_[S_INTERVAL];
+    int semis = INTERVAL_SEMIS[i < 0 || i > 4 ? 2 : i];
+    int s = index_of(key() + semis) - index_of(key());
+    return s < 1 ? 1 : s;
+}
+
+/* The note of square k, or -1 for none (Custom, outside its 16 rows). */
 static int note_of(int k) {
+    if (intervals()) {
+        /* k counts along the upright rows (the screen's columns): its upright row is the place along
+           the screen's row, its column (counted) the screen's row. */
+        int note = note_at(floordiv(k, cols) + floormod(k, cols) * interval_step() + hv->kshift);
+        return note < 0 ? 0 : note > 127 ? 127 : note;
+    }
     if (custom()) {
         int i = cust_index(k);
         if (i < 0) return -1;
@@ -319,6 +345,7 @@ static void clamp_pos(void) {
     for (int h = 0; h < nhalves; h++) {
         hv = &halves[h];
         if (custom()) { float hi = (float)CUST_ROWS - hv->shown; hv->pos = clampf(hv->pos, 0, hi > 0 ? hi : 0); }
+        else if (intervals()) clamp_one(&hv->pos, 1);
         else if (!columns()) clamp_one(&hv->pos, cols);
         else for (int c = 0; c < cols; c++) clamp_one(&hv->colpos[c], 1);
     }
@@ -1411,7 +1438,7 @@ static void draw_bar(const Theme* th) {
     int r0 = (int)floorf_(hv->pos) - 1, r1 = (int)floorf_(hv->pos + hv->shown) + 1;
     for (int r = r0; r <= r1; r++) {
         int root = -1;
-        for (int c = 0; c < cols; c++) { int note = note_of(r * cols + c); if (note >= 0 && floormod(note - key(), 12) == 0) { root = note; break; } }
+        for (int c = 0; c < (intervals() ? 1 : cols); c++) { int note = note_of(r * cols + c); if (note >= 0 && floormod(note - key(), 12) == 0) { root = note; break; } }
         if (root < 0) continue;
         float y = row_top(r, hv->pos) + cell / 2;
         if (y < hv->top + 10 || y > hv->bot - 10) continue;

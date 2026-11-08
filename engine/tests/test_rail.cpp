@@ -186,10 +186,10 @@ static void grid() {
     CHECK(noHidden && !find(rs, "notes0") && !find(rs, "bendSnap") && !find(rs, "dynamics"), "no hidden setting is on the rail");
     size_t shown = 0, ruledOut = 0;
     for (size_t i = 0; i < ss.size(); i++) if (!ss[i]["hidden"].boolean()) { shown++; ruledOut += !rail::shown(m, ss[i], v); }
-    CHECK(rs.size() == shown - ruledOut && ruledOut == 10, "every other one is, but the 10 its mode rules out (%zu shown)", rs.size());
+    CHECK(rs.size() == shown - ruledOut && ruledOut == 11, "every other one is, but the 11 its mode rules out (%zu shown)", rs.size());
     int counted = 0;
     for (auto& g : gs) counted += g.hiddenNow;
-    CHECK(counted == 10, "the groups count what their modes hide (%d)", counted);
+    CHECK(counted == 11, "the groups count what their modes hide (%d)", counted);
     for (auto& r : rs) if (r.id != ss[r.index]["id"].str()) { CHECK(false, "%s's index is wrong", r.id.c_str()); }
     auto cols = find(rs, "cols");
     CHECK(cols && cols->widget == Widget::Chips && cols->choices.size() == 7 && cols->chosen == 1 && cols->display == "3",
@@ -210,7 +210,15 @@ static void grid() {
     CHECK(split && split->widget == Widget::Switch && split->display == "Off" && split->group == "Second grid", "Second grid: a switch, Off");
     auto key = find(rs, "key");
     CHECK(key && key->widget == Widget::Chips && key->choices.size() == 12 && key->display == "C" && key->group == "Notes", "Key: 12 chips, C");
-    CHECK(rail::stepped(ss[size_t(1)], 2, 1) == 0, "Notes run: on from the last (Your own notes) wraps");
+    CHECK(rail::stepped(ss[size_t(1)], 3, 1) == 0, "Mode: on from the last (Intervals) wraps");
+    {
+        auto vi = v;
+        CHECK(!find(rail::rows(m, vi), "interval"), "Wrap: no interval");
+        vi[idx(m, "layout")] = 3;
+        auto ri = rail::rows(m, vi);
+        auto iv = find(ri, "interval");
+        CHECK(iv && iv->display == "5ths" && iv->choices.size() == 5 && find(ri, "scrollBar"), "Intervals: the interval (5ths) and the scroll bar");
+    }
     // The modes: what each brings in.
     CHECK(find(rs, "scrollBar") && !find(rs, "scrollLock") && !find(rs, "sideLock") && !find(rs, "noteEdit"), "Up the columns: the scroll bar, no lock, no notes editor");
     auto vc = v;
