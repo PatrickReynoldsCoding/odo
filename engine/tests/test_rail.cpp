@@ -186,10 +186,10 @@ static void grid() {
     CHECK(noHidden && !find(rs, "notes0") && !find(rs, "bendSnap") && !find(rs, "dynamics"), "no hidden setting is on the rail");
     size_t shown = 0, ruledOut = 0;
     for (size_t i = 0; i < ss.size(); i++) if (!ss[i]["hidden"].boolean()) { shown++; ruledOut += !rail::shown(m, ss[i], v); }
-    CHECK(rs.size() == shown - ruledOut && ruledOut == 12, "every other one is, but the 12 its mode rules out (%zu shown)", rs.size());
+    CHECK(rs.size() == shown - ruledOut && ruledOut == 14, "every other one is, but the 14 its mode rules out (%zu shown)", rs.size());
     int counted = 0;
     for (auto& g : gs) counted += g.hiddenNow;
-    CHECK(counted == 12, "the groups count what their modes hide (%d)", counted);
+    CHECK(counted == 14, "the groups count what their modes hide (%d)", counted);
     for (auto& r : rs) if (r.id != ss[r.index]["id"].str()) { CHECK(false, "%s's index is wrong", r.id.c_str()); }
     auto cols = find(rs, "cols");
     CHECK(cols && cols->widget == Widget::Chips && cols->choices.size() == 7 && cols->chosen == 1 && cols->display == "3",

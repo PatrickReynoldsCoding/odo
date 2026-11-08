@@ -71,12 +71,14 @@ enum {
     /* left/right in a square sets the tone (up/down, the dynamics: S_IN_DYN) */
     S_IN_TONE,
     /* Slide between notes: the glide from one square's note to the next, 0 (each a new note) to 1 */
-    S_GLIDE, S_COUNT
+    S_GLIDE,
+    /* which ways it glides (on screen); the other way, the note jumps to the next square's */
+    S_GLIDE_LR, S_GLIDE_UD, S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
@@ -654,10 +656,10 @@ static void glide_to(Finger* f, float x, float y) {
         float semis = 0;
         /* across the upright grid (on screen: up and down): the square beside it */
         int across = beside(n, du >= 0 ? 1 : -1);
-        if (note_of(across) >= 0) semis += glide_curve(absf(du), g) * (float)(note_of(across) - f->note);
+        if (set_[S_GLIDE_UD] != 0 && note_of(across) >= 0) semis += glide_curve(absf(du), g) * (float)(note_of(across) - f->note);
         /* up and down the upright grid (on screen: left and right): the next row */
         int row = n + ((dv >= 0) != (flipped_y() != 0) ? -cols : cols);
-        if (note_of(row) >= 0) semis += glide_curve(absf(dv), g) * (float)(note_of(row) - f->note);
+        if (set_[S_GLIDE_LR] != 0 && note_of(row) >= 0) semis += glide_curve(absf(dv), g) * (float)(note_of(row) - f->note);
         f->glide = semis;
     }
     hv = was;
@@ -960,7 +962,7 @@ static void draw_sides(const Theme* th) {
    round it is where sliding starts. Below: what moving inside a square does, what sliding out each
    way does (how much, how readily, which way is more; bend's range and snap), and vibrato, with
    how readily a wiggle is taken for it. Scrolled by dragging its background. */
-enum { K_DONE, K_SLIDE, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL };
+enum { K_DONE, K_SLIDE, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL, K_GLIDE_WAY };
 typedef struct { float x, y, w, h; int kind, arg; } Hit;
 #define MAX_HITS 64
 static Hit hits[MAX_HITS];
@@ -1200,6 +1202,13 @@ static void ed_draw(const Theme* th) {
                                                                                    : "Sliding between notes: out of a square, the next one plays.");
             y += 22;
             y = slider(x, y, cw, SL_GLIDE, th);
+            if (set_[S_GLIDE] > 0.001) {
+                int lr = set_[S_GLIDE_LR] != 0, ud = set_[S_GLIDE_UD] != 0;
+                float hw = (cw - 6) / 2;
+                chip(x, y, hw, 30, lr ? "Glide left/right" : "Left/right: jump", lr, th, K_GLIDE_WAY, 0);
+                chip(x + hw + 6, y, hw, 30, ud ? "Glide up/down" : "Up/down: jump", ud, th, K_GLIDE_WAY, 1);
+                y += 38;
+            }
         } else {
             y = section(x, y, "SLIDING OUT, PAST THE LINE", th);
             static const char* AXIS[2] = {"Left/right", "Up/down"};
@@ -1278,6 +1287,7 @@ static void ed_touch(int id, int phase, float x, float y) {
         case K_SLIDER: ed_slider = h->arg; slider_to(h->arg, x); break;
         case K_RANGE: ed_thumb = -1; range_to(x); break;
         case K_DYN_FULL: keep(S_DYN, 1); resend_all(); break;
+        case K_GLIDE_WAY: { int s = h->arg ? S_GLIDE_UD : S_GLIDE_LR; keep(s, set_[s] != 0 ? 0 : 1); break; }
         }
         dirty = 1;
         return;
