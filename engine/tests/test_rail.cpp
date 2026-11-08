@@ -230,7 +230,7 @@ static void grid() {
     std::string j = rail::toJson(gs);
     CHECK(j.find("\"panel\":true") != std::string::npos && j.find("\"hiddenNow\":") != std::string::npos, "toJson() carries panel and hiddenNow");
     // A hidden setting still steps and shows, for an app that shows it elsewhere.
-    CHECK(rail::display(ss[idx(m, "strikeRangeDb")], 24) == "24 dB" && rail::label(ss[idx(m, "strikeRangeDb")]) == "Dynamics range", "Dynamics range: 24 dB");
+    CHECK(rail::display(ss[idx(m, "dynLow")], 30) == "30%" && rail::label(ss[idx(m, "dynHigh")]) == "Loudness at the top of a square", "the loudness range: 30%%, its top's label");
 }
 
 static void tonnetzAndTouchpad() {

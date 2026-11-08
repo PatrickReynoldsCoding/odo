@@ -51,7 +51,7 @@ enum {
     S_COLS, S_LAYOUT, S_LOCK, S_SPLIT, S_SPLIT_SIZE, S_TOP_WAY, S_TOP_NOTES, S_TOP_SCALE, S_TOP_KEY, S_TOP_OCTAVE, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
     /* Sliding out of a square: up/down (S_ACROSS, the upright grid's across) and left/right
        (S_UPDOWN, its up and down); the Touch panel open; inside a square; vibrato */
-    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_TOUCH_EDIT, S_INSIDE, S_DYN_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
+    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_TOUCH_EDIT, S_INSIDE, S_DYN_LOW, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
     S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_VIB_SENS = S_SIDE0 + 6,
     /* hidden: the Dynamics fader */
     S_DYN,
@@ -60,12 +60,14 @@ enum {
     /* Slide between notes: a finger plays the square under it, whichever, until it lifts */
     S_SLIDE,
     /* Your own notes: the editor open, and the notes (hidden) */
-    S_NOTE_EDIT, S_NOTES0, S_COUNT = S_NOTES0 + CUST_WORDS
+    S_NOTE_EDIT, S_NOTES0,
+    /* the loudness at the top of a square (the bottom's is S_DYN_LOW), in % */
+    S_DYN_HIGH = S_NOTES0 + CUST_WORDS, S_COUNT
 };
-static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
+static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_COUNT - 1] = NOTES_EVEN};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
@@ -393,13 +395,12 @@ static Finger* find(int id) {
 static int nfingers(void) { int c = 0; for (int k = 0; k < MAX_FINGERS; k++) c += fingers[k].used; return c; }
 
 /* ---- a finger in its square ------------------------------------------------------------------ */
-/* The note's own volume for a level: full at the top of a square, the dynamics range below at
-   its foot, evenly in dB between. */
-static float strike_gain(float level) {
-    float range = clampf((float)set_[S_DYN_RANGE], 0, 60);
-    float t = clampf((level - 0.25f) / 0.75f, 0, 1);
-    return expf_(-range * (1 - t) * 0.1151293f);     /* 10^(dB/20): ln 10 / 20 */
-}
+/* The note's own volume for a level: the level itself, so 100% is full. (It also plays as hard as
+   the level, for the instruments that listen to that.) */
+static float strike_gain(float level) { return clampf(level, 0, 1); }
+/* The loudness at the top and the bottom of a square, 0..1, the bottom no louder than the top. */
+static float dyn_high(void) { return clampf((float)set_[S_DYN_HIGH] / 100.0f, 0, 1); }
+static float dyn_low(void) { float l = clampf((float)set_[S_DYN_LOW] / 100.0f, 0, 1), h = dyn_high(); return l < h ? l : h; }
 
 /* How far past the line round a square, in squares, beyond which sliding counts (0: not past it). */
 #define MARGIN 0.15f
@@ -408,11 +409,13 @@ static float past(float v) { return v < -MARGIN ? v + MARGIN : v > 1 + MARGIN ? 
    to 1 bottom. (Upright y up is the screen's right; upright x right is its down.) */
 static float across_of(const Finger* f, float y) { return (f->ry + f->rs - y) / f->rs; }
 static float down_of(const Finger* f, float x) { return (x - f->rx) / f->rs; }
-/* The dynamics at a point: top loud, foot soft (Nothing inside: a firm press). */
+/* The dynamics at a point: from the bottom's loudness at the foot to the top's (Nothing inside:
+   the top's, wherever it is pressed). */
 static float level_at(const Finger* f, float x, float y) {
     (void)y;
-    if (set_[S_INSIDE] != 0) return 0.7f;
-    return 0.25f + 0.75f * (1 - clampf(down_of(f, x), 0, 1));
+    float lo = dyn_low(), hi = dyn_high();
+    if (set_[S_INSIDE] != 0) return hi;
+    return lo + (hi - lo) * (1 - clampf(down_of(f, x), 0, 1));
 }
 static float tone_at(const Finger* f, float y) {
     if (set_[S_INSIDE] != 0) return 0.5f;
@@ -896,11 +899,11 @@ static void draw_sides(const Theme* th) {
    round it is where sliding starts. Below: what moving inside a square does, what sliding out each
    way does (how much, how readily, which way is more; bend's range and snap), and vibrato, with
    how readily a wiggle is taken for it. Scrolled by dragging its background. */
-enum { K_DONE, K_SLIDE, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER };
+enum { K_DONE, K_SLIDE, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL };
 typedef struct { float x, y, w, h; int kind, arg; } Hit;
 #define MAX_HITS 64
 static Hit hits[MAX_HITS];
-static int nhits, ed_finger = -1, ed_slider = -1, ed_dragging, te_axis;
+static int nhits, ed_finger = -1, ed_slider = -1, ed_dragging, te_axis, ed_thumb = -1;   /* ed_thumb: the loudness range's end being dragged */
 static float ed_scroll, ed_from, ed_scroll0, ed_room, ed_content;
 static float te_x = -1, te_y, te_s;     /* the square to play, on the surface (te_x < 0: not shown) */
 
@@ -910,9 +913,8 @@ static const char* VIB_NAME[4] = {"Off", "Light", "Normal", "Wide"};
 
 /* The sliders: the setting each moves, its range and step, and how its value reads. */
 typedef struct { int index; float min, max, step; const char* label; int kind; } Slider;   /* kind 1 %, 2 dB */
-enum { SL_DYN_RANGE, SL_AX_AMOUNT, SL_AX_SENS, SL_UD_AMOUNT, SL_UD_SENS, SL_BEND_SNAP, SL_VIB_SENS, SL_COUNT };
+enum { SL_AX_AMOUNT, SL_AX_SENS, SL_UD_AMOUNT, SL_UD_SENS, SL_BEND_SNAP, SL_VIB_SENS, SL_COUNT };
 static const Slider SLIDERS[SL_COUNT] = {
-    {S_DYN_RANGE, 0, 60, 1, "Softest (bottom) below loudest (top)", 2},
     {S_AX_AMOUNT, 0, 100, 5, "Strength", 1}, {S_AX_SENS, 25, 400, 5, "Sensitivity", 1},
     {S_UD_AMOUNT, 0, 100, 5, "Strength", 1}, {S_UD_SENS, 25, 400, 5, "Sensitivity", 1},
     {S_BEND_SNAP, 0, 100, 5, "Snap to semitones", 1}, {S_VIB_SENS, 25, 400, 5, "Wiggle sensitivity", 1},
@@ -968,6 +970,38 @@ static void slider_to(int id, float x) {
         float v = sl->min + t * (sl->max - sl->min);
         v = sl->min + (float)roundi((v - sl->min) / sl->step) * sl->step;
         if ((double)v != set_[sl->index]) keep(sl->index, v);
+        return;
+    }
+}
+
+/* The loudness range: one track, a handle for the bottom of a square and one for its top. */
+static float range_slider(float x, float y, float w, const Theme* th) {
+    unsigned ink = eink ? BLACK : th->light;
+    float lo = dyn_low(), hi = dyn_high();
+    char a[40], b[40];
+    put(put_int(put(a, "Bottom of a square "), roundi(lo * 100), 0), "%");
+    put(put_int(put(b, "Top "), roundi(hi * 100), 0), "%");
+    mesh_text(x, y + 13, 11, ink, MESH_TEXT_BOLD, a);
+    mesh_text(x + w, y + 13, 11, ink, MESH_TEXT_RIGHT | MESH_TEXT_BOLD, b);
+    float ty = y + 30;
+    mesh_rect(x, ty - 3, w, 6, 3, mesh_alpha(ink, 0.25f), 0, 0);
+    mesh_rect(x + w * lo, ty - 3, w * (hi - lo), 6, 3, eink ? BLACK : mesh_alpha(ink, 0.8f), 0, 0);
+    mesh_circle(x + w * lo, ty, 9, eink ? WHITE : th->background, eink ? BLACK : th->hot, 2.5f);
+    mesh_circle(x + w * hi, ty, 9, eink ? BLACK : th->hot, eink ? WHITE : th->background, 2);
+    mesh_text(x, ty + 22, 10, mesh_alpha(ink, 0.6f), 0, "silent");
+    mesh_text(x + w, ty + 22, 10, mesh_alpha(ink, 0.6f), MESH_TEXT_RIGHT, "full");
+    hit(x - 10, y, w + 20, 46, K_RANGE, 0);
+    return y + 62;
+}
+
+/* The loudness range's handle being dragged to x: the nearer one when it was pressed. */
+static void range_to(float x) {
+    for (int k = 0; k < nhits; k++) if (hits[k].kind == K_RANGE) {
+        float w = hits[k].w - 20, t = clampf((x - (hits[k].x + 10)) / w, 0, 1);
+        double v = (double)(roundi(t * 20) * 5);
+        if (ed_thumb < 0) ed_thumb = absf((float)v - (float)set_[S_DYN_LOW]) <= absf((float)v - (float)set_[S_DYN_HIGH]) && v <= set_[S_DYN_HIGH] ? 0 : 1;
+        if (ed_thumb == 0) { if (v > set_[S_DYN_HIGH]) v = set_[S_DYN_HIGH]; if (v != set_[S_DYN_LOW]) keep(S_DYN_LOW, v); }
+        else { if (v < set_[S_DYN_LOW]) v = set_[S_DYN_LOW]; if (v != set_[S_DYN_HIGH]) keep(S_DYN_HIGH, v); }
         return;
     }
 }
@@ -1033,11 +1067,15 @@ static float demo_part(float x, float y, float cw, const Theme* th) {
     }
     mesh_rect(sx, sy, s, s, s * 0.08f, 0, out && !eink ? th->hot : mesh_alpha(ink, 0.8f), 2);
     if (live) {
-        mesh_text(sx + s / 2, sy + 14, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, "loud");
-        mesh_text(sx + s / 2, sy + s - 6, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, "soft");
+        char top[16], bot[16];
+        put(put_int(top, roundi(dyn_high() * 100), 0), "%");
+        put(put_int(bot, roundi(dyn_low() * 100), 0), "%");
+        mesh_text(sx + s / 2, sy + 14, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, top);
+        mesh_text(sx + s / 2, sy + s - 6, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, bot);
         mesh_text(sx + 6, sy + s / 2 + 4, 10, mesh_alpha(ink, 0.8f), 0, "dark");
         mesh_text(sx + s - 6, sy + s / 2 + 4, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_RIGHT, "bright");
     } else mesh_text(sx + s / 2, sy + s / 2 + 4, 11, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER, "press to play");
+    (void)live;
     te_x = sx; te_y = sy; te_s = s;
     float y2 = sy + s + m + gap_ + ah + 10;
     if (f) {
@@ -1081,7 +1119,15 @@ static void ed_draw(const Theme* th) {
         y = section(x, y, "INSIDE A SQUARE", th);
         static const char* INSIDE[2] = {"Dynamics and tone", "Nothing"};
         y = chips(x, y, cw, INSIDE, 2, (int)set_[S_INSIDE], th, K_INSIDE, 0);
-        if (set_[S_INSIDE] == 0) y = slider(x, y, cw, SL_DYN_RANGE, th);
+        y = range_slider(x, y, cw, th);
+        /* The Dynamics fader (an expression pedal over every note) stays where it was left: say so
+           when it is turned down, as everything is quieter for it. */
+        if (set_[S_DYN] < 0.99) {
+            char d[64];
+            put(put_int(put(d, "The Dynamics fader is at "), roundi((float)set_[S_DYN] * 100), 0), "%: set it to 100%");
+            chip(x, y, cw, 30, d, 0, th, K_DYN_FULL, 0);
+            y += 38;
+        }
         y = section(x, y, "SLIDING OUT, PAST THE LINE", th);
         static const char* AXIS[2] = {"Left/right", "Up/down"};
         y = chips(x, y, cw, AXIS, 2, te_axis, th, K_AXIS, 0);
@@ -1130,9 +1176,10 @@ static void ed_touch(int id, int phase, float x, float y) {
         return;
     }
     if (phase != MESH_DOWN && id != ed_finger) return;
-    if (phase == MESH_UP || phase == MESH_CANCEL) { ed_finger = -1; ed_slider = -1; ed_dragging = 0; return; }
+    if (phase == MESH_UP || phase == MESH_CANCEL) { ed_finger = -1; ed_slider = -1; ed_thumb = -1; ed_dragging = 0; return; }
     if (phase == MESH_MOVE) {
         if (ed_slider >= 0) { slider_to(ed_slider, x); return; }
+        if (ed_thumb >= 0) { range_to(x); return; }
         if (ed_dragging) {
             float most = ed_content - ed_room;
             ed_scroll = clampf(ed_scroll0 + (ed_from - y), 0, most > 0 ? most : 0);
@@ -1155,6 +1202,8 @@ static void ed_touch(int id, int phase, float x, float y) {
         case K_BRANGE: keep(S_BEND_RANGE, h->arg); break;
         case K_VIB: keep(S_VIBRATO, h->arg); break;
         case K_SLIDER: ed_slider = h->arg; slider_to(h->arg, x); break;
+        case K_RANGE: ed_thumb = -1; range_to(x); break;
+        case K_DYN_FULL: keep(S_DYN, 1); resend_all(); break;
         }
         dirty = 1;
         return;

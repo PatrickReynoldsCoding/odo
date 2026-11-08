@@ -233,6 +233,7 @@ struct App {
         savedFullscreen = j["fullscreen"].boolean();
         eink = j["eink"].boolean();
         blockGestures = j["blockGestures"].boolean();
+        masterVolume = std::clamp(float(j["volume"].num(1)), 0.f, 2.f);
         presetName = j["preset"].str();
         const mpe::Json& ps = j["presets"];
         for (size_t i = 0; i < ps.size(); i++) {
@@ -286,6 +287,7 @@ struct App {
         f << "],\n  \"railHidden\": " << (railHidden ? "true" : "false")
           << ",\n  \"eink\": " << (eink ? "true" : "false")
           << ",\n  \"blockGestures\": " << (blockGestures ? "true" : "false")
+          << ",\n  \"volume\": " << masterVolume
           << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
           << ",\n  \"controllers\": {";
         bool first = true;
@@ -326,6 +328,14 @@ struct App {
     void setFullscreen(bool on) { SDL_SetWindowFullscreen(window, on); saveConfig(); }
     bool fullscreen() const { return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0; }
     bool railHidden = false, eink = false, logMidi = false;
+
+    // The master volume, 0 to 2 (200%): 1 is the engine's usual level (0.8 into its soft limiter).
+    float masterVolume = 1;
+    void setMasterVolume(float v, bool save) {
+        masterVolume = std::clamp(v, 0.f, 2.f);
+        engine->setVolume(0.8f * masterVolume);
+        if (save) saveConfig();
+    }
 
     // Block system gestures (gestures.h): on, and what to tell the user about it ("" when it works).
     bool blockGestures = false;
@@ -920,7 +930,7 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide };
+    enum Act { aNone, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1059,6 +1069,10 @@ struct App {
             if (!any) note("No sound matches \xE2\x80\x9C" + search + "\xE2\x80\x9D.");
         } else if (panelKey == kAppKey) {
             p.title = "App"; p.sub = "For all of odo, not kept in presets";
+            p.items.push_back({PItem::Label, "Volume", std::to_string(int(std::lround(masterVolume * 100))) + "%", x, y, in, 40}); y += 40;
+            PItem v{PItem::Slider, "", "", x + 9, y, in - 18, 30};
+            v.act = aVolume; v.frac = masterVolume / 2;
+            p.items.push_back(v); y += 40;
             p.items.push_back({PItem::Label, "Look", eink ? "E-ink" : "Dark", x, y, in, 40}); y += 42;
             chips({"Dark", "E-ink"}, eink ? 1 : 0, aLook, 0);
             if (gestures::supported()) {
@@ -1181,10 +1195,11 @@ struct App {
     }
 
     // A slider in the panel under x: its setting at that place.
-    struct Slide { int setting = -1; float x = 0, w = 0; } slide;
+    struct Slide { int setting = -1; float x = 0, w = 0; bool master = false; } slide;
     void panelSlide(float x, bool save) {
-        if (slide.setting < 0 || slide.w <= 0) return;
+        if ((slide.setting < 0 && !slide.master) || slide.w <= 0) return;
         double t = std::clamp(double(x - slide.x) / double(slide.w), 0.0, 1.0);
+        if (slide.master) { setMasterVolume(float(std::round(t * 40) / 20), save); return; }   // 5% steps
         setSetting(size_t(slide.setting), mpe::rail::fromFraction(settingOf(size_t(slide.setting)), t), save);
     }
 
@@ -1248,7 +1263,7 @@ struct App {
                 for (const PItem& it : p.items) {
                     float iy = p.top + it.y - panelScroll;
                     if (it.kind != PItem::Slider || x < it.x - 10 || x >= it.x + it.w + 10 || y < iy - 6 || y >= iy + it.h + 6) continue;
-                    slide = Slide{it.arg, it.x, it.w};
+                    slide = Slide{it.arg, it.x, it.w, it.act == aVolume};
                     press.sliding = press.dragged = true;
                     panelSlide(x, false);
                     break;
@@ -1528,7 +1543,7 @@ struct App {
                     if (open) draw::fillRect(renderer, b.x, y, b.w, b.h, p.eink ? text : key, 10);
                     draw::Color nc = open ? (p.eink ? bg : accent) : text, sc = open && p.eink ? bg : dim;
                     draw::text(renderer, b.x + 12, y + 21, 14, nc, "App", 0, true);
-                    std::string s = std::string(eink ? "E-ink" : "Dark") + (gestures::supported() ? std::string(" \xC2\xB7 gestures ") + (blockGestures ? "blocked" : "allowed") : "");
+                    std::string s = "Volume " + std::to_string(int(std::lround(masterVolume * 100))) + "% \xC2\xB7 " + std::string(eink ? "E-ink" : "Dark") + (gestures::supported() ? std::string(" \xC2\xB7 gestures ") + (blockGestures ? "blocked" : "allowed") : "");
                     draw::text(renderer, b.x + 12, y + 38, 12, sc, draw::fit(s, 12, b.w - 40));
                     chev(b.x + b.w - 12, y + b.h / 2, sc);
                     break;
@@ -1871,7 +1886,7 @@ int main(int argc, char** argv) {
     std::printf("odo: %zu instruments, %zu controllers\n", app.lib.instruments.size(), app.lib.controllers.size());
 
     app.engine = std::make_unique<mpe::Engine>(kRate);
-    app.engine->setVolume(0.8f);
+    app.engine->setVolume(0.8f);              // until the saved master volume is read
     app.midi = std::make_unique<mpe::MidiInput>(*app.engine);
     app.logMidi = logMidi;
     app.argv = argv;
@@ -1918,6 +1933,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "odo: no controller %s in the library\n", cid.c_str());
     }
     if (einkArg) app.eink = true;
+    app.setMasterVolume(app.masterVolume, false);
     app.active = selftestOut ? 0 : app.savedActive;
     app.setSplit(splitArg >= 0 ? splitArg : app.savedSplit);
     for (const auto& ps : presetSettings) {

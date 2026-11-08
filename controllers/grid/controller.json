@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -332,13 +332,13 @@
       "group": "Touch"
     },
     {
-      "id": "strikeRangeDb",
-      "name": "Dynamics range (dB)",
+      "id": "dynLow",
+      "name": "Loudness at the bottom of a square (%)",
       "type": "number",
       "min": 0,
-      "max": 60,
-      "step": 1,
-      "default": 24,
+      "max": 100,
+      "step": 5,
+      "default": 30,
       "hidden": true,
       "group": "Touch"
     },
@@ -860,6 +860,17 @@
       "default": 281474976710655,
       "hidden": true,
       "group": "Layout"
+    },
+    {
+      "id": "dynHigh",
+      "name": "Loudness at the top of a square (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
     }
   ]
 }
