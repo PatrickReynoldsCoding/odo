@@ -15,7 +15,7 @@ UTF-8 JSON, at most 1 MB. MIME type `application/vnd.odo.preset+json`.
 
 ```json
 {
-  "format": "odo-preset/1",
+  "format": "odo-preset/1.1",
   "name": "Bass below, lead above",
   "madeBy": "odo 0.29.0 (Android)",
   "split": 0,
@@ -27,7 +27,7 @@ UTF-8 JSON, at most 1 MB. MIME type `application/vnd.odo.preset+json`.
       "controller": "patrickreynolds/grid",
       "settings": {"split": 1, "slide": 0},
       "parts": [
-        {"sound": "patrickreynolds/bass-guitar", "transpose": 0, "volume": 1, "brightness": 1,
+        {"sound": "patrickreynolds/bass-guitar", "version": "1.0.0", "transpose": 0, "volume": 1, "brightness": 1,
          "drive": 0, "pressureCurve": 1, "reverb": 0.15, "delay": 0, "release": 0,
          "arp": {"on": false, "order": 0, "rate": 4, "gate": 0.6, "octaves": 1, "latch": false}},
         {"sound": "patrickreynolds/lead"}
@@ -50,6 +50,7 @@ UTF-8 JSON, at most 1 MB. MIME type `application/vnd.odo.preset+json`.
 | `sides[].settings` | Setting id to value: numbers, or `true`/`false` for a switch. Settings a controller doesn't have are left out; those the file doesn't name stay as they are. |
 | `sides[].parts[]` | 0 to 4. A split controller's second part (the Grid's second grid) is its second. |
 | `parts[].sound` | The instrument package's id (`patrickreynolds/cello`, not the older `strings/cello`). |
+| `parts[].version` | (1.1) The sound's version the preset was made with. Both apps write it. If that version is here, it plays; if not, the newest plays and the app says so. Left out: the newest. |
 | `parts[].*` | How the part plays. A part with only `sound` plays with that sound's own effects. |
 
 Values out of range are clamped. A value of the wrong type takes the default.

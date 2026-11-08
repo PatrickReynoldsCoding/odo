@@ -1,5 +1,5 @@
 find_package(Threads REQUIRED)
-foreach(t test_clean test_engine test_replay test_threads test_perform test_phone test_looper test_sounds test_preset)
+foreach(t test_clean test_engine test_replay test_threads test_perform test_phone test_looper test_sounds test_preset test_mix)
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${t}.cpp)
     add_executable(${t} ${t}.cpp)
     target_link_libraries(${t} mpe_engine Threads::Threads)

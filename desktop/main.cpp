@@ -79,6 +79,10 @@ struct Instrument {
     int index = -1;                     // in the engine's table, once compiled
     std::string error;
     std::string pack, group;            // where odo's sound packs put it ("" if none does)
+    // Versions sit side by side (INSTRUMENT_FORMAT.md): an older one is kept to go back to, but
+    // only the newest is listed with the sounds; the sound picker offers the others under Version.
+    bool newest = true;
+    std::string version() const { return pkg->version(); }
     // Whether a held note keeps sounding (bowed, blown, sung, an organ or most synths) or fades on
     // its own however long it is held (struck, plucked: keys, guitars, bells, drums): mpe::sustains,
     // as odo on Android's sound picker tells.
@@ -118,10 +122,27 @@ struct Library {
         }
     }
 
+    // Instrument i's versions, newest first (just i if it has no others).
+    std::vector<int> versions(int i) const {
+        std::vector<int> out;
+        for (size_t k = 0; k < instruments.size(); k++)
+            if (instruments[k].pkg->id() == instruments[size_t(i)].pkg->id()) out.push_back(int(k));
+        std::stable_sort(out.begin(), out.end(), [&](int a, int b) {
+            return mpe::compareVersions(instruments[size_t(a)].version(), instruments[size_t(b)].version()) > 0; });
+        return out;
+    }
+    // How a sound is named in odo's own files: its id, and "@<version>" if it is not the newest.
+    std::string ref(int i) const {
+        const Instrument& in = instruments[size_t(i)];
+        return in.newest ? in.pkg->id() : in.pkg->id() + "@" + in.version();
+    }
+
     void order() {
         std::sort(packs.begin(), packs.end(), [](const PackGroup& a, const PackGroup& b) { return a.order < b.order; });
+        for (size_t i = 0; i < instruments.size(); i++) instruments[i].newest = versions(int(i))[0] == int(i);
         soundOrder.clear();
         std::vector<bool> placed(instruments.size());
+        for (size_t i = 0; i < instruments.size(); i++) placed[i] = !instruments[i].newest;   // an older version: not listed
         for (const PackGroup& pg : packs)
             for (const std::string& id : pg.ids)
                 for (size_t i = 0; i < instruments.size(); i++) {
@@ -135,6 +156,8 @@ struct Library {
         for (size_t i = 0; i < instruments.size(); i++) if (!placed[i]) { rest.push_back(int(i)); instruments[i].pack = "More"; instruments[i].group = "Other"; }
         std::sort(rest.begin(), rest.end(), [&](int a, int b) { return instruments[size_t(a)].pkg->name() < instruments[size_t(b)].pkg->name(); });
         soundOrder.insert(soundOrder.end(), rest.begin(), rest.end());
+        for (size_t i = 0; i < instruments.size(); i++)
+            if (!instruments[i].newest) { const Instrument& n = instruments[size_t(versions(int(i))[0])]; instruments[i].pack = n.pack; instruments[i].group = n.group; }
     }
 
     void scan(const std::string& dir) {
@@ -277,10 +300,10 @@ struct App {
         return lib.controllers.empty() ? "" : lib.controllers[size_t(sides[k].controller)]->id();
     }
     std::string soundId(int k) const {
-        return lib.instruments.empty() ? "" : lib.instruments[size_t(sides[k].sound)].pkg->id();
+        return lib.instruments.empty() ? "" : lib.ref(sides[k].sound);
     }
     std::string sound2Id(int k) const {
-        return lib.instruments.empty() || sides[k].sound2 < 0 ? "" : lib.instruments[size_t(sides[k].sound2)].pkg->id();
+        return lib.instruments.empty() || sides[k].sound2 < 0 ? "" : lib.ref(sides[k].sound2);
     }
     // Where side k keeps its controller's settings.
     std::string settingsKey(int k) const { return k == 0 ? controllerId(0) : controllerId(k) + "#" + std::to_string(k + 1); }
@@ -409,10 +432,14 @@ struct App {
         for (size_t i = 0; i < lib.controllers.size(); i++) if (lib.controllers[i]->id() == id) return int(i);
         return -1;
     }
-    int soundIndex(const std::string& id) const {
+    // A sound by its id (or old id): the newest version; "id@1.0.0": that version.
+    int soundIndex(const std::string& ref) const {
+        size_t at = ref.find('@');
+        std::string id = ref.substr(0, at), version = at == std::string::npos ? "" : ref.substr(at + 1);
         for (size_t i = 0; i < lib.instruments.size(); i++) {
-            const auto& p = *lib.instruments[i].pkg;
-            if (p.id() == id || p.manifest["aliases"][size_t(0)].str() == id) return int(i);
+            const Instrument& in = lib.instruments[i];
+            if (in.pkg->id() != id && in.pkg->manifest["aliases"][size_t(0)].str() != id) continue;
+            if (version.empty() ? in.newest : in.version() == version) return int(i);
         }
         return -1;
     }
@@ -582,9 +609,13 @@ struct App {
                 fs.settings.o.emplace_back(kv.first, v);
             }
             fs.parts = s.parts;
-            auto put = [&](size_t j, const std::string& sound) {
+            // The sound, and its version: in a file, always (a preset plays the version it was made with).
+            auto put = [&](size_t j, const std::string& ref) {
                 if (fs.parts.size() <= j) fs.parts.resize(j + 1);
+                int n = soundIndex(ref);
+                std::string sound = ref.substr(0, ref.find('@')), version = n >= 0 ? lib.instruments[size_t(n)].version() : "";
                 if (fs.parts[j].sound != sound) { fs.parts[j] = mpe::preset::Part(); fs.parts[j].sound = sound; }
+                fs.parts[j].version = version;
             };
             put(0, s.sound);
             if (!s.sound2.empty()) put(1, s.sound2);
@@ -605,7 +636,7 @@ struct App {
         p.layered = f.layered;
         p.hasEffects = f.hasEffects;
         p.effects = f.effects;
-        int missingCtl = 0, missingSound = 0;
+        int missingCtl = 0, missingSound = 0, olderMissing = 0;
         size_t sidesNow = size_t(kSplits[p.split].sides);     // a split's sides; a file may give more
         for (size_t k = 0; k < f.sides.size() && k < sidesNow; k++) {
             const mpe::preset::Side& fs = f.sides[k];
@@ -617,15 +648,20 @@ struct App {
                 s.controller = controllerId(ki);
             }
             s.parts = fs.parts;
-            for (size_t j = 0; j < s.parts.size(); j++) {      // the sounds by their ids here
-                int n = soundIndex(s.parts[j].sound);
-                if (n >= 0) s.parts[j].sound = lib.instruments[size_t(n)].pkg->id();
+            // The sounds by their ids here; the version the file names, if this computer has it, else
+            // the newest (and the note says so).
+            std::vector<int> found(s.parts.size(), -1);
+            for (size_t j = 0; j < s.parts.size(); j++) {
+                mpe::preset::Part& q = s.parts[j];
+                int n = q.version.empty() ? -1 : soundIndex(q.sound + "@" + q.version);
+                if (n < 0 && !q.version.empty() && soundIndex(q.sound) >= 0 && j < 2) olderMissing++;
+                if (n < 0) n = soundIndex(q.sound);
+                found[j] = n;
+                if (n >= 0) { q.sound = lib.instruments[size_t(n)].pkg->id(); q.version = lib.instruments[size_t(n)].version(); }
                 else if (j < 2) missingSound++;
             }
-            int n0 = s.parts.empty() ? -1 : soundIndex(s.parts[0].sound);
-            s.sound = n0 >= 0 ? s.parts[0].sound : soundId(ki);
-            int n1 = s.parts.size() < 2 ? -1 : soundIndex(s.parts[1].sound);
-            s.sound2 = n1 >= 0 ? s.parts[1].sound : "";
+            s.sound = !found.empty() && found[0] >= 0 ? lib.ref(found[0]) : soundId(ki);
+            s.sound2 = found.size() > 1 && found[1] >= 0 ? lib.ref(found[1]) : "";
             for (const auto& kv : fs.settings.o) s.settings[kv.first] = kv.second.num();
             p.sides.push_back(std::move(s));
         }
@@ -637,6 +673,8 @@ struct App {
                                                 : ". Its controllers aren't on this computer: the ones in use play it";
         if (missingSound) note += std::string(". ") + std::to_string(missingSound)
                                 + (missingSound == 1 ? " sound isn't" : " sounds aren't") + " here: what was playing plays instead";
+        if (olderMissing) note += std::string(". ") + std::to_string(olderMissing)
+                                + (olderMissing == 1 ? " sound's version isn't" : " sounds' versions aren't") + " here: the newest plays instead";
         if (f.sides.size() > sidesNow) note += ". Its sides after the " + std::string(sidesNow == 1 ? "first" : sidesNow == 2 ? "second" : sidesNow == 3 ? "third" : "fourth") + " are left out";
         return true;
     }
@@ -898,6 +936,16 @@ struct App {
         saveConfig();
     }
 
+    // The sound after (dir 1) or before (-1) sound n in the sound picker's order (older versions are not in it).
+    int nextSound(int n, int dir) const {
+        const std::vector<int>& o = lib.soundOrder;
+        if (o.empty()) return n;
+        int newest = lib.versions(n)[0];
+        auto it = std::find(o.begin(), o.end(), newest);
+        int at = it == o.end() ? 0 : int(it - o.begin());
+        return o[size_t(((at + dir) % int(o.size()) + int(o.size())) % int(o.size()))];
+    }
+
     void chooseSound(int k, int n) {
         if (lib.instruments.empty()) return;
         n = (n % int(lib.instruments.size()) + int(lib.instruments.size())) % int(lib.instruments.size());
@@ -1101,7 +1149,7 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
+    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1223,10 +1271,23 @@ struct App {
             const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
             p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? 1 : 0)].str() : "Sound";
             p.sub = forSide.empty() ? "Type to find one" : forSide + " \xC2\xB7 type to find one";
+            int chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
+            // The sound's versions, when it has more than one: the newest, and those kept to go back to.
+            if (std::vector<int> vs = lib.versions(chosen); vs.size() > 1) {
+                heading("VERSION");
+                std::vector<std::string> names;
+                int on = 0;
+                for (size_t k = 0; k < vs.size(); k++) {
+                    names.push_back(lib.instruments[size_t(vs[k])].version() + (k == 0 ? " \xC2\xB7 newest" : ""));
+                    if (vs[k] == chosen) on = int(k);
+                }
+                chips(names, on, aVersion, 0, &vs);
+                note(lib.instruments[size_t(chosen)].pkg->name() + ": older versions are kept as they were, to go back to.");
+            }
+            chosen = lib.versions(chosen)[0];                // the list marks the sound, whichever version plays
             p.items.push_back({PItem::Field, search, "Find a sound", x, y, in, 38}); y += 46;
             chips({"All", "Sustained", "Fading"}, soundFilter, aSoundFilter, 0);
             size_t filterChips = p.items.size();
-            int chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
             std::string q = lower(search), pack, group;
             std::vector<std::string> names;
             std::vector<int> ids;
@@ -1363,6 +1424,7 @@ struct App {
                 case aController: chooseController(active, it.arg); break;
                 case aSoundFilter: soundFilter = it.arg2; panelScroll = 0; break;
                 case aSound: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
+                case aVersion: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
                 case aLook: setEink(it.arg2 == 1); break;
                 case aGestures: setBlockGestures(!blockGestures); break;
                 case aPanic: engine->panic(); break;                  // every note stops, as on Android
@@ -1550,8 +1612,8 @@ struct App {
                 }
                 if (e.key.key == SDLK_TAB) setRailHidden(!railHidden);
                 else if (e.key.key == SDLK_F11) setFullscreen(!fullscreen());
-                else if (e.key.key == SDLK_RIGHT) chooseSound(active, cur().sound + 1);
-                else if (e.key.key == SDLK_LEFT) chooseSound(active, cur().sound - 1);
+                else if (e.key.key == SDLK_RIGHT) chooseSound(active, nextSound(cur().sound, 1));
+                else if (e.key.key == SDLK_LEFT) chooseSound(active, nextSound(cur().sound, -1));
                 return;
             default: return;
         }
@@ -1682,7 +1744,7 @@ struct App {
                     bool open = (b.key ? kSound2Key : kSoundKey) == panelKey;
                     const Instrument& s = lib.instruments[size_t(n)];
                     soundBadge(n, b.x + 6, y + 7, 30);
-                    std::string name = s.pkg->name() + (s.index < 0 && s.error.empty() ? "..." : "");
+                    std::string name = s.pkg->name() + (s.newest ? "" : " " + s.version()) + (s.index < 0 && s.error.empty() ? "..." : "");
                     float nx = b.x + 46;
                     if (partsOf(active) > 1 && sd.host) {
                         std::string part = sd.host->manifest()["parts"][size_t(b.key)].str() + " ";
@@ -2115,10 +2177,14 @@ int main(int argc, char** argv) {
         if (cid.empty()) cid = k > 0 && !controllerIds.empty() ? controllerIds[0] : app.savedController[0];
         if (sid.empty()) sid = k > 0 && !soundIds.empty() ? soundIds[0] : app.savedSound[0];
         if (sid.empty()) sid = "patrickreynolds/flute";
-        for (size_t i = 0; i < app.lib.instruments.size(); i++) {
-            const auto& p = *app.lib.instruments[i].pkg;
-            if (p.id() == sid || p.manifest["aliases"][size_t(0)].str() == sid) app.sides[k].sound = int(i);
-            if (!app.savedSound2[k].empty() && p.id() == app.savedSound2[k]) app.sides[k].sound2 = int(i);
+        // "id" or "id@version" (a version kept to go back to); one this library hasn't: the newest.
+        int n = app.soundIndex(sid);
+        if (n < 0) n = app.soundIndex(sid.substr(0, sid.find('@')));
+        if (n >= 0) app.sides[k].sound = n;
+        if (!app.savedSound2[k].empty()) {
+            int n2 = app.soundIndex(app.savedSound2[k]);
+            if (n2 < 0) n2 = app.soundIndex(app.savedSound2[k].substr(0, app.savedSound2[k].find('@')));
+            if (n2 >= 0) app.sides[k].sound2 = n2;
         }
         for (size_t i = 0; i < app.lib.controllers.size(); i++) if (app.lib.controllers[i]->id() == cid) app.sides[k].controller = int(i);
         if (k < int(controllerIds.size()) && (app.lib.controllers.empty() || app.lib.controllers[size_t(app.sides[k].controller)]->id() != cid))

@@ -14,7 +14,7 @@ add_subdirectory(../engine engine)
 
 find_package(SDL3 REQUIRED CONFIG)
 # odo for computers' own version (its releases are tagged desktop-v<version>).
-set(ODO_DESKTOP_VERSION "0.0.28")
+set(ODO_DESKTOP_VERSION "0.0.29")
 # -DODO_TEST_VERSION=0.0.0: an older-numbered build, to try the updater with.
 if(ODO_TEST_VERSION)
   set(ODO_DESKTOP_VERSION "${ODO_TEST_VERSION}")

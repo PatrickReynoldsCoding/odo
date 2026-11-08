@@ -8,7 +8,7 @@
 
 namespace mpe::preset {
 
-constexpr const char* kFormat = "odo-preset/1";   // "odo-preset/<major>": a newer major is refused
+constexpr const char* kFormat = "odo-preset/1.1";   // 1.1: a part may name its sound's version   // "odo-preset/<major>": a newer major is refused
 constexpr const char* kExtension = ".odopreset";
 constexpr const char* kMimeType = "application/vnd.odo.preset+json";
 constexpr size_t kMaxBytes = 1 << 20;             // a preset is a few kB: anything near this is not one
@@ -28,6 +28,7 @@ struct Arp {
 // plays with that sound's own effects (what odo for computers does, which has no part settings).
 struct Part {
     std::string sound;         // the instrument package's id: "patrickreynolds/cello"
+    std::string version;       // the sound's version it plays ("1.0.0"), or "": the newest there is
     bool full = false;
     int transpose = 0;
     double volume = 1, brightness = 1, drive = 0, pressureCurve = 1, reverb = 0.15, delay = 0;

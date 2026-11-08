@@ -147,5 +147,10 @@ every system that compiles it.
    what it is meant to be heard with; the pack manifests no longer carry effects, and odo reads
    them from the instrument, falling back to a pack's only for an instrument that declares none).
    `id`, `version` and `tags` are still taken from file names and folders.
-4. Presets store `id@version`; old ids are read through the aliases (the engine already finds
-   instruments by alias).
+4. ~~Versions side by side~~: done (2026-11-08). In the instruments repo, `tools/pack.py --keep
+   <dsp>` keeps an instrument's version as it is now in `versions/<name>@<version>.odoi`, before
+   its `declare version` is raised; the kept packages are copied beside the new ones and both apps
+   compile them all. `mpe::findInstrument` finds the newest by id, or a version by `id@version`.
+   The sound pickers list only the newest; a sound with older versions gets a Version choice.
+   A preset file names the version in the part (`"version"`, PRESET_FORMAT.md); an app's own
+   settings say nothing for the newest, so they move on to new versions.

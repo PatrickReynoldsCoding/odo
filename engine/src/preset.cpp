@@ -93,6 +93,7 @@ struct Obj {
 Json partJson(const Part& q) {
     Obj o;
     o.str("sound", q.sound);
+    if (!q.version.empty()) o.str("version", q.version);
     if (!q.full) return o.j;
     const Arp& a = q.arp;
     o.num("transpose", q.transpose).num("volume", q.volume).num("brightness", q.brightness).num("drive", q.drive)
@@ -105,7 +106,11 @@ Json partJson(const Part& q) {
 Part partFrom(const Json& q) {
     Part part, d;
     part.sound = q["sound"].str();
-    part.full = q.size() > (q["sound"].type == Json::Null ? 0u : 1u);
+    part.version = q["version"].str();
+    if (part.version.size() > 32 || part.version.find_first_not_of("0123456789.") != std::string::npos) part.version.clear();
+    size_t named = 0;                               // the part's sound and version: the rest is how it plays
+    for (const auto& kv : q.o) named += kv.first == "sound" || kv.first == "version";
+    part.full = q.o.size() > named;
     part.transpose = int(finite(q["transpose"], d.transpose, -60, 60));
     part.volume = finite(q["volume"], d.volume, 0, 4);
     part.brightness = finite(q["brightness"], d.brightness, 0, 4);

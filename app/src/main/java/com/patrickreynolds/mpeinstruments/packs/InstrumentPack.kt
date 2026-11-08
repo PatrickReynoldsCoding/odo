@@ -39,8 +39,9 @@ data class SoundDefaults(
     val pressureCurve: Float = 1f,
     val release: Float = 0f,
 ) {
-    /** A part playing [instrument], with these effects. */
-    fun applyTo(p: Part, instrument: String = p.instrument) = p.copy(instrument = instrument, reverb = reverb, delay = delay,
+    /** A part playing [instrument] (its newest version, if it is another instrument), with these effects. */
+    fun applyTo(p: Part, instrument: String = p.instrument) = p.copy(instrument = instrument,
+        version = if (instrument == p.instrument) p.version else "", reverb = reverb, delay = delay,
         brightness = brightness, drive = drive, pressureCurve = pressureCurve, release = release)
 
     companion object {

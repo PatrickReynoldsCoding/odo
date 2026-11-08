@@ -32,8 +32,19 @@ FN(jstring, nativeInstrumentField)(JNIEnv* env, jobject, jint index, jint field)
                   : field == 2 ? i.name.c_str() : field == 3 ? i.description.c_str()
                   : field == 4 ? i.meta("range")     // field 4: "low high" in Hz, or ""
                   : field == 5 ? i.meta("sound")     // field 5: its own effects, `declare sound "reverb=0.3 ..."`, or ""
+                  : field == 7 ? i.version.c_str()   // 7: its version ("1.1.0"), or ""
+                  : field == 8 ? (mpe::isNewestVersion(index) ? "1" : "0")   // 8: the newest of its versions (older ones are kept to go back to)
                   : mpe::sustains({i.group}, i.aliases.empty() ? i.id : i.aliases[0]) ? "1" : "0";   // 6: it sustains
     return env->NewStringUTF(v ? v : "");
+}
+
+FN(jint, compareVersions)(JNIEnv* env, jobject, jstring a, jstring b) {
+    const char* x = env->GetStringUTFChars(a, nullptr);
+    const char* y = env->GetStringUTFChars(b, nullptr);
+    int r = mpe::compareVersions(x, y);
+    env->ReleaseStringUTFChars(a, x);
+    env->ReleaseStringUTFChars(b, y);
+    return r;
 }
 
 FN(void, nativeSetInstrument)(JNIEnv*, jobject, jint i) { synth().setInstrument(i); }

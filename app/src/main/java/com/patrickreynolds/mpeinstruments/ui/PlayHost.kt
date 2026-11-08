@@ -259,7 +259,7 @@ private fun SoundTile(pane: Pane?, pick: (Int) -> Unit) = Tile(pane is Pane.Soun
             Column(Modifier.padding(start = 10.dp).weight(1f)) {
                 Row {
                     if (n > 1) Text(partLabel(k) + " ", color = TextDim, fontSize = 14.sp, maxLines = 1)
-                    Text(inst?.name ?: "?", color = if (open) PartColors[0] else Fg, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    Text((inst?.name ?: "?") + if (inst != null && !inst.newest) " ${inst.version}" else "", color = if (open) PartColors[0] else Fg, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                          maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 val id = inst?.id ?: ""

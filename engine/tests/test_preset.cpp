@@ -48,6 +48,16 @@ int main() {
     CHECK(!q.sides[0].parts[0].full && near(q.sides[0].parts[0].reverb, 0.15), "a sound alone: not full, defaults");
     CHECK(write(q).find("\"transpose\"") == std::string::npos, "and written back with the sound alone");
 
+    // A sound's version (1.1): kept, and not taken for the part's settings.
+    const char* pinned = R"({"format": "odo-preset/1.1", "name": "Old piano",
+        "sides": [{"parts": [{"sound": "patrickreynolds/piano", "version": "1.0.0"}, {"sound": "patrickreynolds/lead", "version": "../x"}]}]})";
+    CHECK(parse(pinned, q, &err), "a preset naming a sound's version reads (%s)", err.c_str());
+    CHECK(q.sides[0].parts[0].version == "1.0.0" && !q.sides[0].parts[0].full, "the version is kept; a sound and version alone: not full");
+    CHECK(q.sides[0].parts[1].version.empty(), "a version that is not one is left out: the newest plays");
+    CHECK(write(q).find("\"version\": \"1.0.0\"") != std::string::npos || write(q).find("\"version\":\"1.0.0\"") != std::string::npos,
+          "and written back");
+    CHECK(write(q).find("odo-preset/1.1") != std::string::npos, "files are odo-preset/1.1");
+
     // What is not a preset, or is too new.
     CHECK(!parse("not json", q, &err), "not JSON: refused (%s)", err.c_str());
     CHECK(!parse(R"({"name": "x", "sides": [{}]})", q, &err), "no format: refused");

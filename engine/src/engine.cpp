@@ -11,6 +11,9 @@ namespace mpe {
 
 static const int kChannels = 16;      // MPE: channel 0 is the master, 1..15 carry notes
 static const int kMaxBlock = 64;      // control values are refreshed at least this often
+// The output: the mix times the volume and kMasterGain, which leaves room for a chord before the
+// limiter has to turn it down; and the limiter's ceiling (-1 dBFS).
+static const float kMasterGain = 0.5f, kCeiling = 0.89f;
 
 int64_t steadyNowNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -140,6 +143,8 @@ Engine::Engine(int sampleRate)
     lowB_[0] = (1.f - cw) / 2.f / a0; lowB_[1] = (1.f - cw) / a0; lowB_[2] = lowB_[0];
     lowB_[3] = -2.f * cw / a0; lowB_[4] = (1.f - al) / a0;
     lowRel_ = 1.f - std::exp(-1.f / (0.15f * sr_));
+    limHoldN_ = int(0.03f * sr_);                    // longer than the slowest wave's cycle (33 Hz), so the gain does not ripple in it
+    limRise_ = 1.f - std::exp(-1.f / (0.25f * sr_));
 }
 
 Engine::~Engine() {
@@ -777,6 +782,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
     const float vol = volume_.load();
     float mixL[kMaxBlock], mixR[kMaxBlock], partL[kMaxBlock], partR[kMaxBlock];
     float revL[kMaxBlock], revR[kMaxBlock], delL[kMaxBlock], delR[kMaxBlock];
+    float deepest = 1;                               // the limiter's lowest gain in this callback
     int done = 0;
     while (done < frames) {
         const int64_t now = frameCounter_ + done;
@@ -843,8 +849,17 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         std::copy(mixR, mixR + n, liveR);
         for (auto& lp : loops_) lp->process(liveL, liveR, mixL, mixR, n, noteStarted_, perf_.bpm);
         noteStarted_ = false;
-        for (int i = 0; i < n; i++) {                                // soft limiter
-            const float l = std::tanh(mixL[i] * vol * 1.5f) * 0.7f, r = std::tanh(mixR[i] * vol * 1.5f) * 0.7f;
+        for (int i = 0; i < n; i++) {
+            // The mix, with room for many notes (each plays at its full level), then the limiter.
+            float l = mixL[i] * vol * kMasterGain, r = mixR[i] * vol * kMasterGain;
+            const float pk = std::max(std::fabs(l), std::fabs(r));
+            if (pk >= limHeld_) { limHeld_ = pk; limHold_ = limHoldN_; }
+            else if (limHold_ > 0) limHold_--;
+            else limHeld_ = pk + (limHeld_ - pk) * (1.f - limRise_);
+            const float want = limHeld_ > kCeiling ? kCeiling / limHeld_ : 1.f;
+            limGain_ = want < limGain_ ? want : limGain_ + (want - limGain_) * limRise_;
+            deepest = std::min(deepest, limGain_);
+            l = clampf(l * limGain_, -1.f, 1.f); r = clampf(r * limGain_, -1.f, 1.f);
             out[2 * (done + i)] = l;
             out[2 * (done + i) + 1] = r;
             // The low end of what goes to the speaker, two passes of the low-pass (24 dB/octave).
@@ -865,6 +880,8 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
     for (int p = 0; p < kParts; p++) for (int i = 1; i < kChannels; i++) voices += parts_[p].v[i].sounding;
     activeVoices_ = voices;
     frameCounter_ += frames;
+    if (!std::isfinite(limHeld_) || !std::isfinite(limGain_)) { limHeld_ = 0; limGain_ = 1; }
+    limitDb_.store(20.f * std::log10(std::max(deepest, 1e-6f)), std::memory_order_relaxed);
     if (!std::isfinite(lowEnv_)) { lowEnv_ = 0; for (float& z : lowZ_) z = 0; }
     lowDb_.store(10.f * std::log10(lowEnv_ + 1e-12f), std::memory_order_relaxed);
     publish();

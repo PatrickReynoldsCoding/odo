@@ -31,6 +31,7 @@ data class Arp(
 /** One part, a sound and its arp: mirrors mpe::PartConfig. */
 data class Part(
     val instrument: String = "strings/cello",
+    val version: String = "",      // the instrument's version it plays ("1.0.0"); "": the newest
     val transpose: Int = 0,
     val volume: Float = 1f,
     val brightness: Float = 1f,
@@ -42,7 +43,7 @@ data class Part(
     val arp: Arp = Arp(),
 ) {
     fun json() = JSONObject().apply {
-        put("instrument", instrument); put("transpose", transpose)
+        put("instrument", instrument); if (version.isNotEmpty()) put("version", version); put("transpose", transpose)
         put("volume", volume.toDouble()); put("brightness", brightness.toDouble()); put("drive", drive.toDouble())
         put("pressureCurve", pressureCurve.toDouble()); put("reverb", reverb.toDouble()); put("delay", delay.toDouble())
         put("release", release.toDouble()); put("arpeggio", arp.json())
@@ -50,7 +51,7 @@ data class Part(
 
     companion object {
         fun from(o: JSONObject?, d: Part = Part()): Part = if (o == null) d else Part(
-            o.optString("instrument", d.instrument), o.optInt("transpose", d.transpose),
+            o.optString("instrument", d.instrument), o.optString("version", ""), o.optInt("transpose", d.transpose),
             o.optDouble("volume", d.volume.toDouble()).toFloat(), o.optDouble("brightness", d.brightness.toDouble()).toFloat(),
             o.optDouble("drive", d.drive.toDouble()).toFloat(), o.optDouble("pressureCurve", d.pressureCurve.toDouble()).toFloat(),
             o.optDouble("reverb", d.reverb.toDouble()).toFloat(), o.optDouble("delay", d.delay.toDouble()).toFloat(),

@@ -39,7 +39,15 @@ struct InstrumentInfo {
 int instrumentCount();
 const InstrumentInfo& instrumentAt(int index);
 int addInstrument(InstrumentInfo info);             // its index
-int findInstrument(const char* id);                 // by id or alias: index, or -1
+// By id or alias: the newest version there is, or with "@<version>" ("patrickreynolds/cello@1.0.0")
+// that one. Index, or -1.
+int findInstrument(const char* id);
+// Versions sit side by side (INSTRUMENT_FORMAT.md): the instrument's versions, newest first
+// (index's own id; just index if it has no others).
+std::vector<int> instrumentVersions(int index);
+bool isNewestVersion(int index);
+// "1.10.0" > "1.9.2": < 0, 0 or > 0. "" is older than any version.
+int compareVersions(const std::string& a, const std::string& b);
 
 // How the fingers are turned into notes. Handed to the audio thread whole (setPerformance).
 enum class Layout : int { Single = 0, Split = 1, Layer = 2 };
@@ -201,6 +209,8 @@ public:
     ModView modifiers() const;
     // Any thread: the output below 150 Hz in dBFS, peak-held for 150 ms (for mpe::Breath::setEcho).
     float outputLowDb() const { return lowDb_.load(std::memory_order_relaxed); }
+    // How far the output limiter turned the sound down in the last callback, in dB (0: not at all).
+    float limiterDb() const { return limitDb_.load(std::memory_order_relaxed); }
 
     // The loops, each with its own length and layers (any thread may read a view; the control
     // thread presses the buttons).
@@ -276,6 +286,12 @@ private:
     std::atomic<bool> pubHeld_{false};
     float lowZ_[4] = {}, lowB_[5] = {}, lowEnv_ = 0, lowRel_ = 0;   // the output's low end, for the breath detector
     std::atomic<float> lowDb_{-120.f};
+    // The output limiter: a gain that drops at once to keep a peak under the ceiling, holds, then
+    // rises slowly. It turns the whole sound down, so a chord is not bent out of shape (a tanh on
+    // the mix made the notes of a chord beat against each other).
+    float limHeld_ = 0, limGain_ = 1, limRise_ = 0;
+    int limHold_ = 0, limHoldN_ = 0;
+    std::atomic<float> limitDb_{0.f};
 
     // stats, written by the audio thread
     std::atomic<double> ageSum_{0}, ageMax_{0}, ageLast_{0}, loadSum_{0}, loadPeak_{0};

@@ -378,6 +378,15 @@ private var soundFilter by mutableIntStateOf(0)
 private fun SoundsPanel(k: Int) {
     var search by rememberSaveable { mutableStateOf("") }
     val chosen = AppState.perf.part(k).instrument
+    // The sound's versions, when it has more than one: the newest, and those kept to go back to.
+    val versions = AppState.versions(k)
+    if (versions.size > 1) {
+        val playing = AppState.instrument(k)?.version
+        PHeading("VERSION")
+        PChips(versions.mapIndexed { i, v -> v.version + if (i == 0) " · newest" else "" },
+               versions.indexOfFirst { it.version == playing }) { i -> AppState.chooseVersion(k, versions[i].version) }
+        PNote("${versions[0].name}: older versions are kept as they were, to go back to.")
+    }
     PField(search, "Find a sound", { search = it.take(60) })
     Spacer(Modifier.height(6.dp))
     PChips(listOf("All", "Sustained", "Fading"), soundFilter) { soundFilter = it }

@@ -57,7 +57,11 @@ object AppState {
     private lateinit var appContext: Context
     private var started = false
 
+    /** The sounds to pick from: each instrument's newest version. */
     var instruments: List<Native.Instrument> = emptyList()
+        private set
+    /** Every version of every instrument: older ones are kept, to go back to (the sound picker's Version). */
+    var allInstruments: List<Native.Instrument> = emptyList()
         private set
     var perf by mutableStateOf(Perf())
         private set
@@ -109,13 +113,14 @@ object AppState {
         started = true
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences("mpe", Context.MODE_PRIVATE)
-        instruments = Native.instruments()
+        allInstruments = Native.instruments()
+        instruments = allInstruments.filter { it.newest }
         com.patrickreynolds.mpeinstruments.packs.Packs.load(appContext, instruments)
         val perfJson = runCatching { prefs.getString("perf", null)?.let { JSONObject(it) } }.getOrNull()
         perf = runCatching { Perf.from(perfJson) }.getOrDefault(Perf())
         // Before presets existed the instrument was saved as an index.
         if (!prefs.contains("perf") && prefs.contains("instrument"))
-            instruments.getOrNull(prefs.getInt("instrument", -1))?.let { inst -> perf = perf.withPart(0) { it.copy(instrument = inst.id) } }
+            allInstruments.getOrNull(prefs.getInt("instrument", -1))?.let { inst -> perf = perf.withPart(0) { it.copy(instrument = inst.id) } }
         volume = prefs.getFloat("volume", 0.8f)
         presetName = prefs.getString("preset", "") ?: ""
         eink = prefs.getBoolean("eink", false)
@@ -175,10 +180,26 @@ object AppState {
         Looper.snap(loopSnap)
     }
 
-    private fun index(id: String) = instruments.indexOfFirst { it.id == id }.takeIf { it >= 0 }
-        ?: instruments.indexOfFirst { it.id == "strings/cello" }.coerceAtLeast(0)
+    /** Instrument [id] at [version] ("": the newest; one not here: the newest too), else the cello. */
+    private fun find(id: String, version: String = ""): Native.Instrument? =
+        (if (version.isEmpty()) null else allInstruments.firstOrNull { it.id == id && it.version == version })
+            ?: instruments.firstOrNull { it.id == id } ?: instruments.firstOrNull { it.id == "strings/cello" } ?: instruments.firstOrNull()
 
-    fun instrument(part: Int) = instruments.getOrNull(index(perf.part(part).instrument))
+    private fun index(p: Part) = find(p.instrument, p.version)?.index ?: 0
+
+    fun instrument(part: Int) = find(perf.part(part).instrument, perf.part(part).version)
+
+    /** Part [k]'s instrument's versions, newest first (one: it has no others). */
+    fun versions(k: Int): List<Native.Instrument> {
+        val id = perf.part(k).instrument
+        return allInstruments.filter { it.id == id }.sortedWith { a, b -> -Native.compareVersions(a.version, b.version) }
+    }
+
+    /** Play [version] of part [k]'s instrument ("" or the newest's: the newest). Its effects stay as they are. */
+    fun chooseVersion(k: Int, version: String) {
+        val newest = versions(k).firstOrNull()?.version ?: ""
+        updatePart(k) { it.copy(version = if (version == newest) "" else version) }
+    }
 
     /** Parts after the first are only built when a split or layer needs them: 15 more copies of an instrument each. */
     private val built = BooleanArray(PARTS)
@@ -188,10 +209,11 @@ object AppState {
         val s = shape
         Native.nativeSetTranspose(s.transpose)
         Native.nativeSetBendRange(s.bendRange)
-        if (old == null || old.part(0).instrument != perf.part(0).instrument) Native.nativeSetPartInstrument(0, index(perf.part(0).instrument))
+        fun changed(k: Int) = old == null || old.part(k).instrument != perf.part(k).instrument || old.part(k).version != perf.part(k).version
+        if (changed(0)) Native.nativeSetPartInstrument(0, index(perf.part(0)))
         for (k in 1 until partCount)
-            if (!built[k] || old == null || old.part(k).instrument != perf.part(k).instrument) {
-                Native.nativeSetPartInstrument(k, index(perf.part(k).instrument))
+            if (!built[k] || changed(k)) {
+                Native.nativeSetPartInstrument(k, index(perf.part(k)))
                 built[k] = true
             }
         Native.nativeSetPerformance(perf.toArray(s))
@@ -212,16 +234,16 @@ object AppState {
      * Play instrument [id] on part [k], with the effects its pack means it to be heard with (the
      * room too, unless the other part is sounding and keeps it).
      */
-    fun chooseInstrument(k: Int, id: String) {
+    fun chooseInstrument(k: Int, id: String, keepVersion: Boolean = false) {
         val d = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(id)
         update { p ->
-            val q = p.withPart(k) { d.applyTo(it, id) }
+            val q = p.withPart(k) { d.applyTo(it, id).let { r -> if (keepVersion) r else r.copy(version = "") } }   // a sound picked: its newest
             if (twoParts && k >= 1) q else q.copy(reverbSize = d.reverbSize, reverbDamp = d.reverbDamp)
         }
     }
 
     /** Part [k]'s effects back to its pack's, for its instrument. */
-    fun resetEffects(k: Int) = chooseInstrument(k, perf.part(k).instrument)
+    fun resetEffects(k: Int) = chooseInstrument(k, perf.part(k).instrument, keepVersion = true)
 
     fun changeVolume(v: Float) { volume = v; Native.nativeSetVolume(v); prefs.edit().putFloat("volume", v).apply() }
 
@@ -432,7 +454,8 @@ object AppState {
         val s = p.settings?.let { runCatching { JSONObject(it) }.getOrNull() }
         val settings = s?.optJSONObject("byId") ?: s ?: JSONObject()
         val parts = JSONArray()
-        for (part in pf.parts) parts.put(JSONObject().put("sound", part.instrument).put("transpose", part.transpose)
+        for (part in pf.parts) parts.put(JSONObject().put("sound", part.instrument)
+            .put("version", find(part.instrument, part.version)?.version ?: "").put("transpose", part.transpose)
             .put("volume", d(part.volume)).put("brightness", d(part.brightness)).put("drive", d(part.drive))
             .put("pressureCurve", d(part.pressureCurve)).put("reverb", d(part.reverb))
             .put("delay", d(part.delay)).put("release", d(part.release))
@@ -472,18 +495,25 @@ object AppState {
         val s = settings?.let { if (c is com.patrickreynolds.mpeinstruments.controllers.PackageController) JSONObject().put("byId", it) else it }
 
         var missing = 0
+        var olderMissing = 0
         val a = side.optJSONArray("parts") ?: JSONArray()
         val parts = (0 until minOf(a.length(), PARTS)).mapNotNull { k -> a.optJSONObject(k) }.mapIndexed { k, q ->
             val id = q.optString("sound")
             val known = instruments.any { it.id == id }
             if (!known && k < 2) missing++
             val sound = if (known) id else perf.part(k).instrument
+            // The version the file names, if this phone has it; the newest plays as "".
+            val want = if (known) q.optString("version") else ""
+            val has = want.isNotEmpty() && allInstruments.any { it.id == sound && it.version == want }
+            if (want.isNotEmpty() && !has && k < 2) olderMissing++
+            val version = if (has && instruments.none { it.id == sound && it.version == want }) want else ""
             // The file's arp says "on"; the app's own JSON (Arp.json) "arp".
             val arp = q.optJSONObject("arp")?.let { JSONObject(it.toString()).put("arp", it.optBoolean("on")) } ?: Arp().json()
-            if (q.has("volume")) Part.from(q.put("instrument", sound).put("arpeggio", arp))
-            else com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(sound).applyTo(perf.part(k), sound)
+            if (q.has("volume")) Part.from(q.put("instrument", sound).put("version", version).put("arpeggio", arp))
+            else com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(sound).applyTo(perf.part(k), sound).copy(version = version)
         }.ifEmpty { perf.parts }
         if (missing > 0) notes += "$missing ${if (missing == 1) "sound isn't" else "sounds aren't"} here: what was playing plays instead"
+        if (olderMissing > 0) notes += "$olderMissing ${if (olderMissing == 1) "sound's version isn't" else "sounds' versions aren't"} here: the newest plays instead"
 
         val fx = f.optJSONObject("effects")
         val room = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(parts[0].instrument)
