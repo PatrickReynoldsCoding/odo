@@ -197,7 +197,7 @@ static void grid() {
     CHECK(key && key->widget == Widget::Chips && key->choices.size() == 12 && key->display == "C" && key->group == "Notes", "Key: 12 chips, C");
     auto oct = find(rs, "topOctave");
     CHECK(oct && oct->choices.front() == "-3" && oct->choices.back() == "3" && oct->chosen == 3, "Top: octave: -3..3, 0 chosen");
-    CHECK(rail::stepped(ss[size_t(1)], 1, 1) == 0, "Notes run: on from the last wraps");
+    CHECK(rail::stepped(ss[size_t(1)], 2, 1) == 0, "Notes run: on from the last (Your own notes) wraps");
     // A hidden setting still steps and shows, for an app that shows it elsewhere.
     for (size_t i = 0; i < ss.size(); i++) if (ss[i]["id"].str() == "strikeRangeDb")
         CHECK(rail::display(ss[i], 24) == "24 dB" && rail::label(ss[i]) == "Strike range", "Strike range: 24 dB");

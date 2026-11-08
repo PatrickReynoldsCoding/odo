@@ -17,6 +17,11 @@
  * Controls can sit in strips either side: Latch, Hold, Bend, Tone. The colours can mark notes
  * by their place in the key (the 4th always blue, say).
  *
+ * Or, Your own notes: any square can be any note. Edit your own notes opens a panel: tap a square
+ * (it plays), then pick its note's name, octave, or a semitone up or down. Until the first change
+ * every square is as Along the rows has it; that change fixes them all where they are. 8 columns
+ * by 16 rows can hold notes, kept 6 to a hidden setting (a byte each, 255: as the rows).
+ *
  * Slide between notes: a finger plays whichever square it is on. Move onto another and its note
  * starts (the last one stops), without lifting: no strike zones, nothing across or up and down,
  * no vibrato; every note as loud as the Dynamics fader says.
@@ -29,6 +34,11 @@
 #define MAX_VOICES 15          /* the MIDI channels MPE has for notes */
 #define MAX_RING 32
 #define MAX_SIDE 10
+#define CUST_COLS 8            /* Your own notes: the squares that can hold one, 8 x 16 */
+#define CUST_ROWS 16
+#define CUST_WORDS 22          /* 128 squares, 6 to a setting: 8 bits each, inside a double's 53 */
+#define CUST_ANY 255           /* a square as Along the rows has it */
+#define NOTES_EVEN 281474976710655.0   /* 2^48 - 1: six squares, all CUST_ANY */
 
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
@@ -40,14 +50,17 @@ enum {
     /* the axes' shaping, set in the touch panel: amount and sensitivity in %, flip */
     S_AX_AMOUNT, S_AX_SENS, S_AX_FLIP, S_UD_AMOUNT, S_UD_SENS, S_UD_FLIP,
     /* Slide between notes: a finger plays the square under it, whichever, until it lifts */
-    S_SLIDE, S_COUNT
+    S_SLIDE,
+    /* Your own notes: the editor open, and the notes (hidden) */
+    S_NOTE_EDIT, S_NOTES0, S_COUNT = S_NOTES0 + CUST_WORDS
 };
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 0,
                                ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1,
-                               100, 100, 0, 100, 100, 0, 0};
+                               100, 100, 0, 100, 100, 0, 0, 0,
+                               [S_NOTES0 ... S_COUNT - 1] = NOTES_EVEN};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
@@ -152,7 +165,9 @@ static int mirrored(void) { return set_[S_FLIP_X] == 0; }
 static int flipped_y(void) { return hv->flip; }
 static int split_on(void) { return set_[S_SPLIT] != 0; }
 /* Up each column: every column runs up the scale on its own, and scrolls on its own (while unlocked). */
-static int columns(void) { return set_[S_LAYOUT] != 0; }
+static int columns(void) { return (int)set_[S_LAYOUT] == 1; }
+/* Your own notes: each square the note it was given. */
+static int custom(void) { return (int)set_[S_LAYOUT] == 2; }
 static int locked(void) { return set_[S_LOCK] != 0; }
 /* The Lock button only means something with the columns. */
 static int side_of(int c) { return c == C_LOCK && !columns() ? SIDE_OFF : (int)set_[S_SIDE0 + c]; }
@@ -254,7 +269,34 @@ static int index_of(int note) {
 }
 /* The note of square k (k counts along the rows from row 0, which is at the bottom unscrolled).
    Up each column, the note is the row's alone: every column holds the same notes, scrolled its own way. */
+static void keep(int index, double v);
+/* Your own notes: square i's stored note (or CUST_ANY), and setting it. */
+static int cust_get(int i) {
+    unsigned long long w = (unsigned long long)set_[S_NOTES0 + i / 6];
+    return (int)((w >> (8 * (i % 6))) & 0xFF);
+}
+static void cust_put(int i, int v) {
+    unsigned long long w = (unsigned long long)set_[S_NOTES0 + i / 6];
+    int s = 8 * (i % 6);
+    w = (w & ~(0xFFull << s)) | ((unsigned long long)(v & 0xFF) << s);
+    if ((double)w != set_[S_NOTES0 + i / 6]) keep(S_NOTES0 + i / 6, (double)w);
+}
+/* The stored place of square k (row by row, 8 to a row), or -1 outside the rows that hold notes. */
+static int cust_index(int k) {
+    int r = floordiv(k, cols), c = floormod(k, cols);
+    return r < 0 || r >= CUST_ROWS ? -1 : r * CUST_COLS + c;
+}
+/* Your own notes are kept as the bottom grid has them; the top's are its octave apart. */
+static int top_shift(void) { return half_index() == 1 ? 12 * (int)set_[S_TOP_OCTAVE] : 0; }
+
+/* The note of square k, or -1 for none (Your own notes, outside its 16 rows). */
 static int note_of(int k) {
+    if (custom()) {
+        int i = cust_index(k);
+        if (i < 0) return -1;
+        int v = cust_get(i);
+        if (v != CUST_ANY) { int note = v + top_shift(); return note < 0 ? 0 : note > 127 ? 127 : note; }
+    }
     int note = note_at((columns() ? floordiv(k, cols) : k) + hv->kshift);
     return note < 0 ? 0 : note > 127 ? 127 : note;
 }
@@ -270,7 +312,8 @@ static void clamp_pos(void) {
     Half* was = hv;
     for (int h = 0; h < nhalves; h++) {
         hv = &halves[h];
-        if (!columns()) clamp_one(&hv->pos, cols);
+        if (custom()) { float hi = (float)CUST_ROWS - hv->shown; hv->pos = clampf(hv->pos, 0, hi > 0 ? hi : 0); }
+        else if (!columns()) clamp_one(&hv->pos, cols);
         else for (int c = 0; c < cols; c++) clamp_one(&hv->colpos[c], 1);
     }
     hv = was;
@@ -328,6 +371,8 @@ static int spent[MAX_FINGERS], nspent;
 typedef struct { int n, half; float glow; } Ring;
 static Ring ring[MAX_RING];
 static int next_voice = 1;
+/* Editing your own notes: the square chosen (its index k, or -1) and its half; Reset all asked once. */
+static int sel = -1, sel_half, resetting;
 
 typedef struct { int id, control, col, half; float from, top, h; float start, y; } SideTouch;
 enum { C_COL = 98, C_BAR = 99 };     /* a finger scrolling a column (unlocked), or on the scroll bar */
@@ -419,6 +464,7 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
            next is to the left); up and down, the row above or below. */
         int dir = v >= 0 ? 1 : -1;
         int to = across ? note_of(beside(f->n, dir)) : note_of(f->n + dir * (flipped_y() ? -cols : cols));
+        if (to < 0) to = f->note;
         *semis += (float)(to - f->note) * amount;
         break;
     }
@@ -524,7 +570,7 @@ static void down(int id, float x, float y) {
 
 static void down_in(int id, float x, float y, int h) {
     int n = square_at(x, y);
-    if (n == -100000) return;
+    if (n == -100000 || note_of(n) < 0) return;
     if (latch_on && set_[S_LATCHMODE] == LATCH_TAP) {
         /* Tap a held square to let it go. */
         int k = find_latched(h, n);
@@ -559,6 +605,7 @@ static void slide_to(Finger* f, float x, float y) {
     Half* was = hv;
     hv = &halves[h];
     int n = square_at(x, y);
+    if (n != -100000 && note_of(n) < 0) n = -100000;
     if (n == -100000 || (h == f->half && n == f->n)) { hv = was; return; }
     if (h == f->half) {
         /* Past the old square's edge by a little more than the gap. */
@@ -881,8 +928,8 @@ static void chip(float x, float y, float w, float h, const char* label, int on, 
     unsigned ink = eink ? BLACK : th->light;
     mesh_rect(x, y, w, h, 8, on ? (eink ? BLACK : mesh_alpha(ink, 0.85f)) : (eink ? WHITE : th->square), mesh_alpha(ink, on ? 1 : 0.45f), 1.5f);
     /* As big as fits: at most 11, smaller for a long name in a narrow chip (text runs about a size per letter). */
-    int n = 0;
-    while (label[n]) n++;
+    int n = 0;                     /* letters, not bytes: a sharp is three */
+    for (const char* c = label; *c; c++) n += (*c & 0xC0) != 0x80;
     float size = n ? clampf((w - 8) / (float)n, 7, 11) : 11;
     mesh_text(x + w / 2, y + h / 2 + size * 0.35f, size, on ? (eink ? WHITE : th->on_light) : ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
     hit(x, y, w, h, kind, arg);
@@ -1070,6 +1117,130 @@ static void ed_touch(int id, int phase, float x, float y) {
     if (phase == MESH_DOWN) { ed_dragging = 1; ed_from = y; ed_scroll0 = ed_scroll; }
 }
 
+/* ---- Your own notes: the editor ------------------------------------------------------------- */
+/* A panel across the top of the surface (or the bottom, when the square being changed is under the
+   top half): the square's note, the twelve names, octave and semitone steps, and back as the rows.
+   Tap a square to choose it (it plays as usual). Drawn and touched in surface coordinates. */
+static void note_name(char* out, int note, int octave);
+enum { K_NE_DONE = 40, K_NE_USE, K_NE_NAME, K_NE_OCT, K_NE_SEMI, K_NE_RESET, K_NE_RESETALL };
+static float ne_y, ne_h;
+static int ne_finger = -1;
+
+static int note_editing(void) { return set_[S_NOTE_EDIT] != 0; }
+
+/* The chosen square's note (its own half's), or -1. */
+static int sel_note(void) {
+    if (sel < 0) return -1;
+    Half* was = hv;
+    hv = &halves[sel_half < nhalves ? sel_half : 0];
+    int n = note_of(sel);
+    hv = was;
+    return n;
+}
+
+/* The first change fixes every square where it is now (else they would move with the window and
+   the sound, as the rows' do). */
+static void bake(void) {
+    Half* was = hv;
+    hv = &halves[0];
+    for (int r = 0; r < CUST_ROWS; r++)
+        for (int c = 0; c < cols && c < CUST_COLS; c++) {
+            int i = r * CUST_COLS + c;
+            if (cust_get(i) == CUST_ANY) cust_put(i, note_at(r * cols + c + hv->kshift) & 0x7F);
+        }
+    hv = was;
+}
+
+/* The chosen square to note (as heard: the top's octave is taken off to keep it). */
+static void ne_set(int note) {
+    if (sel < 0) return;
+    Half* was = hv;
+    hv = &halves[sel_half < nhalves ? sel_half : 0];
+    int i = cust_index(sel);
+    if (i >= 0) {
+        bake();
+        note -= top_shift();
+        cust_put(i, note < 0 ? 0 : note > 127 ? 127 : note);
+    }
+    hv = was;
+}
+
+static void ne_draw(const Theme* th) {
+    nhits = 0;
+    unsigned ink = eink ? BLACK : th->light, panel = eink ? WHITE : th->background;
+    float pw = SW - 16 > 600 ? 600 : SW - 16, px = (SW - pw) / 2, in = 10, cw = pw - 2 * in, g = 5;
+    int wrap = (cw - 11 * g) / 12 < 30;          /* the names in two rows of six */
+    float ph = custom() ? 44 + (wrap ? 2 : 1) * 38 + 38 + 4 : 44 + 38 + 4;
+    /* Out of the way of the square being changed. */
+    float sy = -1;
+    if (sel >= 0 && custom()) {
+        Half* was = hv;
+        hv = &halves[sel_half < nhalves ? sel_half : 0];
+        float ux = square_x(sel) + (cell - gap) / 2, uy = square_y(sel) + (cell - gap) / 2;
+        sy = turned ? ux : uy;
+        hv = was;
+    }
+    ne_y = sy >= 0 && sy < ph + 40 ? SH - ph - 8 : 8;
+    ne_h = ph;
+    mesh_rect(px, ne_y, pw, ph, 14, panel, mesh_alpha(ink, 0.6f), 1.5f);
+    float y = ne_y + 8;
+    char title[40];
+    int note = sel_note();
+    if (!custom()) put(title, "Notes run: choose Your own notes");
+    else if (note < 0) put(title, "Tap a square to change its note");
+    else { char* p = put(title, "This square: "); note_name(p, note, 1); }
+    mesh_text(px + in + 4, y + 20, 14, ink, MESH_TEXT_BOLD, title);
+    chip(px + pw - in - 70, y, 70, 30, "Done", 1, th, K_NE_DONE, 0);
+    y += 36;
+    if (!custom()) { chip(px + in, y, cw, 32, "Use your own notes", 0, th, K_NE_USE, 0); return; }
+    int per = wrap ? 6 : 12;
+    float nw = (cw - (float)(per - 1) * g) / (float)per;
+    for (int d = 0; d < 12; d++)
+        chip(px + in + (float)(d % per) * (nw + g), y + (float)(d / per) * 38, nw, 32, NAMES[d], note >= 0 && note % 12 == d, th, K_NE_NAME, d);
+    y += (wrap ? 2 : 1) * 38;
+    float aw = (cw - 5 * g) / 6;
+    static const char* ACT[6] = {"Oct \xE2\x88\x92", "Oct +", ("\xE2\x88\x92" "1"), "+1", "As the rows", "Reset all"};
+    static const int KIND[6] = {K_NE_OCT, K_NE_OCT, K_NE_SEMI, K_NE_SEMI, K_NE_RESET, K_NE_RESETALL};
+    for (int a = 0; a < 6; a++)
+        chip(px + in + (float)a * (aw + g), y, aw, 32, a == 5 && resetting ? "Sure?" : ACT[a], a == 5 && resetting, th, KIND[a], a % 2 ? 1 : -1);
+}
+
+/* A touch on the panel (1: it was), on surface coordinates. A touch elsewhere plays, and chooses. */
+static int ne_touch(int id, int phase, float x, float y) {
+    if (phase != MESH_DOWN) {
+        if (id != ne_finger) return 0;
+        if (phase == MESH_UP || phase == MESH_CANCEL) ne_finger = -1;
+        return 1;
+    }
+    if (y < ne_y || y > ne_y + ne_h) return 0;
+    ne_finger = id;
+    int note = sel_note();
+    for (int k = 0; k < nhits; k++) {
+        Hit* h = &hits[k];
+        if (x < h->x || x > h->x + h->w || y < h->y || y > h->y + h->h) continue;
+        if (h->kind != K_NE_RESETALL) resetting = 0;
+        switch (h->kind) {
+        case K_NE_DONE: keep(S_NOTE_EDIT, 0); sel = -1; break;
+        case K_NE_USE: keep(S_LAYOUT, 2); layout(); clamp_pos(); break;
+        case K_NE_NAME: if (note >= 0) ne_set(note - note % 12 + h->arg); break;
+        case K_NE_OCT: if (note >= 0) ne_set(note + 12 * h->arg); break;
+        case K_NE_SEMI: if (note >= 0) ne_set(note + h->arg); break;
+        case K_NE_RESET: {
+            int i = sel >= 0 ? cust_index(sel) : -1;
+            if (i >= 0) cust_put(i, CUST_ANY);
+            break;
+        }
+        case K_NE_RESETALL:
+            if (!resetting) { resetting = 1; break; }
+            resetting = 0;
+            for (int w = 0; w < CUST_WORDS; w++) keep(S_NOTES0 + w, NOTES_EVEN);
+            break;
+        }
+        break;
+    }
+    return 1;
+}
+
 /* The colour a note is marked with, or 0 to use the theme's. */
 static unsigned note_colour(int note) {
     int scheme = (int)set_[S_COLOURS], iv = floormod(note - key(), 12);
@@ -1124,7 +1295,7 @@ static void draw_bar(const Theme* th) {
     int r0 = (int)floorf_(hv->pos) - 1, r1 = (int)floorf_(hv->pos + hv->shown) + 1;
     for (int r = r0; r <= r1; r++) {
         int root = -1;
-        for (int c = 0; c < cols; c++) { int note = note_of(r * cols + c); if (floormod(note - key(), 12) == 0) { root = note; break; } }
+        for (int c = 0; c < cols; c++) { int note = note_of(r * cols + c); if (note >= 0 && floormod(note - key(), 12) == 0) { root = note; break; } }
         if (root < 0) continue;
         float y = row_top(r, hv->pos) + cell / 2;
         if (y < hv->top + 10 || y > hv->bot - 10) continue;
@@ -1170,6 +1341,7 @@ static void draw(void) {
         float ox = square_x(n), oy = square_y(n);
         if (oy > hv->bot || oy + side < hv->top) continue;
         int note = note_of(n);
+        if (note < 0) continue;
         int root = floormod(note - key(), 12) == 0;
         int off = chromatic() && !in_scale(note);
         int on = is_held(n), kept = is_kept(n);
@@ -1214,12 +1386,14 @@ static void draw(void) {
         if (kept && !on && in_half(oy + side * 0.16f))
             g_circle(ox + side * 0.84f, oy + side * 0.16f, side * 0.06f,
                         glow > 0.5f ? (flat ? WHITE : th->on_light) : (flat ? BLACK : th->hot), 0, 0);
-        if (set_[S_LABELS] != 0 && in_half(oy + side / 2)) {
+        if (note_editing() && n == sel && h == sel_half)
+            c_rect(ox - 4, oy - 4, side + 8, side + 8, radius + 4, 0, flat ? BLACK : th->hot, 4);
+        if ((set_[S_LABELS] != 0 || note_editing()) && in_half(oy + side / 2)) {
             float size = side * 0.16f;
             unsigned tc = glow > 0.5f ? (flat ? WHITE : colour ? 0x101010FFu : th->on_light)
                         : mesh_alpha(colour ? colour : light, off ? 0.3f : 0.85f);
             char name[16];
-            note_name(name, note, root);
+            note_name(name, note, 1);
             g_text(ox + side / 2, oy + side / 2 + size * 0.35f, size, tc, MESH_TEXT_CENTER | (root ? MESH_TEXT_BOLD : 0), name);
         }
       }
@@ -1238,6 +1412,7 @@ static void draw(void) {
     draw_bar(th);
     draw_sides(th);
     if (editing()) ed_draw(th);
+    else if (note_editing()) ne_draw(th);
     mesh_end();
     dirty = 0;
 }
@@ -1275,6 +1450,7 @@ MESH_EXPORT(setting) void setting(int index, double value) {
     if (index == S_LATCH) set_latch(value != 0);
     if (index == S_TURN) turn_to(SW, SH);
     if (index == S_ZONE_EDIT && value != 0) stop();      /* opening the editor lets go of what plays */
+    if (index == S_NOTE_EDIT) { sel = -1; resetting = 0; if (value != 0) stop(); }
     layout();
     clamp_pos();
 }
@@ -1284,12 +1460,16 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
     now = t;
     /* The zone editor takes every touch while it is open, on the surface as it is (never turned). */
     if (editing()) { ed_touch(id, phase, x, y); dirty = 1; return; }
+    if (note_editing() && ne_touch(id, phase, x, y)) { dirty = 1; return; }
     if (turned) { float ux = y, uy = H - x; x = ux; y = uy; }   /* the touch, as on the upright grid */
     id += 1;    /* 0 marks a free side touch */
     if (phase == MESH_DOWN) {
         if (find(id)) up(id);
         layout();
         if (!side_down(id, x, y)) { if (columns() && !locked()) col_down(id, x, y); else down(id, x, y); }
+        /* Editing your own notes: the square played is the one to change. */
+        Finger* f = note_editing() ? find(id) : 0;
+        if (f) { sel = f->n; sel_half = f->half; resetting = 0; }
     } else if (phase == MESH_MOVE) {
         SideTouch* s = side_find(id);
         if (s) {
@@ -1301,7 +1481,7 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
         Finger* f = find(id);
         if (!f) return;
         f->x = x; f->y = y;
-        if (sliding()) slide_to(f, x, y);
+        if (sliding() && !note_editing()) slide_to(f, x, y);
         send(f);
     } else {
         SideTouch* s = side_find(id);

@@ -1,9 +1,9 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "name": "Grid",
-  "description": "Square keys, upright: the notes climb row by row, or up each column on its own; drag to bend toward the next, wiggle for vibrato",
+  "description": "Square keys, upright: the notes climb row by row, or up each column on its own; drag to bend toward the next, wiggle for vibrato; or make any square any note",
   "author": "Patrick Reynolds",
   "licence": "MIT",
   "needs": {
@@ -34,7 +34,8 @@
       "type": "choice",
       "options": [
         "Along the rows",
-        "Up each column"
+        "Up each column",
+        "Your own notes"
       ],
       "default": 0,
       "group": "Layout"
@@ -615,6 +616,29 @@
       "hidden": true,
       "group": "Touch"
     },
-    {"id": "slide", "name": "Slide between notes", "type": "switch", "default": false, "group": "Touch"}
+    {"id": "slide", "name": "Slide between notes", "type": "switch", "default": false, "group": "Touch"},
+    {"id": "noteEdit", "name": "Edit your own notes", "type": "switch", "default": false, "group": "Layout"},
+    {"id": "notes0", "name": "Your own notes 1", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes1", "name": "Your own notes 2", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes2", "name": "Your own notes 3", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes3", "name": "Your own notes 4", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes4", "name": "Your own notes 5", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes5", "name": "Your own notes 6", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes6", "name": "Your own notes 7", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes7", "name": "Your own notes 8", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes8", "name": "Your own notes 9", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes9", "name": "Your own notes 10", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes10", "name": "Your own notes 11", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes11", "name": "Your own notes 12", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes12", "name": "Your own notes 13", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes13", "name": "Your own notes 14", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes14", "name": "Your own notes 15", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes15", "name": "Your own notes 16", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes16", "name": "Your own notes 17", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes17", "name": "Your own notes 18", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes18", "name": "Your own notes 19", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes19", "name": "Your own notes 20", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes20", "name": "Your own notes 21", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"},
+    {"id": "notes21", "name": "Your own notes 22", "type": "number", "min": 0, "max": 281474976710655, "step": 1, "default": 281474976710655, "hidden": true, "group": "Layout"}
   ]
 }
