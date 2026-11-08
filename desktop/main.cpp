@@ -9,9 +9,11 @@
 // Library folders hold .odoi and .odoc files (default: the library folder beside odo, and
 // ~/.local/share/odo/library). It checks GitHub for a newer odo when it opens (--no-update: not);
 // the update line at the bottom of the rail installs it. The rail on
-// the left, as odo on Android's, picks the split, then for each side its controller, sound and
-// settings: a tap opens a panel beside it with chips, a slider or a list (--tap: a self-test's
-// taps there, in window points, before its touches). The rest of
+// the left: tiles for the preset, the split, the controller and the sound (in its pack and group),
+// each opening its picker beside the rail; a map of the sides when split; then the side's
+// controller's settings by group, each opening a panel with all of them (those its mode leaves
+// out not shown: mpe::rail's showIf), or the controller's own (the Grid's Touch); then the app's
+// (--tap: a self-test's taps there, in window points, before its touches). The rest of
 // the window is the controllers: whole, or split side by side, above and below, in three or in
 // four, each side playing its own sound. (--controller and --sound repeat: the first is the
 // first side's, the next the second's.) Presets, as Android's, keep all of that under a name; and
@@ -51,7 +53,7 @@ using draw::rgba;
 namespace {
 
 constexpr int kRate = 48000;           // instruments are tuned at 48 kHz: SDL converts if the device differs
-constexpr float kRail = 230;           // the rail's width, points
+constexpr float kRail = 300;           // the rail's width, points
 
 // A chevron pointing left (dir -1) or right (dir 1), centred on (cx, cy), `size` points high.
 void chevron(SDL_Renderer* r, float cx, float cy, float size, int dir, draw::Color c) {
@@ -75,13 +77,58 @@ struct Instrument {
     std::unique_ptr<mpe::Package> pkg;
     int index = -1;                     // in the engine's table, once compiled
     std::string error;
+    std::string pack, group;            // where odo's sound packs put it ("" if none does)
 };
 
 struct Library {
     std::vector<Instrument> instruments;
     std::vector<std::unique_ptr<mpe::Package>> controllers;
 
+    // The sounds in the order the sound picker shows them: by pack, group, then as the pack lists
+    // them (odo's packs: library/packs/*.json, as on Android); any no pack has, after, by name.
+    std::vector<int> soundOrder;
+    struct PackGroup { std::string pack, group; std::vector<std::string> ids; int order; };
+    std::vector<PackGroup> packs;
+
+    void scanPacks(const std::string& dir) {
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec)) return;
+        for (const auto& e : fs::directory_iterator(dir, ec)) {
+            if (e.path().extension() != ".json") continue;
+            std::ifstream f(e.path());
+            std::stringstream ss;
+            ss << f.rdbuf();
+            mpe::Json j = mpe::Json::parse(ss.str());
+            const mpe::Json& gs = j["groups"];
+            for (size_t g = 0; g < gs.size(); g++) {
+                PackGroup pg{j["name"].str(), gs[g]["name"].str(), {}, int(j["order"].num(99)) * 100 + int(g)};
+                for (size_t k = 0; k < gs[g]["instruments"].size(); k++) pg.ids.push_back(gs[g]["instruments"][k].str());
+                if (std::none_of(packs.begin(), packs.end(), [&](const PackGroup& x) { return x.pack == pg.pack && x.group == pg.group; })) packs.push_back(pg);
+            }
+        }
+    }
+
+    void order() {
+        std::sort(packs.begin(), packs.end(), [](const PackGroup& a, const PackGroup& b) { return a.order < b.order; });
+        soundOrder.clear();
+        std::vector<bool> placed(instruments.size());
+        for (const PackGroup& pg : packs)
+            for (const std::string& id : pg.ids)
+                for (size_t i = 0; i < instruments.size(); i++) {
+                    const auto& m = instruments[i].pkg->manifest;
+                    if (placed[i] || (m["aliases"][size_t(0)].str() != id && instruments[i].pkg->id() != id)) continue;
+                    placed[i] = true;
+                    instruments[i].pack = pg.pack; instruments[i].group = pg.group;
+                    soundOrder.push_back(int(i));
+                }
+        std::vector<int> rest;
+        for (size_t i = 0; i < instruments.size(); i++) if (!placed[i]) { rest.push_back(int(i)); instruments[i].pack = "More"; instruments[i].group = "Other"; }
+        std::sort(rest.begin(), rest.end(), [&](int a, int b) { return instruments[size_t(a)].pkg->name() < instruments[size_t(b)].pkg->name(); });
+        soundOrder.insert(soundOrder.end(), rest.begin(), rest.end());
+    }
+
     void scan(const std::string& dir) {
+        scanPacks(dir + "/packs");
         std::error_code ec;
         if (!fs::is_directory(dir, ec)) { std::fprintf(stderr, "odo: no folder %s\n", dir.c_str()); return; }
         std::vector<fs::path> files;
@@ -96,7 +143,7 @@ struct Library {
             auto same = [&](const mpe::Package& o) { return o.id() == pkg->id() && o.version() == pkg->version(); };
             if (std::any_of(instruments.begin(), instruments.end(), [&](const Instrument& i) { return same(*i.pkg); }) ||
                 std::any_of(controllers.begin(), controllers.end(), [&](const auto& c) { return same(*c); })) continue;
-            if (pkg->isInstrument()) instruments.push_back({std::move(pkg), -1, ""});
+            if (pkg->isInstrument()) instruments.push_back({std::move(pkg), -1, "", "", ""});
             else controllers.push_back(std::move(pkg));
         }
     }
@@ -774,261 +821,374 @@ struct App {
     }
     const mpe::Json& settingOf(size_t i) { return cur().host->manifest()["settings"][i]; }
 
-    // ---- the rail and its panel -----------------------------------------------------------------
+    // ---- the rail and its panels -----------------------------------------------------------------
 
-    // As odo on Android: the rail lists what can be changed, each a name over its value. A tap
-    // flips a switch, or opens a panel beside the rail with the setting's chips, slider or list,
-    // until Done (or the row again). The controller's settings come from mpe::rail, in their
-    // groups, as Android shows them; under the top row the whole rail scrolls.
+    // Under its top row, four tiles: the preset, the split, the controller and the sound (two, for
+    // a split controller); a map of the sides when the window is split, to pick the one the rest
+    // changes; then that side's controller's settings by group, each a row that opens a panel
+    // beside the rail with all of the group's settings in it; then the app's. A tile opens its own
+    // picker. Which settings, in which groups, and which the mode now leaves out: mpe::rail. A
+    // group with a "panel" setting (the Grid's Touch) opens the controller's own panel instead.
+    // Under the top row the rail scrolls; so does a long panel.
     static constexpr float kButton = 40;           // the top buttons' width
     static constexpr float kTop = 46;              // the top row: odo, full screen, hide
     static constexpr float kBottom = 84;           // the lines at the bottom: version and update, latency, load
-    static constexpr float kItem = 40, kHeading = 26, kToggle = 42, kDivider = 13;
+    static constexpr float kPad = 16, kPanelHead = 58;
 
-    // What a row opens or flips: a controller setting by its place in the manifest (0 and up), or one of these.
-    enum Key { kNone = -100, kSplitKey = -1, kControllerKey = -2, kSoundKey = -3, kSound2Key = -4, kLookKey = -5,
-               kPresetKey = -6, kRenameKey = -7, kGesturesKey = -8 };
+    enum Key { kNone = -100, kPresetKey = -1, kSplitKey = -2, kControllerKey = -3, kSoundKey = -4, kSound2Key = -5, kAppKey = -6, kGroupKey = -7 };
+    int panelKey = kNone;
+    std::string panelGroup;                        // kGroupKey: the group it shows
+    float panelScroll = 0, settingsScroll = 0;
+    int folded = -1;                               // a group's panel: the setting whose long list of chips is open
+    bool renaming = false;                         // the preset panel: a new name being typed
+    std::string editText, search;                  // that name; the sound panel's search
 
-    struct RailItem {
-        enum Kind { Row, Heading, Toggle, Divider } kind;
-        int key;
-        std::string label, value;
-        bool isSwitch, on;                         // a switch, and whether it is on
-        float y, h;                                // from the top of the scrolled part, unscrolled
+    // ---- the rail's boxes: drawing and tapping use this one layout ----
+
+    struct Box {
+        enum Kind { Tile, Part, Map, Cell, Eyebrow, Group, App } kind;
+        int key;                                   // Tile: its panel; Part: 0 or 1; Cell: the side
+        std::string text;                          // Eyebrow: its words; Group: its name
+        float x, y, w, h;                          // y from the top of the scrolled part, unscrolled
     };
 
-    std::string soundName(int n) const {
-        const Instrument& in = lib.instruments[size_t(n)];
-        return in.pkg->name() + (in.index < 0 && in.error.empty() ? "..." : "");
-    }
+    static std::string upper(std::string s) { for (char& c : s) c = char(std::toupper(static_cast<unsigned char>(c))); return s; }
+    std::string groupLabel(const std::string& g) const { return g.empty() ? "Settings" : g; }
 
-    // The rail under its top row: the split, which side it changes, that side's controller and
-    // sound (two, for a split controller), then the controller's settings. Drawing, tapping and
-    // scrolling all use this one layout.
-    std::vector<RailItem> railItems() {
-        std::vector<RailItem> items;
-        float y = 0;
-        auto add = [&](RailItem::Kind k, int key, std::string label, std::string value, float h, bool sw = false, bool on = false) {
-            items.push_back({k, key, std::move(label), std::move(value), sw, on, y, h});
-            y += h;
-        };
-        Side& sd = cur();
-        add(RailItem::Row, kPresetKey, "Preset", presetName.empty() ? "None" : presetName + (presetEdited() ? " (changed)" : ""), kItem);
-        add(RailItem::Row, kSplitKey, "Split", kSplits[split].name, kItem);
-        if (count() > 1) add(RailItem::Toggle, kNone, "", "", kToggle);
-        add(RailItem::Row, kControllerKey, "Controller", sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", kItem);
+    std::vector<Box> railBoxes() {
+        std::vector<Box> b;
+        float x = 10, w = kRail - 20, half = (w - 8) / 2, y = 2;
+        b.push_back({Box::Tile, kPresetKey, "", x, y, w, 62}); y += 70;
+        b.push_back({Box::Tile, kSplitKey, "", x, y, half, 88});
+        b.push_back({Box::Tile, kControllerKey, "", x + half + 8, y, half, 88}); y += 96;
         if (!lib.instruments.empty()) {
-            bool two = partsOf(active) > 1;
-            const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
-            add(RailItem::Row, kSoundKey, two ? "Sound: " + parts[size_t(0)].str() : "Sound", soundName(sd.sound), kItem);
-            if (two) add(RailItem::Row, kSound2Key, "Sound: " + parts[size_t(1)].str(), soundName(sound2Of(active)), kItem);
+            int parts = partsOf(active);
+            float th = 28 + 46 * float(parts);
+            b.push_back({Box::Tile, kSoundKey, "", x, y, w, th});
+            for (int j = 0; j < parts; j++) b.push_back({Box::Part, j, "", x + 6, y + 26 + 46 * float(j), w - 12, 44});
+            y += th + 8;
         }
-        add(RailItem::Row, kLookKey, "Look", eink ? "E-ink" : "Dark", kItem);
-        if (gestures::supported())
-            add(RailItem::Row, kGesturesKey, "Block system gestures", !blockGestures ? "Off" : gestureNote.empty() ? "On" : gestureNote,
-                kItem, true, blockGestures);
+        if (count() > 1) {
+            const Split& sp = kSplits[split];
+            int cols = sp.cols, rows = (sp.sides + cols - 1) / cols;
+            b.push_back({Box::Eyebrow, kNone, "CHANGING", x, y, w, 22}); y += 22;
+            float mh = 12 + 42 * float(rows) - 4, cw = (w - 12 - 4 * float(cols - 1)) / float(cols);
+            b.push_back({Box::Map, kNone, "", x, y, w, mh});
+            for (int k = 0; k < sp.sides; k++)
+                b.push_back({Box::Cell, k, "", x + 6 + float(k % cols) * (cw + 4), y + 6 + float(k / cols) * 42, cw, 38});
+            y += mh + 6;
+        }
+        Side& sd = cur();
         if (sd.host) {
-            add(RailItem::Divider, kNone, "", "", kDivider);
-            for (auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) {
-                if (!g.name.empty()) add(RailItem::Heading, kNone, g.name, "", kHeading);
-                for (auto& r : g.rows) {
-                    bool sw = r.widget == mpe::rail::Widget::Switch;
-                    add(RailItem::Row, int(r.index), r.label, r.display, kItem, sw, sw && r.value != 0);
-                }
-            }
+            std::string head = upper(lib.controllers[size_t(sd.controller)]->name());
+            if (count() > 1) head += " \xC2\xB7 " + upper(kSplits[split].side[active]);
+            b.push_back({Box::Eyebrow, kNone, head, x, y, w, 26}); y += 26;
+            for (const auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) { b.push_back({Box::Group, kGroupKey, g.name, x, y, w, 50}); y += 52; }
         }
-        return items;
+        b.push_back({Box::Eyebrow, kNone, "APP", x, y, w, 26}); y += 26;
+        b.push_back({Box::App, kAppKey, "", x, y, w, 50});
+        return b;
     }
-    static float itemsHeight(const std::vector<RailItem>& items) { return items.empty() ? 0 : items.back().y + items.back().h; }
+    static float boxesHeight(const std::vector<Box>& b) { return b.empty() ? 0 : b.back().y + b.back().h + 8; }
 
-    float settingsScroll = 0;                      // how far the rail under its top row is scrolled
     void scrollRail(float by, float h) {
         float room = h - kBottom - kTop;
-        settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, itemsHeight(railItems()) - room));
+        settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, boxesHeight(railBoxes()) - room));
     }
 
-    // The open panel: what it is for (kNone: none), and how far its list is scrolled.
-    int panelKey = kNone;
-    float panelScroll = 0;
-    static constexpr float kPanelHead = 50, kPad = 14, kChipH = 32, kChipGap = 8, kListH = 36, kSliderH = 56;
+    const mpe::rail::Group* findGroup(const std::vector<mpe::rail::Group>& gs, const std::string& name) const {
+        for (const auto& g : gs) if (g.name == name) return &g;
+        return nullptr;
+    }
+    // A group's row on the rail: its first few values, and how many it shows now.
+    std::string groupSummary(const mpe::rail::Group& g) const {
+        std::string s;
+        int n = 0;
+        for (const auto& r : g.rows) {
+            if (r.panel || n == 3) continue;
+            std::string v = r.widget == mpe::rail::Widget::Switch ? r.label + (r.value != 0 ? " on" : " off") : r.display;
+            s += (s.empty() ? "" : " \xC2\xB7 ") + v;
+            n++;
+        }
+        return s.empty() ? (g.rows.empty() ? "Nothing to set in this mode" : "") : s;
+    }
+    // The setting that opens the controller's own panel for this group, or -1.
+    static int panelRow(const mpe::rail::Group& g) {
+        for (const auto& r : g.rows) if (r.panel) return int(r.index);
+        return -1;
+    }
 
-    struct PanelLayout {
+    // ---- the panel beside the rail ----
+
+    enum Act { aNone, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide };
+    struct PItem {
+        enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
+        std::string text, sub;
+        float x, y, w, h;                          // y from the content's top, unscrolled
+        int act = aNone, arg = 0, arg2 = 0;
+        bool on = false, rule = false;             // rule: a line above it
+        double frac = 0;                           // a slider's place
+        int pic = 0, picArg = -1;                  // a picture: 1 a split, 2 a controller, 3 a sound's badge
+        uint32_t colour = 0;                       // a heading's colour (a pack's), 0: the theme's
+    };
+    struct Panel {
         bool open = false;
-        float x = 0, y = 0, w = 0, h = 0;          // the card, in the window
-        std::string title;
-        enum Kind { Chips, List, Slider, Text } kind = Chips;
-        struct Item { std::string text; float x, y, w, h; };   // y from the content's top, unscrolled
-        std::vector<Item> items;
-        int chosen = -1;
-        float top = 0, room = 0, contentH = 0;     // where the content starts, how much of it shows, all of it
-        double frac = 0;                           // a slider's place, 0..1
-        std::string label, valueText;              // a slider's name and value
-        float trackX = 0, trackW = 0;
-        bool inCard(float px, float py) const { return open && px >= x && px < x + w && py >= y && py < y + h; }
-        bool onDone(float px, float py) const { return inCard(px, py) && px >= x + w - 80 && py < y + kPanelHead; }
+        float x = 0, y = 0, w = 0, h = 0;
+        std::string title, sub;
+        std::vector<PItem> items;
+        float top = 0, room = 0, contentH = 0;
+        bool in(float px, float py) const { return open && px >= x && px < x + w && py >= y && py < y + h; }
+        bool onDone(float px, float py) const { return in(px, py) && px >= x + w - 80 && py < y + kPanelHead; }
     };
 
-    PanelLayout panelLayout() {
-        PanelLayout p;
+    std::string presetSubtitle(const Preset& p) const {
+        std::string ctl, snd;
+        for (const PresetSide& s : p.sides) {
+            int c = controllerIndex(s.controller);
+            std::string cn = c >= 0 ? lib.controllers[size_t(c)]->name() : "?";
+            if (ctl.find(cn) == std::string::npos) ctl += (ctl.empty() ? "" : " + ") + cn;
+            int n = soundIndex(s.sound);
+            snd += (snd.empty() ? "" : ", ") + (n >= 0 ? lib.instruments[size_t(n)].pkg->name() : std::string("?"));
+            auto sp = s.settings.find("split");
+            int n2 = s.sound2.empty() ? -1 : soundIndex(s.sound2);
+            if (n2 >= 0 && sp != s.settings.end() && sp->second != 0) snd += " + " + lib.instruments[size_t(n2)].pkg->name();
+        }
+        return (p.split ? std::string(kSplits[p.split].name) + " \xC2\xB7 " : "") + ctl + " \xC2\xB7 " + snd;
+    }
+
+    static std::string lower(std::string s) { for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c))); return s; }
+
+    Panel panelLayout() {
+        Panel p;
         if (panelKey == kNone || railHidden) return p;
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         Side& sd = cur();
-        std::vector<std::string> names;
-        if (panelKey == kSplitKey) {
-            p.title = "Split"; p.kind = PanelLayout::List; p.chosen = split;
-            for (const Split& s : kSplits) names.push_back(s.name);
-        } else if (panelKey == kControllerKey) {
-            p.title = "Controller"; p.kind = PanelLayout::List; p.chosen = sd.controller;
-            for (const auto& c : lib.controllers) names.push_back(c->name());
-        } else if (panelKey == kPresetKey) {
-            // The presets, then what can be done with them.
-            p.title = "Preset"; p.kind = PanelLayout::List;
-            std::vector<Preset> all = allPresets();
-            for (size_t i = 0; i < all.size(); i++) {
-                names.push_back(all[i].name);
-                if (all[i].name == presetName) p.chosen = int(i);
-            }
-            for (const std::string& a : presetActions()) names.push_back(a);
-        } else if (panelKey == kRenameKey) {
-            if (!userPreset(presetName)) { panelKey = kNone; return p; }
-            p.title = "Rename"; p.kind = PanelLayout::Text;
-        } else if (panelKey == kLookKey) {
-            p.title = "Look"; p.kind = PanelLayout::Chips; p.chosen = eink ? 1 : 0;
-            names = {"Dark", "E-ink"};
-        } else if (panelKey == kSoundKey || panelKey == kSound2Key) {
-            if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < 2)) { panelKey = kNone; return p; }
-            const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
-            bool two = partsOf(active) > 1;
-            p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? 1 : 0)].str() : "Sound";
-            p.kind = PanelLayout::List;
-            p.chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
-            for (const Instrument& in : lib.instruments) names.push_back(in.pkg->name());
-        } else {
-            // A controller setting: as the rail model shows it. Gone (another controller, now
-            // hidden) or a switch: no panel.
-            if (!sd.host) { panelKey = kNone; return p; }
-            bool found = false;
-            for (const mpe::rail::Row& r : mpe::rail::rows(sd.host->manifest(), sd.settings)) {
-                if (int(r.index) != panelKey || r.widget == mpe::rail::Widget::Switch) continue;
-                found = true;
-                p.title = r.label;
-                if (r.widget == mpe::rail::Widget::Chips) { p.kind = PanelLayout::Chips; names = r.choices; p.chosen = r.chosen; }
-                else {
-                    p.kind = PanelLayout::Slider;
-                    p.frac = mpe::rail::toFraction(settingOf(r.index), r.value);
-                    p.label = r.label;
-                    p.valueText = r.display;
-                }
-            }
-            if (!found) { panelKey = kNone; return p; }
-        }
-        p.open = true;
         p.x = kRail + 8;
         p.y = 12;
-        p.w = std::min(380.f, float(ww) - p.x - 8);
-        float inner = p.w - 2 * kPad;
-        if (p.kind == PanelLayout::Chips) {
-            float cx = 0, cy = 0;
-            for (const std::string& n : names) {
-                float tw = std::min(inner, draw::textWidth(tokens::type::body, n) + 26);
-                if (cx > 0 && cx + tw > inner) { cx = 0; cy += kChipH + kChipGap; }
-                p.items.push_back({n, p.x + kPad + cx, cy, tw, kChipH});
-                cx += tw + kChipGap;
+        p.w = std::min(440.f, float(ww) - p.x - 8);
+        float in = p.w - 2 * kPad, x = p.x + kPad, y = 0;
+        std::string forSide = count() > 1 ? std::string("For the ") + lower(kSplits[split].side[active]) + " side" : "";
+        auto heading = [&](const std::string& t, uint32_t colour = 0) { PItem it{PItem::Heading, t, "", x, y + 6, in, 26}; it.colour = colour; p.items.push_back(it); y += 32; };
+        auto note = [&](const std::string& t) { p.items.push_back({PItem::Note, t, "", x, y, in, 24}); y += 28; };
+        // Chips that wrap, as wide as their words.
+        auto chips = [&](const std::vector<std::string>& names, int chosen, int act, int arg, const std::vector<int>* args = nullptr) {
+            float cx = 0;
+            for (size_t i = 0; i < names.size(); i++) {
+                float cw = std::min(in, draw::textWidth(13, names[i]) + 24);
+                if (cx > 0 && cx + cw > in) { cx = 0; y += 36; }
+                PItem it{PItem::Chip, names[i], "", x + cx, y, cw, 30};
+                it.act = act; it.arg = arg; it.arg2 = args ? (*args)[i] : int(i); it.on = int(i) == chosen;
+                p.items.push_back(it);
+                cx += cw + 6;
             }
-            p.contentH = names.empty() ? 0 : cy + kChipH;
-        } else if (p.kind == PanelLayout::List) {
-            for (size_t i = 0; i < names.size(); i++) p.items.push_back({names[i], p.x + kPad, float(i) * kListH, inner, kListH});
-            p.contentH = float(names.size()) * kListH;
-        } else if (p.kind == PanelLayout::Text) {
-            p.contentH = 44;
-        } else {
-            p.contentH = kSliderH;
-            p.trackX = p.x + kPad + 9;
-            p.trackW = inner - 18;
+            if (!names.empty()) y += 38;
+        };
+        if (panelKey == kPresetKey) {
+            p.title = "Presets"; p.sub = "The sound, the split, the controllers and their settings";
+            std::vector<Preset> all = allPresets();
+            for (int pass = 0; pass < 2; pass++) {
+                heading(pass ? "YOURS" : "BUILT IN");
+                bool any = false;
+                for (size_t i = 0; i < all.size(); i++) {
+                    if (all[i].builtIn != (pass == 0)) continue;
+                    any = true;
+                    PItem it{PItem::Row, all[i].name, presetSubtitle(all[i]), x, y, in, 50};
+                    it.act = aLoadPreset; it.arg = int(i); it.on = all[i].name == presetName; it.rule = true;
+                    if (all[i].split) { it.pic = 1; it.picArg = all[i].split; }
+                    else if (!all[i].sides.empty()) { it.pic = 2; it.picArg = controllerIndex(all[i].sides[0].controller); }
+                    p.items.push_back(it);
+                    y += 50;
+                }
+                if (!any) note("None yet: keep what is playing as one, below.");
+            }
+            heading("THIS PRESET");
+            auto action = [&](const std::string& t, int act) { PItem it{PItem::Row, t, "", x, y, in, 40}; it.act = act; it.rule = true; p.items.push_back(it); y += 40; };
+            action("+ Keep what is playing as a new preset", aNewPreset);
+            if (userPreset(presetName)) {
+                if (renaming) {
+                    p.items.push_back({PItem::Field, editText, "", x, y + 4, in, 38}); y += 46;
+                    action("Save the name (Enter)", aRenameOk);
+                } else action("Rename \xE2\x80\x9C" + presetName + "\xE2\x80\x9D", aRename);
+                action(std::string(confirmDelete ? "Tap again to delete \xE2\x80\x9C" : "Delete \xE2\x80\x9C") + presetName + "\xE2\x80\x9D", aDelete);
+            }
+        } else if (panelKey == kSplitKey || panelKey == kControllerKey) {
+            bool isSplit = panelKey == kSplitKey;
+            p.title = isSplit ? "Split" : "Controller";
+            p.sub = isSplit ? "Share the window: each side its own controller and sound" : forSide.empty() ? "What you play on" : forSide;
+            int n = isSplit ? kSplitCount : int(lib.controllers.size());
+            float tw = (in - 8) / 2;
+            for (int k = 0; k < n; k++) {
+                PItem it{PItem::Tile, "", "", x + float(k % 2) * (tw + 8), y + float(k / 2) * 104, tw, 96};
+                if (isSplit) {
+                    it.text = kSplits[k].name; it.sub = std::to_string(kSplits[k].sides) + (kSplits[k].sides == 1 ? " side" : " sides");
+                    it.act = aSplit; it.on = k == split; it.pic = 1;
+                } else {
+                    it.text = lib.controllers[size_t(k)]->name();
+                    std::string d = lib.controllers[size_t(k)]->manifest["description"].str();
+                    it.sub = d.substr(0, d.find_first_of(":;,"));
+                    it.act = aController; it.on = k == sd.controller; it.pic = 2;
+                }
+                it.arg = k; it.picArg = k;
+                p.items.push_back(it);
+            }
+            y += float((n + 1) / 2) * 104;
+        } else if (panelKey == kSoundKey || panelKey == kSound2Key) {
+            if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < 2)) { panelKey = kNone; return Panel(); }
+            bool two = partsOf(active) > 1;
+            const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
+            p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? 1 : 0)].str() : "Sound";
+            p.sub = forSide.empty() ? "Type to find one" : forSide + " \xC2\xB7 type to find one";
+            p.items.push_back({PItem::Field, search, "Find a sound", x, y, in, 38}); y += 46;
+            int chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
+            std::string q = lower(search), pack, group;
+            std::vector<std::string> names;
+            std::vector<int> ids;
+            auto flush = [&] { if (!names.empty()) { std::vector<int> a = ids; chips(names, -1, aSound, 0, &a); } names.clear(); ids.clear(); };
+            bool any = false;
+            for (int i : lib.soundOrder) {
+                const Instrument& s = lib.instruments[size_t(i)];
+                if (!q.empty() && lower(s.pkg->name() + " " + s.pack + " " + s.group).find(q) == std::string::npos) continue;
+                any = true;
+                if (s.pack != pack) { flush(); pack = s.pack; group.clear(); heading(upper(pack), packColour(pack)); }
+                if (s.group != group) { flush(); group = s.group; p.items.push_back({PItem::Sub, group, "", x, y, in, 20}); y += 22; }
+                names.push_back(s.pkg->name()); ids.push_back(i);
+            }
+            flush();
+            for (PItem& it : p.items) if (it.kind == PItem::Chip) it.on = it.arg2 == chosen;
+            if (!any) note("No sound matches \xE2\x80\x9C" + search + "\xE2\x80\x9D.");
+        } else if (panelKey == kAppKey) {
+            p.title = "App"; p.sub = "For all of odo, not kept in presets";
+            p.items.push_back({PItem::Label, "Look", eink ? "E-ink" : "Dark", x, y, in, 40}); y += 42;
+            chips({"Dark", "E-ink"}, eink ? 1 : 0, aLook, 0);
+            if (gestures::supported()) {
+                PItem it{PItem::Switch, "Block system gestures", !blockGestures ? "GNOME's three-finger swipes stay on" : gestureNote.empty() ? "Kept off odo while it has focus" : gestureNote, x, y, in, 48};
+                it.act = aGestures; it.on = blockGestures; it.rule = true;
+                p.items.push_back(it); y += 50;
+            }
+        } else if (panelKey == kGroupKey) {
+            if (!sd.host) { panelKey = kNone; return Panel(); }
+            auto gs = mpe::rail::groups(sd.host->manifest(), sd.settings);
+            const mpe::rail::Group* g = findGroup(gs, panelGroup);
+            if (!g) { panelKey = kNone; return Panel(); }
+            p.title = groupLabel(g->name);
+            p.sub = lib.controllers[size_t(sd.controller)]->name() + (count() > 1 ? std::string(" \xC2\xB7 ") + kSplits[split].side[active] + " side" : "");
+            bool first = true;
+            for (const auto& r : g->rows) {
+                if (r.panel) continue;
+                if (r.widget == mpe::rail::Widget::Switch) {
+                    PItem it{PItem::Switch, r.label, r.display, x, y, in, 48};
+                    it.act = aFlip; it.arg = int(r.index); it.on = r.value != 0; it.rule = !first;
+                    p.items.push_back(it); y += 50;
+                } else if (r.widget == mpe::rail::Widget::Chips) {
+                    size_t letters = 0;
+                    for (const auto& c : r.choices) letters += c.size();
+                    bool fold = r.choices.size() > 8 || letters > 56;
+                    if (fold) {
+                        PItem it{PItem::Fold, r.label, r.display, x, y, in, 48};
+                        it.act = aFold; it.arg = int(r.index); it.on = folded == int(r.index); it.rule = !first;
+                        p.items.push_back(it); y += 50;
+                        if (folded == int(r.index)) chips(r.choices, r.chosen, aChip, int(r.index));
+                    } else {
+                        PItem it{PItem::Label, r.label, r.display, x, y, in, 42};
+                        it.rule = !first;
+                        p.items.push_back(it); y += 44;
+                        chips(r.choices, r.chosen, aChip, int(r.index));
+                    }
+                } else {
+                    PItem it{PItem::Label, r.label, r.display, x, y, in, 42};
+                    it.rule = !first;
+                    p.items.push_back(it); y += 42;
+                    PItem s{PItem::Slider, "", "", x + 9, y, in - 18, 30};
+                    s.act = aSlide; s.arg = int(r.index); s.frac = mpe::rail::toFraction(settingOf(r.index), r.value);
+                    p.items.push_back(s); y += 36;
+                }
+                first = false;
+            }
+            if (g->rows.empty()) note("Nothing to set in this mode.");
+            if (g->hiddenNow) note(std::to_string(g->hiddenNow) + (g->hiddenNow == 1 ? " option" : " options") + " hidden in this mode");
         }
+        p.open = true;
+        p.contentH = y + 8;
         p.h = std::min(kPanelHead + p.contentH + kPad, float(wh) - 24);
         p.top = p.y + kPanelHead;
-        p.room = p.h - kPanelHead - kPad;
+        p.room = p.h - kPanelHead - kPad / 2;
         panelScroll = std::clamp(panelScroll, 0.f, std::max(0.f, p.contentH - p.room));
         return p;
     }
 
-    // Below the presets in their panel: keep this as a new one; for one of yours, rename or delete it.
-    std::vector<std::string> presetActions() {
-        std::vector<std::string> a = {"+ Keep this as a new preset"};
-        if (userPreset(presetName)) {
-            a.push_back("Rename \u201C" + presetName + "\u201D");
-            a.push_back(confirmDelete ? "Tap again to delete \u201C" + presetName + "\u201D" : "Delete \u201C" + presetName + "\u201D");
-        }
-        return a;
+    // The colour of a pack's heading and its sounds' badges.
+    static uint32_t packColour(const std::string& pack) {
+        static const struct { const char* name; uint32_t c; } kPacks[] = {
+            {"Classical", 0xFF8A65FFu}, {"Keys & Organs", 0xFFC857FFu}, {"Plucked & Struck", 0xAEEA70FFu},
+            {"Winds, Brass & Voices", 0x4DD0E1FFu}, {"Synthesizers", 0xC792EAFFu}, {"Percussion", 0xFF6B6BFFu}};
+        for (const auto& k : kPacks) if (pack == k.name) return k.c;
+        return 0x9AA2B4FFu;
     }
 
-    // Renaming: the name being typed, from the keyboard (Enter or Done keeps it, Esc does not).
-    std::string editText;
-    bool typing() const { return panelKey == kRenameKey; }
-    void startRename() {
-        panelKey = kRenameKey;
-        editText = presetName;
-        SDL_StartTextInput(window);
-    }
-    void endRename(bool keep) {
-        if (keep && panelKey == kRenameKey) renamePreset(presetName, editText);
-        panelKey = kPresetKey;
-        SDL_StopTextInput(window);
-    }
+    bool typing() const { return renaming || panelKey == kSoundKey || panelKey == kSound2Key; }
 
-    void presetTap(int n) {
-        std::vector<Preset> all = allPresets();
-        if (n < int(all.size())) { loadPreset(all[size_t(n)]); return; }
-        n -= int(all.size());
-        if (n == 0) newPreset();
-        else if (n == 1) startRename();
-        else if (n == 2) { if (confirmDelete) deletePreset(presetName); else confirmDelete = true; }
-    }
-
-    void openPanel(int key) {
-        if (typing()) SDL_StopTextInput(window);
-        confirmDelete = false;
-        panelKey = panelKey == key ? kNone : key;
+    void openPanel(int key, const std::string& group = "") {
+        bool same = panelKey == key && (key != kGroupKey || panelGroup == group);
+        panelKey = same ? kNone : key;
+        panelGroup = group;
         panelScroll = 0;
-        // A long list opens with the chosen one in sight.
-        PanelLayout p = panelLayout();
-        if (p.open && p.kind == PanelLayout::List && p.chosen >= 0)
-            panelScroll = std::clamp(float(p.chosen) * kListH - p.room / 2 + kListH / 2, 0.f, std::max(0.f, p.contentH - p.room));
+        folded = -1;
+        renaming = false;
+        confirmDelete = false;
+        search.clear();
     }
 
-    // A tap in the panel: Done, or a chip or a list's item.
+    // A tap on a group's row: its panel, or the controller's own (a "panel" switch flipped on).
+    void openGroup(const std::string& name) {
+        Side& sd = cur();
+        if (!sd.host) return;
+        auto gs = mpe::rail::groups(sd.host->manifest(), sd.settings);
+        const mpe::rail::Group* g = findGroup(gs, name);
+        if (!g) return;
+        int own = panelRow(*g);
+        if (own >= 0) { panelKey = kNone; setSetting(size_t(own), sd.settings[size_t(own)] != 0 ? 0 : 1); return; }
+        openPanel(kGroupKey, name);
+    }
+
     void panelTap(float x, float y) {
-        PanelLayout p = panelLayout();
+        Panel p = panelLayout();
         if (!p.open) return;
-        if (p.onDone(x, y)) { if (typing()) endRename(true); else panelKey = kNone; return; }
+        if (p.onDone(x, y)) { panelKey = kNone; renaming = false; return; }
         if (y < p.top || y >= p.top + p.room) return;
-        for (size_t i = 0; i < p.items.size(); i++) {
-            const auto& it = p.items[i];
+        for (const PItem& it : p.items) {
             float iy = p.top + it.y - panelScroll;
-            if (x < it.x || x >= it.x + it.w || y < iy || y >= iy + it.h) continue;
-            int n = int(i);
-            if (panelKey == kPresetKey) presetTap(n);
-            else if (panelKey == kSplitKey) { setSplit(n); panelKey = kNone; }
-            else if (panelKey == kControllerKey) { chooseController(active, n); panelKey = kNone; }
-            else if (panelKey == kSoundKey) chooseSound(active, n);
-            else if (panelKey == kSound2Key) chooseSound2(active, n);
-            else if (panelKey == kLookKey) setEink(n == 1);
-            else setSetting(size_t(panelKey), mpe::rail::chipValue(settingOf(size_t(panelKey)), n));
+            if (it.act == aNone || x < it.x || x >= it.x + it.w || y < iy || y >= iy + it.h) continue;
+            switch (it.act) {
+                case aLoadPreset: { std::vector<Preset> all = allPresets(); if (it.arg < int(all.size())) loadPreset(all[size_t(it.arg)]); break; }
+                case aNewPreset: newPreset(); renaming = false; break;
+                case aRename: renaming = true; editText = presetName; break;
+                case aRenameOk: renamePreset(presetName, editText); renaming = false; break;
+                case aDelete: if (confirmDelete) deletePreset(presetName); else confirmDelete = true; break;
+                case aSplit: setSplit(it.arg); break;
+                case aController: chooseController(active, it.arg); break;
+                case aSound: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
+                case aLook: setEink(it.arg2 == 1); break;
+                case aGestures: setBlockGestures(!blockGestures); break;
+                case aFlip: setSetting(size_t(it.arg), cur().settings[size_t(it.arg)] != 0 ? 0 : 1); break;
+                case aChip: setSetting(size_t(it.arg), mpe::rail::chipValue(settingOf(size_t(it.arg)), it.arg2)); break;
+                case aFold: folded = folded == it.arg ? -1 : it.arg; break;
+                default: break;
+            }
+            if (it.act != aDelete) confirmDelete = false;
             return;
         }
     }
 
-    // A slider under x: the setting at that place.
-    void panelSlide(const PanelLayout& p, float x, bool save) {
-        if (p.kind != PanelLayout::Slider || panelKey < 0 || p.trackW <= 0) return;
-        double t = std::clamp(double(x - p.trackX) / double(p.trackW), 0.0, 1.0);
-        setSetting(size_t(panelKey), mpe::rail::fromFraction(settingOf(size_t(panelKey)), t), save);
+    // A slider in the panel under x: its setting at that place.
+    struct Slide { int setting = -1; float x = 0, w = 0; } slide;
+    void panelSlide(float x, bool save) {
+        if (slide.setting < 0 || slide.w <= 0) return;
+        double t = std::clamp(double(x - slide.x) / double(slide.w), 0.0, 1.0);
+        setSetting(size_t(slide.setting), mpe::rail::fromFraction(settingOf(size_t(slide.setting)), t), save);
     }
 
-    // A tap on the rail: the top row's buttons, the update line, a row (a switch flips, the rest
-    // open their panel) or the side toggle.
+    // A tap on the rail: the top row's buttons, the update line, a tile, a sound, a side, a group.
     void railTap(float x, float y) {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
@@ -1045,22 +1205,24 @@ struct App {
         }
         if (y >= float(wh) - kBottom) return;
         float at = y - kTop + settingsScroll;
-        for (const RailItem& it : railItems()) {
-            if (at < it.y || at >= it.y + it.h) continue;
-            if (it.kind == RailItem::Toggle) {           // which side the rail changes
-                int n = count(), k = std::clamp(int((x - 8) / ((kRail - 16) / float(n))), 0, n - 1);
-                if (k != active) { setActive(k); panelKey = kNone; }
-            } else if (it.kind == RailItem::Row) {
-                if (it.isSwitch && it.key == kGesturesKey) setBlockGestures(!blockGestures);
-                else if (it.isSwitch) { setSetting(size_t(it.key), mpe::rail::stepped(settingOf(size_t(it.key)), cur().settings[size_t(it.key)], 1)); }
-                else openPanel(it.key);
+        std::vector<Box> boxes = railBoxes();
+        // The innermost box under the tap: a sound in its tile, a side in the map.
+        for (auto it = boxes.rbegin(); it != boxes.rend(); ++it) {
+            const Box& b = *it;
+            if (x < b.x || x >= b.x + b.w || at < b.y || at >= b.y + b.h) continue;
+            switch (b.kind) {
+                case Box::Part: openPanel(b.key ? kSound2Key : kSoundKey); return;
+                case Box::Cell: if (b.key != active) { setActive(b.key); panelKey = panelKey == kGroupKey ? kNone : panelKey; } return;
+                case Box::Tile: if (b.key != kSoundKey) openPanel(b.key); return;
+                case Box::Group: openGroup(b.text); return;
+                case Box::App: openPanel(kAppKey); return;
+                default: break;
             }
-            return;
         }
     }
 
     // A finger (or the mouse) on the rail or the panel: a tap acts when it lifts, a drag scrolls
-    // (the rail, or the panel's list), and on a slider it slides. phase 0 down, 1 move, 2 up.
+    // (the rail, or the panel), and on a slider it slides. phase 0 down, 1 move, 2 up.
     // True if the rail or the panel took it.
     static constexpr int64_t kMouse = -1;
     struct Press {
@@ -1077,20 +1239,25 @@ struct App {
         if (phase == 0) {
             // Hidden, the rail's corner button brings it back.
             if (railHidden && x < 44 && y < 44) { setRailHidden(false); press = Press{Press::Corner, true, id, x, y, y, true, false}; return true; }
-            PanelLayout p = panelLayout();
-            bool mine = x < railW() || p.inCard(x, y);
+            Panel p = panelLayout();
+            bool mine = x < railW() || p.in(x, y);
             if (press.on) return mine;                   // one finger at a time on the rail and panel
             if (!mine) return false;
-            press = Press{p.inCard(x, y) ? Press::Panel : Press::Rail, true, id, x, y, y, false, false};
-            if (press.where == Press::Panel && p.kind == PanelLayout::Slider && y >= p.top && !p.onDone(x, y)) {
-                press.sliding = press.dragged = true;
-                panelSlide(p, x, false);
-            }
+            press = Press{p.in(x, y) ? Press::Panel : Press::Rail, true, id, x, y, y, false, false};
+            if (press.where == Press::Panel && y >= p.top && !p.onDone(x, y))
+                for (const PItem& it : p.items) {
+                    float iy = p.top + it.y - panelScroll;
+                    if (it.kind != PItem::Slider || x < it.x - 10 || x >= it.x + it.w + 10 || y < iy - 6 || y >= iy + it.h + 6) continue;
+                    slide = Slide{it.arg, it.x, it.w};
+                    press.sliding = press.dragged = true;
+                    panelSlide(x, false);
+                    break;
+                }
             return true;
         }
         if (!press.on || press.id != id) return false;
         if (phase == 1) {
-            if (press.sliding) panelSlide(panelLayout(), x, false);
+            if (press.sliding) panelSlide(x, false);
             else {
                 if (std::fabs(y - press.y0) > 16) press.dragged = true;
                 if (press.dragged && press.where == Press::Rail) scrollRail(press.last - y, float(wh));
@@ -1100,7 +1267,7 @@ struct App {
             return true;
         }
         press.on = false;
-        if (press.sliding) saveConfig();
+        if (press.sliding) { saveConfig(); slide = Slide(); }
         else if (!press.dragged && press.where == Press::Rail) railTap(press.x, press.y0);
         else if (!press.dragged && press.where == Press::Panel) panelTap(press.x, press.y0);
         return true;
@@ -1160,21 +1327,25 @@ struct App {
             case SDL_EVENT_MOUSE_WHEEL: {
                 float mx, my;
                 SDL_GetMouseState(&mx, &my);
-                if (panelLayout().inCard(mx, my)) { panelScroll -= e.wheel.y * 40; panelLayout(); }
+                if (panelLayout().in(mx, my)) { panelScroll -= e.wheel.y * 40; panelLayout(); }
                 else if (mx < railW()) scrollRail(-e.wheel.y * 40, float(wh));
                 return;
             }
-            case SDL_EVENT_TEXT_INPUT:
-                if (typing() && editText.size() < 60) editText += e.text.text;
+            case SDL_EVENT_TEXT_INPUT: {
+                // a preset's new name, or the sound panel's search
+                std::string& to = renaming ? editText : search;
+                if (typing() && to.size() < 60) { to += e.text.text; panelScroll = renaming ? panelScroll : 0; }
                 return;
+            }
             case SDL_EVENT_KEY_DOWN:
                 if (typing()) {
-                    if (e.key.key == SDLK_BACKSPACE && !editText.empty()) {
-                        size_t n = editText.size() - 1;      // a whole UTF-8 character
-                        while (n > 0 && (static_cast<unsigned char>(editText[n]) & 0xC0) == 0x80) n--;
-                        editText.resize(n);
-                    } else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) endRename(true);
-                    else if (e.key.key == SDLK_ESCAPE) endRename(false);
+                    std::string& to = renaming ? editText : search;
+                    if (e.key.key == SDLK_BACKSPACE && !to.empty()) {
+                        size_t n = to.size() - 1;            // a whole UTF-8 character
+                        while (n > 0 && (static_cast<unsigned char>(to[n]) & 0xC0) == 0x80) n--;
+                        to.resize(n);
+                    } else if (renaming && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) { renamePreset(presetName, editText); renaming = false; }
+                    else if (e.key.key == SDLK_ESCAPE) { if (renaming) renaming = false; else panelKey = kNone; }
                     return;
                 }
                 if (e.key.key == SDLK_TAB) setRailHidden(!railHidden);
@@ -1196,66 +1367,176 @@ struct App {
         SDL_SetRenderClipRect(renderer, &r);
     }
 
+    // A split, drawn: its sides as boxes in w x h; the one the rail changes filled.
+    void splitPic(int n, int activeSide, float x, float y, float w, float h, draw::Color c) {
+        const Split& sp = kSplits[n];
+        int cols = sp.cols, rows = (sp.sides + cols - 1) / cols;
+        float g = 3, cw = (w - g * float(cols - 1)) / float(cols), rh = (h - g * float(rows - 1)) / float(rows);
+        for (int k = 0; k < sp.sides; k++) {
+            float bx = x + float(k % cols) * (cw + g), by = y + float(k / cols) * (rh + g);
+            if (k == activeSide) draw::fillRect(renderer, bx, by, cw, rh, draw::Color{c.r, c.g, c.b, 0.45f}, 3);
+            draw::strokeRect(renderer, bx, by, cw, rh, c, 1.6f, 3);
+        }
+    }
+
+    // A controller, drawn small (one odo does not know: its first letter in a box).
+    void controllerPic(int n, float x, float y, float w, float h, draw::Color c) {
+        if (n < 0 || n >= int(lib.controllers.size())) return;
+        std::string id = lib.controllers[size_t(n)]->id();
+        float s = std::min(w / 40, h / 28);
+        float ox = x + (w - 40 * s) / 2, oy = y + (h - 28 * s) / 2;
+        auto X = [&](float v) { return ox + v * s; };
+        auto Y = [&](float v) { return oy + v * s; };
+        if (id == "patrickreynolds/grid") {
+            for (int r = 0; r < 2; r++) for (int k = 0; k < 3; k++) {
+                float bx = X(5 + float(k) * 10.5f), by = Y(3 + float(r) * 11);
+                if (k == 1 && r == 1) draw::fillRect(renderer, bx, by, 8.5f * s, 9 * s, c, 2 * s);
+                else draw::strokeRect(renderer, bx, by, 8.5f * s, 9 * s, c, 1.6f, 2 * s);
+            }
+        } else if (id == "patrickreynolds/touchpad") {
+            draw::strokeRect(renderer, X(3), Y(3), 34 * s, 22 * s, c, 1.6f, 3 * s);
+            for (int k = 1; k < 6; k++) draw::line(renderer, X(3 + float(k) * 34 / 6), Y(3), X(3 + float(k) * 34 / 6), Y(25), c, 1);
+            draw::circle(renderer, X(20), Y(12), 3 * s, c, c, 0);
+        } else if (id == "patrickreynolds/tonnetz") {
+            const float px[5] = {4, 12, 20, 28, 36}, py[5] = {24, 6, 24, 6, 24};
+            for (int k = 0; k < 4; k++) draw::line(renderer, X(px[k]), Y(py[k]), X(px[k + 1]), Y(py[k + 1]), c, 1.6f);
+            draw::line(renderer, X(4), Y(24), X(36), Y(24), c, 1.6f);
+            draw::line(renderer, X(8), Y(15), X(32), Y(15), c, 1.2f);
+            for (int k : {1, 2, 3}) draw::circle(renderer, X(px[k]), Y(py[k]), 2.4f * s, c, c, 0);
+        } else {
+            draw::strokeRect(renderer, X(6), Y(3), 28 * s, 22 * s, c, 1.6f, 4 * s);
+            draw::text(renderer, X(20), Y(19), 12 * s, c, lib.controllers[size_t(n)]->name().substr(0, 1), 1, true);
+        }
+    }
+
+    // A sound's badge: its pack's colour, the first letters of its name.
+    void soundBadge(int i, float x, float y, float size) {
+        const Instrument& s = lib.instruments[size_t(i)];
+        const tokens::Palette& p = look();
+        draw::Color c = rgba(p.eink ? 0xFFFFFFFFu : packColour(s.pack));
+        draw::fillRect(renderer, x, y, size, size, c, 8);
+        if (p.eink) draw::strokeRect(renderer, x, y, size, size, rgba(p.line), 2, 8);
+        draw::text(renderer, x + size / 2, y + size / 2 + 4, 11, rgba(p.eink ? 0x000000FFu : 0x0E1014FFu), s.pkg->name().substr(0, 2), 1, true);
+    }
+
+    void chev(float x, float y, draw::Color c, bool down = false) {
+        if (down) { draw::line(renderer, x - 4, y - 2, x, y + 2, c, 2); draw::line(renderer, x, y + 2, x + 4, y - 2, c, 2); }
+        else chevron(renderer, x, y, 11, 1, c);
+    }
+
     void drawRail(float h) {
         const tokens::Palette& p = look();
         draw::Color bg = rgba(p.ink), text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]);
+        draw::Color tile = rgba(p.panel), key = rgba(p.panelHigh), line = rgba(p.line);
         draw::fillRect(renderer, 0, 0, kRail, h, bg);
-        if (p.eink) draw::fillRect(renderer, kRail - 2, 0, 2, h, rgba(p.line));
-        draw::Color key = rgba(p.panelHigh);
+        if (p.eink) draw::fillRect(renderer, kRail - 2, 0, 2, h, line);
         // The top row: odo, and buttons for full screen and to hide the rail.
         draw::text(renderer, 12, 30, tokens::type::title, accent, "odo", 0, true);
         draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kTop - 10, key, tokens::radius::control);
         draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kTop - 10, key, tokens::radius::control);
         if (p.eink) for (int b = 1; b <= 2; b++)
-            draw::strokeRect(renderer, kRail - float(b) * kButton + 2, 5, kButton - 4, kTop - 10, rgba(p.line), 2, tokens::radius::control);
+            draw::strokeRect(renderer, kRail - float(b) * kButton + 2, 5, kButton - 4, kTop - 10, line, 2, tokens::radius::control);
         draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kTop / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
         chevron(renderer, kRail - 0.5f * kButton - 4, kTop / 2, 12, -1, text);
         chevron(renderer, kRail - 0.5f * kButton + 4, kTop / 2, 12, -1, text);
 
-        // Under it, scrolled: the rows, as Android's rail has them.
-        scrollRail(0, h);                                // keep the scroll in range (the window may have grown)
-        std::vector<RailItem> items = railItems();
+        // Under it, scrolled: the tiles, the sides, the groups, the app.
+        scrollRail(0, h);
+        std::vector<Box> boxes = railBoxes();
         float room = h - kBottom - kTop;
         clip(0, kTop, kRail, room);
-        for (const RailItem& it : items) {
-            float y = kTop + it.y - settingsScroll;
-            if (y + it.h < kTop || y > kTop + room) continue;
-            switch (it.kind) {
-                case RailItem::Divider:
-                    draw::line(renderer, 12, y + it.h / 2, kRail - 12, y + it.h / 2, rgba(p.line), 1);
-                    break;
-                case RailItem::Heading: {                // a group's name: small capitals, as Android's
-                    std::string up = it.label;
-                    for (char& c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
-                    draw::text(renderer, 14, y + it.h - 7, tokens::type::header, dim, draw::fit(up, tokens::type::header, kRail - 28, true), 0, true);
-                    break;
-                }
-                case RailItem::Toggle: {                 // which side the rail changes, one cell each
-                    int n = count();
-                    float bx = 8, bw = kRail - 16, cw = bw / float(n);
-                    draw::strokeRect(renderer, bx, y + 5, bw, it.h - 10, p.eink ? rgba(p.line) : dim, p.eink ? 2 : 1, 8);
-                    for (int k = 0; k < n; k++) {
-                        bool on = k == active;
-                        float cx = bx + float(k) * cw;
-                        if (on) draw::fillRect(renderer, cx + 2, y + 7, cw - 4, it.h - 14, p.eink ? rgba(p.text) : rgba(tokens::alpha(p.parts[0], 0x4D)), 6);
-                        std::string name = draw::fit(kSplits[split].side[k], tokens::type::header, cw - 8, on);
-                        draw::text(renderer, cx + cw / 2, y + it.h / 2 + 4.5f, tokens::type::header,
-                                   on ? (p.eink ? bg : accent) : text, name, 1, on);
+        Side& sd = cur();
+        auto gs = sd.host ? mpe::rail::groups(sd.host->manifest(), sd.settings) : std::vector<mpe::rail::Group>();
+        for (const Box& b : boxes) {
+            float y = kTop + b.y - settingsScroll;
+            if (y + b.h < kTop || y > kTop + room) continue;
+            auto eyebrow = [&](float ex, float ey, const std::string& t) { draw::text(renderer, ex, ey, 10, dim, t, 0, true); };
+            switch (b.kind) {
+                case Box::Tile: {
+                    bool open = panelKey == b.key || (b.key == kSoundKey && panelKey == kSound2Key);
+                    draw::fillRect(renderer, b.x, y, b.w, b.h, open ? key : tile, 12);
+                    if (open || p.eink) draw::strokeRect(renderer, b.x, y, b.w, b.h, open && !p.eink ? accent : line, open ? 2 : 1.5f, 12);
+                    if (b.key == kPresetKey) {
+                        eyebrow(b.x + 12, y + 17, "PRESET");
+                        draw::text(renderer, b.x + 12, y + 37, 15, text, draw::fit(presetName.empty() ? "None" : presetName, 15, b.w - 24, true), 0, true);
+                        bool edited = presetEdited();
+                        std::string sub;
+                        for (const Preset& pr : allPresets()) if (pr.name == presetName) sub = presetSubtitle(pr);
+                        if (presetName.empty()) sub = "Keep what plays as a preset";
+                        draw::text(renderer, b.x + 12, y + 54, 12, edited ? accent : dim, draw::fit(edited ? "Changed since loaded" : sub, 12, b.w - 24));
+                    } else if (b.key == kSplitKey) {
+                        eyebrow(b.x + 12, y + 17, "SPLIT");
+                        splitPic(split, count() > 1 ? active : -1, b.x + 12, y + 28, 46, 30, p.eink ? text : accent);
+                        draw::text(renderer, b.x + 12, y + 78, 12, dim, draw::fit(kSplits[split].name, 12, b.w - 24));
+                    } else if (b.key == kControllerKey) {
+                        eyebrow(b.x + 12, y + 17, "CONTROLLER");
+                        controllerPic(sd.controller, b.x + 12, y + 28, 46, 32, p.eink ? text : accent);
+                        draw::text(renderer, b.x + 12, y + 78, 12, dim, draw::fit(sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", 12, b.w - 24));
+                    } else if (b.key == kSoundKey) {
+                        eyebrow(b.x + 12, y + 17, partsOf(active) > 1 ? "SOUNDS" : "SOUND");
                     }
                     break;
                 }
-                case RailItem::Row: {
-                    bool open = panelKey == it.key, lit = open || it.on;
-                    if (open) draw::fillRect(renderer, 6, y + 1, kRail - 12, it.h - 2, p.eink ? rgba(p.text) : key, tokens::radius::control);
-                    draw::Color lc = open && p.eink ? bg : lit ? accent : text, vc = open && p.eink ? bg : dim;
-                    draw::text(renderer, 14, y + 17, tokens::type::header, lc, draw::fit(it.label, tokens::type::header, kRail - 28, true), 0, true);
-                    draw::text(renderer, 14, y + 32, tokens::type::label, vc, draw::fit(it.value, tokens::type::label, kRail - 28));
+                case Box::Part: {
+                    int n = b.key ? sound2Of(active) : sd.sound;
+                    bool open = (b.key ? kSound2Key : kSoundKey) == panelKey;
+                    const Instrument& s = lib.instruments[size_t(n)];
+                    soundBadge(n, b.x + 6, y + 7, 30);
+                    std::string name = s.pkg->name() + (s.index < 0 && s.error.empty() ? "..." : "");
+                    float nx = b.x + 46;
+                    if (partsOf(active) > 1 && sd.host) {
+                        std::string part = sd.host->manifest()["parts"][size_t(b.key)].str() + " ";
+                        draw::text(renderer, nx, y + 20, 14, dim, part);
+                        nx += draw::textWidth(14, part);
+                    }
+                    draw::text(renderer, nx, y + 20, 14, open ? accent : text, draw::fit(name, 14, b.x + b.w - nx - 6, true), 0, true);
+                    draw::text(renderer, b.x + 46, y + 36, 11, dim, draw::fit(s.pack.empty() ? "" : s.pack + " \xC2\xB7 " + s.group, 11, b.w - 52));
+                    break;
+                }
+                case Box::Eyebrow: eyebrow(b.x + 4, y + b.h - 7, draw::fit(b.text, 10, b.w - 8, true)); break;
+                case Box::Map:
+                    draw::fillRect(renderer, b.x, y, b.w, b.h, tile, 12);
+                    if (p.eink) draw::strokeRect(renderer, b.x, y, b.w, b.h, line, 2, 12);
+                    break;
+                case Box::Cell: {
+                    bool on = b.key == active;
+                    const Side& x = sides[b.key];
+                    draw::fillRect(renderer, b.x, y, b.w, b.h, on ? (p.eink ? text : rgba(tokens::alpha(p.parts[0], 0x38))) : bg, 8);
+                    draw::strokeRect(renderer, b.x, y, b.w, b.h, on ? (p.eink ? text : accent) : line, on ? 2 : 1, 8);
+                    draw::Color tc = on && p.eink ? bg : text, sc = on && p.eink ? bg : dim;
+                    draw::text(renderer, b.x + 8, y + 15, 11, tc, draw::fit(kSplits[split].side[b.key], 11, b.w - 14, true), 0, true);
+                    std::string what = (x.host ? lib.controllers[size_t(x.controller)]->name() : std::string("none")) +
+                                       (lib.instruments.empty() ? "" : " \xC2\xB7 " + lib.instruments[size_t(x.sound)].pkg->name());
+                    draw::text(renderer, b.x + 8, y + 30, 10, sc, draw::fit(what, 10, b.w - 14));
+                    break;
+                }
+                case Box::Group: {
+                    const mpe::rail::Group* g = findGroup(gs, b.text);
+                    if (!g) break;
+                    int own = panelRow(*g);
+                    bool open = (panelKey == kGroupKey && panelGroup == b.text) || (own >= 0 && sd.settings[size_t(own)] != 0);
+                    if (open) draw::fillRect(renderer, b.x, y, b.w, b.h, p.eink ? text : key, 10);
+                    draw::Color nc = open ? (p.eink ? bg : accent) : text, sc = open && p.eink ? bg : dim;
+                    draw::text(renderer, b.x + 12, y + 21, 14, nc, draw::fit(groupLabel(g->name), 14, b.w - 60, true), 0, true);
+                    draw::text(renderer, b.x + 12, y + 38, 12, sc, draw::fit(groupSummary(*g), 12, b.w - 60));
+                    if (own < 0) draw::text(renderer, b.x + b.w - 26, y + 30, 11, sc, std::to_string(g->rows.size()), 2);
+                    chev(b.x + b.w - 12, y + b.h / 2, sc);
+                    break;
+                }
+                case Box::App: {
+                    bool open = panelKey == kAppKey;
+                    if (open) draw::fillRect(renderer, b.x, y, b.w, b.h, p.eink ? text : key, 10);
+                    draw::Color nc = open ? (p.eink ? bg : accent) : text, sc = open && p.eink ? bg : dim;
+                    draw::text(renderer, b.x + 12, y + 21, 14, nc, "App", 0, true);
+                    std::string s = std::string(eink ? "E-ink" : "Dark") + (gestures::supported() ? std::string(" \xC2\xB7 gestures ") + (blockGestures ? "blocked" : "allowed") : "");
+                    draw::text(renderer, b.x + 12, y + 38, 12, sc, draw::fit(s, 12, b.w - 40));
+                    chev(b.x + b.w - 12, y + b.h / 2, sc);
                     break;
                 }
             }
         }
         SDL_SetRenderClipRect(renderer, nullptr);
-        float all = itemsHeight(items);
+        float all = boxesHeight(boxes);
         if (all > room) {                                // a scroll bar: how much of the rail shows, and where
             float bar = room * room / all, at = kTop + (room - bar) * settingsScroll / (all - room);
             draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
@@ -1263,11 +1544,11 @@ struct App {
 
         if (updater) {
             Updater::State us = updater->state();
-            std::string line = "odo " + updater->current();
+            std::string ln = "odo " + updater->current();
             std::string msg = us == Updater::State::Checking ? "checking for updates" : updater->message();
             bool act = us == Updater::State::Available || us == Updater::State::Installed;
             float ms = act ? tokens::type::header : tokens::type::caption;
-            draw::text(renderer, 12, h - 62, tokens::type::caption, dim, draw::fit(line, tokens::type::caption, kRail - 24));
+            draw::text(renderer, 12, h - 62, tokens::type::caption, dim, draw::fit(ln, tokens::type::caption, kRail - 24));
             draw::text(renderer, 12, h - 46, ms, act ? accent : dim, draw::fit(msg, ms, kRail - 24, act), 0, act);
         }
         mpe::Stats st = engine->stats();
@@ -1279,55 +1560,93 @@ struct App {
         drawPanel();
     }
 
-    // The open panel, beside the rail over the play area: its name and Done, then the setting's
-    // chips, a slider, or a list to choose from (Android's SettingPanel).
+    // The open panel, beside the rail over the play area: its name, what it is for and Done, then
+    // its rows, tiles, chips, switches and sliders.
     void drawPanel() {
-        PanelLayout pl = panelLayout();
+        Panel pl = panelLayout();
         if (!pl.open) return;
         const tokens::Palette& p = look();
-        draw::Color text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]), line = rgba(p.line);
+        draw::Color text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]), line = rgba(p.line), bg = rgba(p.ink);
+        draw::Color soft = rgba(tokens::alpha(p.line, 0xC0));
         draw::fillRect(renderer, pl.x, pl.y, pl.w, pl.h, rgba(p.panel), tokens::radius::card);
-        if (p.eink) draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, line, 2, tokens::radius::card);
-        else draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, rgba(tokens::alpha(p.line, 0xC0)), 1, tokens::radius::card);
-        draw::text(renderer, pl.x + kPad, pl.y + 31, 17, text, draw::fit(pl.title, 17, pl.w - 2 * kPad - 70, true), 0, true);
-        draw::text(renderer, pl.x + pl.w - kPad - 6, pl.y + 31, tokens::type::body + 1, accent, "Done", 2, true);
-        if (pl.kind == PanelLayout::Text) {              // the name being typed, with a cursor
-            float fy = pl.top + 4, fw = pl.w - 2 * kPad;
-            draw::strokeRect(renderer, pl.x + kPad, fy, fw, 36, accent, p.eink ? 2 : 1.5f, 8);
-            std::string shown = draw::fit(editText, 15, fw - 24);
-            draw::text(renderer, pl.x + kPad + 10, fy + 23, 15, text, shown);
-            float cx = pl.x + kPad + 10 + draw::textWidth(15, shown) + 1;
-            if ((SDL_GetTicks() / 500) % 2 == 0) draw::fillRect(renderer, cx, fy + 9, 2, 18, accent);
-            return;
-        }
-        if (pl.kind == PanelLayout::Slider) {            // its name and value, then the slider
-            float y = pl.top;
-            draw::text(renderer, pl.x + kPad, y + 16, 14, text, draw::fit(pl.label, 14, pl.w - 2 * kPad - 70));
-            draw::text(renderer, pl.x + pl.w - kPad, y + 16, 14, dim, pl.valueText, 2);
-            float ty = y + 38, fx = pl.trackX + float(pl.frac) * pl.trackW;
-            draw::fillRect(renderer, pl.trackX, ty - 2, pl.trackW, 4, p.eink ? rgba(0xBBBBBBFF) : line, 2);
-            draw::fillRect(renderer, pl.trackX, ty - 2, fx - pl.trackX, 4, accent, 2);
-            draw::circle(renderer, fx, ty, 9, accent, accent, 0);
-            return;
-        }
+        draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, p.eink ? line : soft, p.eink ? 2 : 1, tokens::radius::card);
+        draw::text(renderer, pl.x + kPad, pl.y + 29, 17, text, draw::fit(pl.title, 17, pl.w - 2 * kPad - 70, true), 0, true);
+        draw::text(renderer, pl.x + kPad, pl.y + 47, 12, dim, draw::fit(pl.sub, 12, pl.w - 2 * kPad - 70));
+        draw::text(renderer, pl.x + pl.w - kPad - 4, pl.y + 31, tokens::type::body + 1, accent, "Done", 2, true);
         clip(pl.x, pl.top, pl.w, pl.room);
-        for (size_t i = 0; i < pl.items.size(); i++) {
-            const auto& it = pl.items[i];
+        for (const PItem& it : pl.items) {
             float y = pl.top + it.y - panelScroll;
             if (y + it.h < pl.top || y > pl.top + pl.room) continue;
-            bool on = int(i) == pl.chosen;
-            if (pl.kind == PanelLayout::Chips) {         // Android's FilterChip: the chosen one tinted and edged in the accent
-                if (on) draw::fillRect(renderer, it.x, y, it.w, it.h, p.eink ? text : rgba(tokens::alpha(p.parts[0], 0x38)), 8);
-                draw::strokeRect(renderer, it.x, y, it.w, it.h, p.eink ? line : on ? accent : line, p.eink ? 2 : 1, 8);
-                draw::text(renderer, it.x + it.w / 2, y + it.h / 2 + 4.5f, tokens::type::body,
-                           on ? (p.eink ? rgba(p.ink) : accent) : text, draw::fit(it.text, tokens::type::body, it.w - 16), 1);
-            } else {                                     // a list: the chosen one in the accent, bold
-                if (i > 0) draw::line(renderer, it.x, y, it.x + it.w, y, rgba(tokens::alpha(p.line, 0x80)), 1);
-                draw::text(renderer, it.x, y + it.h / 2 + 5.5f, 15, on ? accent : text, draw::fit(it.text, 15, it.w, on), 0, on);
+            if (it.rule) draw::line(renderer, it.x, y, it.x + it.w, y, rgba(tokens::alpha(p.line, 0x90)), 1);
+            switch (it.kind) {
+                case PItem::Heading:
+                    draw::text(renderer, it.x, y + 18, 11, it.colour && !p.eink ? rgba(it.colour) : dim, it.text, 0, true);
+                    break;
+                case PItem::Sub: draw::text(renderer, it.x, y + 14, 12, dim, it.text); break;
+                case PItem::Note: draw::text(renderer, it.x, y + 16, 12, dim, draw::fit(it.text, 12, it.w)); break;
+                case PItem::Row: {
+                    float tx = it.x + 2;
+                    if (it.pic == 1) { splitPic(it.picArg, -1, it.x + 2, y + 12, 38, 26, it.on ? accent : dim); tx = it.x + 52; }
+                    if (it.pic == 2) { controllerPic(it.picArg, it.x + 2, y + 10, 38, 30, it.on ? accent : dim); tx = it.x + 52; }
+                    bool two = !it.sub.empty();
+                    draw::text(renderer, tx, y + (two ? 21 : 25), 14, it.on ? accent : text, draw::fit(it.text, 14, it.x + it.w - tx, true), 0, true);
+                    if (two) draw::text(renderer, tx, y + 38, 12, dim, draw::fit(it.sub, 12, it.x + it.w - tx));
+                    break;
+                }
+                case PItem::Tile: {
+                    draw::fillRect(renderer, it.x, y, it.w, it.h, bg, 12);
+                    draw::strokeRect(renderer, it.x, y, it.w, it.h, it.on ? accent : line, it.on ? 2 : 1, 12);
+                    draw::Color pc = it.on ? accent : dim;
+                    if (it.pic == 1) splitPic(it.picArg, -1, it.x + 10, y + 10, 58, 38, pc);
+                    else controllerPic(it.picArg, it.x + 10, y + 10, 58, 40, pc);
+                    draw::text(renderer, it.x + 10, y + 68, 13, text, draw::fit(it.text, 13, it.w - 20, true), 0, true);
+                    draw::text(renderer, it.x + 10, y + 85, 11, dim, draw::fit(it.sub, 11, it.w - 20));
+                    break;
+                }
+                case PItem::Chip:
+                    if (it.on) draw::fillRect(renderer, it.x, y, it.w, it.h, p.eink ? text : rgba(tokens::alpha(p.parts[0], 0x38)), 8);
+                    draw::strokeRect(renderer, it.x, y, it.w, it.h, p.eink ? line : it.on ? accent : line, p.eink ? 2 : 1, 8);
+                    draw::text(renderer, it.x + it.w / 2, y + it.h / 2 + 4.5f, 13, it.on ? (p.eink ? bg : accent) : text, draw::fit(it.text, 13, it.w - 12), 1);
+                    break;
+                case PItem::Switch: {
+                    draw::text(renderer, it.x, y + 21, 13, text, draw::fit(it.text, 13, it.w - 60, true), 0, true);
+                    draw::text(renderer, it.x, y + 37, 12, dim, draw::fit(it.sub, 12, it.w - 60));
+                    float sx = it.x + it.w - 36, sy = y + it.h / 2 - 10;
+                    draw::fillRect(renderer, sx, sy, 36, 20, it.on ? (p.eink ? text : accent) : line, 10);
+                    if (p.eink) draw::strokeRect(renderer, sx, sy, 36, 20, line, 1.5f, 10);
+                    draw::circle(renderer, it.on ? sx + 26 : sx + 10, sy + 10, 8, it.on && p.eink ? bg : rgba(0xECEFF5FFu), it.on && p.eink ? bg : rgba(0xECEFF5FFu), 0);
+                    break;
+                }
+                case PItem::Fold:
+                    draw::text(renderer, it.x, y + 21, 13, text, draw::fit(it.text, 13, it.w - 30, true), 0, true);
+                    draw::text(renderer, it.x, y + 37, 12, it.on ? accent : dim, draw::fit(it.sub, 12, it.w - 30));
+                    chev(it.x + it.w - 8, y + it.h / 2, dim, true);
+                    break;
+                case PItem::Label:
+                    draw::text(renderer, it.x, y + 21, 13, text, draw::fit(it.text, 13, it.w - 90, true), 0, true);
+                    draw::text(renderer, it.x + it.w, y + 21, 12, dim, draw::fit(it.sub, 12, 120), 2);
+                    break;
+                case PItem::Slider: {
+                    float ty = y + it.h / 2, fx = it.x + float(it.frac) * it.w;
+                    draw::fillRect(renderer, it.x, ty - 2, it.w, 4, p.eink ? rgba(0xBBBBBBFF) : line, 2);
+                    draw::fillRect(renderer, it.x, ty - 2, fx - it.x, 4, accent, 2);
+                    draw::circle(renderer, fx, ty, 9, accent, accent, 0);
+                    break;
+                }
+                case PItem::Field: {
+                    draw::fillRect(renderer, it.x, y, it.w, it.h, bg, 10);
+                    draw::strokeRect(renderer, it.x, y, it.w, it.h, accent, p.eink ? 2 : 1.5f, 10);
+                    bool empty = it.text.empty();
+                    std::string shown = empty ? it.sub : draw::fit(it.text, 14, it.w - 28);
+                    draw::text(renderer, it.x + 12, y + 24, 14, empty ? dim : text, shown);
+                    float cx = it.x + 12 + (empty ? 0 : draw::textWidth(14, shown)) + 1;
+                    if ((SDL_GetTicks() / 500) % 2 == 0) draw::fillRect(renderer, cx, y + 10, 2, 18, accent);
+                    break;
+                }
             }
         }
         SDL_SetRenderClipRect(renderer, nullptr);
-        if (pl.contentH > pl.room) {                     // a scroll bar for a long list
+        if (pl.contentH > pl.room) {                     // a scroll bar for a long panel
             float bar = pl.room * pl.room / pl.contentH, at = pl.top + (pl.room - bar) * panelScroll / (pl.contentH - pl.room);
             draw::fillRect(renderer, pl.x + pl.w - 6, at, 2, bar, rgba(tokens::alpha(p.textDim, 0x80)), 1);
         }
@@ -1335,7 +1654,8 @@ struct App {
 
     void frame() {
         collectCompiled();
-        if (!typing() && SDL_TextInputActive(window)) SDL_StopTextInput(window);   // the rename panel was closed
+        // Typing (a preset's name, a sound's search) while its panel is open, and only then.
+        if (typing() != SDL_TextInputActive(window)) { if (typing()) SDL_StartTextInput(window); else SDL_StopTextInput(window); }
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         layoutSides();
@@ -1547,6 +1867,7 @@ int main(int argc, char** argv) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { std::fprintf(stderr, "odo: %s\n", SDL_GetError()); return 1; }
     App app;
     for (const auto& d : dirs) app.lib.scan(d);
+    app.lib.order();
     std::printf("odo: %zu instruments, %zu controllers\n", app.lib.instruments.size(), app.lib.controllers.size());
 
     app.engine = std::make_unique<mpe::Engine>(kRate);

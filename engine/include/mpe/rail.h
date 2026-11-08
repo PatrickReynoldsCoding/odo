@@ -19,12 +19,16 @@ struct Row {
     double min, max, step;            // Slider/number: step 0 = continuous. A choice: 0, options-1, 1; a switch: 0, 1, 1
     double value;                     // the current value
     std::string display;              // the value as shown: "On"/"Off", the choice's name, or the formatted number (with its unit)
+    bool panel = false;               // a switch that opens the controller's own panel ("panel": true)
 };
 
-struct Group { std::string name; std::vector<Row> rows; };   // name "" for settings with no group
+// name "" for settings with no group. hiddenNow: its settings left out because of what others are
+// set to now (their "showIf"); a group with none shown now is still listed.
+struct Group { std::string name; std::vector<Row> rows; int hiddenNow = 0; };
 
-// The rail: non-hidden settings, grouped. Groups appear in the order of their first setting; rows
-// keep manifest order within a group. values[i] is setting i's value; a missing one is its default.
+// The rail: non-hidden settings, grouped, without those whose "showIf" is not met by the values
+// now. Groups appear in the order of their first setting; rows keep manifest order within a group.
+// values[i] is setting i's value; a missing one is its default.
 std::vector<Group> groups(const Json& manifest, const std::vector<double>& values);
 // Flat convenience: every shown row, in display order (groups flattened).
 std::vector<Row> rows(const Json& manifest, const std::vector<double>& values);
@@ -39,10 +43,15 @@ std::string label(const Json& setting);                      // the name, withou
 
 // Helpers.
 Widget widget(const Json& setting);
+// Whether a setting is shown with these values: its "showIf" (none: always). An object: every key
+// (another setting's id) must match its value (a number, a list of numbers, or true/false for a
+// switch); a list of objects: any one of them.
+bool shown(const Json& manifest, const Json& setting, const std::vector<double>& values);
 double snap(const Json& setting, double value);              // clamped to its range and snapped to its step (a choice to an option)
 // groups() as compact JSON, for a MESH that draws in another language (Android, across JNI):
 // [{"name":"Layout","rows":[{"index":0,"id":"cols","label":"Squares across","widget":"chips",
-//   "choices":["2",...],"chosen":1,"min":2,"max":8,"step":1,"value":3,"display":"3"}, ...]}, ...]
+//   "choices":["2",...],"chosen":1,"min":2,"max":8,"step":1,"value":3,"display":"3"}, ...],"hiddenNow":0}, ...]
+// (a row that opens the controller's own panel also has "panel":true).
 // widget is "switch", "chips" or "slider".
 std::string toJson(const std::vector<Group>& groups);
 

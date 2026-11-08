@@ -101,6 +101,7 @@ Row row(const Json& s, size_t i, double v) {
     r.value = v;
     r.display = display(s, v);
     r.chosen = -1;
+    r.panel = s["panel"].boolean();
     if (r.widget == Widget::Chips) {
         if (kind(s) == Kind::Choice) {
             for (size_t k = 0; k < s["options"].size(); k++) r.choices.push_back(s["options"][k].str());
@@ -148,6 +149,37 @@ double snap(const Json& s, double v) {
     return onGrid(range(s), v);
 }
 
+namespace {
+bool matches(const Json& manifest, const Json& cond, const std::vector<double>& values) {
+    if (cond.type == Json::Array) {
+        for (size_t k = 0; k < cond.size(); k++) if (matches(manifest, cond[k], values)) return true;
+        return cond.size() == 0;
+    }
+    if (cond.type != Json::Object) return true;
+    const Json& ss = manifest["settings"];
+    for (const auto& kv : cond.o) {
+        size_t i = 0;
+        while (i < ss.size() && ss[i]["id"].str() != kv.first) i++;
+        if (i == ss.size()) continue;                      // no such setting: no condition
+        double v = valueOf(ss[i], i, values);
+        const Json& want = kv.second;
+        bool ok;
+        if (want.type == Json::Bool) ok = (v != 0) == want.b;
+        else if (want.type == Json::Array) {
+            ok = false;
+            for (size_t k = 0; k < want.size(); k++) ok = ok || std::fabs(v - want[k].num()) < 1e-9;
+        } else ok = std::fabs(v - want.num()) < 1e-9;
+        if (!ok) return false;
+    }
+    return true;
+}
+}  // namespace
+
+bool shown(const Json& manifest, const Json& s, const std::vector<double>& values) {
+    const Json& c = s["showIf"];
+    return c.type == Json::Null || matches(manifest, c, values);
+}
+
 std::vector<Group> groups(const Json& manifest, const std::vector<double>& values) {
     std::vector<Group> out;
     const Json& ss = manifest["settings"];
@@ -156,7 +188,8 @@ std::vector<Group> groups(const Json& manifest, const std::vector<double>& value
         if (s["hidden"].boolean()) continue;
         std::string g = s["group"].str();
         auto it = std::find_if(out.begin(), out.end(), [&](const Group& x) { return x.name == g; });
-        if (it == out.end()) { out.push_back({g, {}}); it = out.end() - 1; }
+        if (it == out.end()) { out.push_back({g, {}, 0}); it = out.end() - 1; }
+        if (!shown(manifest, s, values)) { it->hiddenNow++; continue; }
         it->rows.push_back(row(s, i, valueOf(s, i, values)));
     }
     return out;
@@ -251,9 +284,11 @@ std::string toJson(const std::vector<Group>& gs) {
             o += ",\"step\":"; num(o, r.step);
             o += ",\"value\":"; num(o, r.value);
             o += ",\"display\":"; quote(o, r.display);
+            if (r.panel) o += ",\"panel\":true";
             o += '}';
         }
-        o += "]}";
+        o += "],\"hiddenNow\":"; num(o, gs[gi].hiddenNow);
+        o += '}';
     }
     return o + "]";
 }

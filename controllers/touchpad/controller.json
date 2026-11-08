@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/touchpad",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Touch pad",
   "description": "Play with your fingers on the screen: columns of notes, each finger its own voice; slide to glide, up for louder and brighter, rock a finger for vibrato. Split it into two pads, or play a chord's notes from a chord wheel or grid",
   "author": "Patrick Reynolds",
@@ -99,7 +99,7 @@
       "name": "Split: two pads side by side",
       "type": "switch",
       "default": false,
-      "group": "Split"
+      "group": "Two pads"
     },
     {
       "id": "rightNotes",
@@ -112,7 +112,10 @@
         "Chord grid"
       ],
       "default": 0,
-      "group": "Split"
+      "group": "Two pads",
+      "showIf": {
+        "split": true
+      }
     },
     {
       "id": "rightSize",
@@ -144,7 +147,10 @@
         "24"
       ],
       "default": 0,
-      "group": "Split"
+      "group": "Two pads",
+      "showIf": {
+        "split": true
+      }
     },
     {
       "id": "rightOctave",
@@ -154,7 +160,10 @@
       "max": 4,
       "step": 1,
       "default": 0,
-      "group": "Split"
+      "group": "Two pads",
+      "showIf": {
+        "split": true
+      }
     },
     {
       "id": "rightKey",
@@ -176,7 +185,10 @@
         "B"
       ],
       "default": 0,
-      "group": "Split"
+      "group": "Two pads",
+      "showIf": {
+        "split": true
+      }
     },
     {
       "id": "rightScale",
@@ -196,14 +208,17 @@
         "Chromatic"
       ],
       "default": 0,
-      "group": "Split"
+      "group": "Two pads",
+      "showIf": {
+        "split": true
+      }
     },
     {
       "id": "rightDrums",
       "name": "Right: drum kit",
       "type": "switch",
       "default": false,
-      "group": "Split",
+      "group": "Two pads",
       "hidden": true
     },
     {
@@ -241,7 +256,16 @@
         "7sus4"
       ],
       "default": 0,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 1
+        },
+        {
+          "split": true,
+          "rightNotes": 2
+        }
+      ]
     },
     {
       "id": "wheelMiddle",
@@ -278,7 +302,16 @@
         "7sus4"
       ],
       "default": 1,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 1
+        },
+        {
+          "split": true,
+          "rightNotes": 2
+        }
+      ]
     },
     {
       "id": "wheelInner",
@@ -315,7 +348,16 @@
         "7sus4"
       ],
       "default": 2,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 1
+        },
+        {
+          "split": true,
+          "rightNotes": 2
+        }
+      ]
     },
     {
       "id": "middleRoots",
@@ -331,7 +373,16 @@
         "3rd"
       ],
       "default": 1,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 1
+        },
+        {
+          "split": true,
+          "rightNotes": 2
+        }
+      ]
     },
     {
       "id": "innerRoots",
@@ -347,7 +398,16 @@
         "3rd"
       ],
       "default": 2,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 1
+        },
+        {
+          "split": true,
+          "rightNotes": 2
+        }
+      ]
     },
     {
       "id": "gridRow1",
@@ -384,7 +444,16 @@
         "7sus4"
       ],
       "default": 0,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "gridRow2",
@@ -421,7 +490,16 @@
         "7sus4"
       ],
       "default": 1,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "gridRow3",
@@ -458,7 +536,16 @@
         "7sus4"
       ],
       "default": 8,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "gridRow4",
@@ -495,7 +582,16 @@
         "7sus4"
       ],
       "default": 9,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "gridRow5",
@@ -532,7 +628,16 @@
         "7sus4"
       ],
       "default": 10,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "gridRow6",
@@ -569,7 +674,16 @@
         "7sus4"
       ],
       "default": 5,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "gridRow7",
@@ -606,7 +720,16 @@
         "7sus4"
       ],
       "default": 2,
-      "group": "Chords"
+      "group": "Chords",
+      "showIf": [
+        {
+          "chordMode": 2
+        },
+        {
+          "split": true,
+          "rightNotes": 3
+        }
+      ]
     },
     {
       "id": "vertical",
@@ -668,7 +791,14 @@
         "Very high"
       ],
       "default": 1,
-      "group": "Touch"
+      "group": "Touch",
+      "showIf": {
+        "vibrato": [
+          1,
+          2,
+          3
+        ]
+      }
     },
     {
       "id": "locked",
@@ -720,7 +850,7 @@
       "max": 0.8,
       "step": 0,
       "default": 0.5,
-      "group": "Split",
+      "group": "Two pads",
       "hidden": true
     },
     {

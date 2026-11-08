@@ -29,7 +29,7 @@ data class RailGroup(val name: String, val rows: List<RailRow>) {
             return List(a.length()) { a.optJSONObject(it) }.filterNotNull().map { g ->
                 val rows = g.optJSONArray("rows") ?: JSONArray()
                 RailGroup(g.optString("name"), List(rows.length()) { rows.optJSONObject(it) }.filterNotNull().map(::row))
-            }
+            }.filter { it.rows.isNotEmpty() }     // a group its mode leaves empty (showIf) is not shown
         }
 
         private fun row(r: JSONObject): RailRow {

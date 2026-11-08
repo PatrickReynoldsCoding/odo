@@ -145,6 +145,8 @@ Each setting has an `id`, a `name` (the `id` if none), a `type`, a `default` and
 | `min`, `max`, `step` | a `number`'s range (0 and 1 if missing) and step. A missing or 0 step: continuous |
 | `hidden` | `true`: not on the rail |
 | `group` | a short name it is shown under: `Layout`, `Notes`, `Split`, `Touch`, `Look`, `Playing`, `Controls`... |
+| `showIf` | shown only when other settings are set so: an object of setting ids, each with the value it must have (a number, a list of numbers any of which will do, or `true`/`false` for a switch), all of which must hold; or a list of such objects, any one of which will do. `{"layout": 1}`, `{"split": true}`, `[{"chordMode": 1}, {"split": true, "rightNotes": 2}]`. For settings that mean nothing in the mode the controller is in |
+| `panel` | `true` on a `switch` that opens the controller's own panel (drawn on its surface; it turns the switch off when closed). A MESH whose rail opens a group as a panel opens this one instead, for its group |
 
 - **Order.** Hidden settings are left out. The rest are grouped by `group` (no group: a group
   named `""`). Groups appear in the order of their first setting; within a group, settings keep
@@ -160,6 +162,9 @@ Each setting has an `id`, a `name` (the `id` if none), a `type`, a `default` and
   to 2 decimals, trailing zeros dropped (`0.5`, `0.25`). A name ending in `(%)` shows the value
   with `%` (`50%`), one ending in `(dB)` with ` dB` (`24 dB`); the name is then shown without it.
 - **Values**: a missing value is the setting's `default`.
+- **Modes**: a setting whose `showIf` is not met by the values now is left out, as a hidden one
+  is, until it is. Its group still shows, with how many it leaves out (`hiddenNow`), even with
+  none left in it.
 
 ## Layouts without code
 

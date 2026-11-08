@@ -12,7 +12,8 @@ python3 "$root/third_party/mpe-instruments/tools/pack.py" -o "$root/third_party/
 "$root/controllers/build.sh"
 cmake -S "$root/desktop" -B "$build" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build "$build" -j "$(nproc)"
-mkdir -p "$lib"
+mkdir -p "$lib/packs"
+ln -sf "$root"/app/src/main/assets/packs/*.json "$lib/packs/"
 for f in "$root"/third_party/mpe-instruments/build/packages/*.odoi "$root"/controllers/build/*.odoc; do
     ln -sf "$f" "$lib/"
 done

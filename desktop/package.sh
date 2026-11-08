@@ -23,6 +23,8 @@ mkdir -p "$stage/licenses"
 cp "$root"/ui/fonts/OFL-*.txt "$stage/licenses/"
 strip "$stage/odo"
 cp "$root"/third_party/mpe-instruments/build/packages/*.odoi "$stage/library/"
+mkdir -p "$stage/library/packs"            # the sound packs: how the sound picker groups them, as on Android
+cp "$root"/app/src/main/assets/packs/*.json "$stage/library/packs/"
 for c in $controllers; do
     [ -f "$root/controllers/build/$c.odoc" ] && cp "$root/controllers/build/$c.odoc" "$stage/library/"
 done
@@ -35,7 +37,9 @@ Needs:    Linux x86-64 with SDL 3 and Faust's libfaust (Ubuntu 26.04: sudo apt i
 Updates:  odo checks GitHub for a newer version when it opens; tap the update line at the
           bottom of the rail to install it. ./odo --no-update turns the check off.
 Keys:     Tab hides the rail, F11 full screen, Left/Right change the sound, Esc quits.
-Presets:  the rail's top row. A preset of yours keeps what you change while it is on view.
+Rail:     the preset, split, controller and sound at the top, each opening its picker; then the
+          controller's settings by group, each opening a panel. A preset of yours keeps what you
+          change while it is on view. The Grid's Touch opens its own panel, with a square to play.
 Gestures: on GNOME, the rail's Block system gestures keeps three-finger swipes (overview,
           workspaces) off odo while it has focus. It installs a small GNOME Shell extension
           (odo-no-gestures@odo); log out and in once the first time.
