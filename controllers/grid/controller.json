@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -321,14 +321,10 @@
       "panel": true
     },
     {
-      "id": "inside",
-      "name": "Moving inside a square",
-      "type": "choice",
-      "options": [
-        "Dynamics and tone",
-        "Nothing"
-      ],
-      "default": 0,
+      "id": "insideDyn",
+      "name": "Up/down in a square: dynamics",
+      "type": "switch",
+      "default": true,
       "hidden": true,
       "group": "Touch"
     },
@@ -354,10 +350,7 @@
         "Wide"
       ],
       "default": 2,
-      "group": "Touch",
-      "showIf": {
-        "slide": false
-      }
+      "group": "Touch"
     },
     {
       "id": "labels",
@@ -890,6 +883,14 @@
       "showIf": {
         "layout": 3
       }
+    },
+    {
+      "id": "insideTone",
+      "name": "Left/right in a square: tone",
+      "type": "switch",
+      "default": true,
+      "hidden": true,
+      "group": "Touch"
     }
   ]
 }

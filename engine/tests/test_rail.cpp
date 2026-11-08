@@ -230,7 +230,7 @@ static void grid() {
     CHECK(find(rc, "noteEdit") && find(rc, "scrollBar"), "Your own notes: the notes editor and the scroll bar");
     auto vl = v;
     vl[idx(m, "slide")] = 1;
-    CHECK(find(rs, "vibrato") && !find(rail::rows(m, vl), "vibrato"), "Slide between notes: no vibrato");
+    CHECK(find(rs, "vibrato") && find(rail::rows(m, vl), "vibrato"), "Slide between notes: vibrato still there (only slides go)");
     vl[idx(m, "latch")] = 1;
     CHECK(!find(rs, "latchMode") && find(rail::rows(m, vl), "latchMode"), "Latch on: its next-touch choice");
     auto te = find(rs, "touchEdit");

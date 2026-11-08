@@ -54,7 +54,7 @@ enum {
     S_COLS, S_LAYOUT, S_LOCK, S_SPLIT, S_SPLIT_SIZE, S_TOP_WAY, S_TOP_NOTES, S_TOP_SCALE, S_TOP_KEY, S_TOP_OCTAVE, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
     /* Sliding out of a square: up/down (S_ACROSS, the upright grid's across) and left/right
        (S_UPDOWN, its up and down); the Touch panel open; inside a square; vibrato */
-    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_TOUCH_EDIT, S_INSIDE, S_DYN_LOW, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
+    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_TOUCH_EDIT, S_IN_DYN, S_DYN_LOW, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
     S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_VIB_SENS = S_SIDE0 + 6,
     /* hidden: the Dynamics fader */
     S_DYN,
@@ -67,12 +67,14 @@ enum {
     /* the loudness at the top of a square (the bottom's is S_DYN_LOW), in % */
     S_DYN_HIGH = S_NOTES0 + CUST_WORDS,
     /* Intervals: how far apart the rows of notes are */
-    S_INTERVAL, S_COUNT
+    S_INTERVAL,
+    /* left/right in a square sets the tone (up/down, the dynamics: S_IN_DYN) */
+    S_IN_TONE, S_COUNT
 };
-static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
+static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
@@ -436,21 +438,20 @@ static float past(float v) { return v < -MARGIN ? v + MARGIN : v > 1 + MARGIN ? 
    to 1 bottom. (Upright y up is the screen's right; upright x right is its down.) */
 static float across_of(const Finger* f, float y) { return (f->ry + f->rs - y) / f->rs; }
 static float down_of(const Finger* f, float x) { return (x - f->rx) / f->rs; }
-/* The dynamics at a point: from the bottom's loudness at the foot to the top's (Nothing inside:
-   the top's, wherever it is pressed). */
+/* The dynamics at a point: from the bottom's loudness at the foot to the top's (up/down off: the
+   top's, wherever it is pressed). */
 static float level_at(const Finger* f, float x, float y) {
     (void)y;
     float lo = dyn_low(), hi = dyn_high();
-    if (set_[S_INSIDE] != 0) return hi;
+    if (set_[S_IN_DYN] == 0) return hi;
     return lo + (hi - lo) * (1 - clampf(down_of(f, x), 0, 1));
 }
 static float tone_at(const Finger* f, float y) {
-    if (set_[S_INSIDE] != 0) return 0.5f;
+    if (set_[S_IN_TONE] == 0) return 0.5f;
     return clampf(across_of(f, y), 0, 1);
 }
 
 typedef struct { float pitch, pressure, slide, volume; } Expr;
-#define SLIDE_STRIKE 0.85f      /* how hard a slid-onto note is played: f */
 
 /* The two ways out of a square, from how far the finger (slowly) is past the line round it;
    vibrato from the rest. Loudness, tone and volume reach their full change half a square past it
@@ -510,12 +511,6 @@ static Expr expression(const Finger* f) {
 static int sliding(void) { return set_[S_SLIDE] != 0; }
 
 static Expr expression_in(const Finger* f) {
-    if (sliding()) {
-        /* Sliding: every note the same, firm and full; only the side controls change it. */
-        float dyn = clampf((float)set_[S_DYN], 0, 1);
-        Expr s = {(float)f->note + side_bend, SLIDE_STRIKE * (0.4f + 0.6f * dyn), clampf(0.5f + side_tone, 0, 1), dyn};
-        return s;
-    }
     /* In the square: the dynamics and tone where the finger is (slowly), held at the square's edge
        once it is out; full volume (or Volume's 0.7). */
     Expr e = {0, level_at(f, f->rx + clampf(down_of(f, f->sx), 0, 1) * f->rs, 0), tone_at(f, f->sy), 1};
@@ -524,8 +519,12 @@ static Expr expression_in(const Finger* f) {
        one that ignores how hard it is played (an organ). */
     e.volume *= strike_gain(e.pressure);
     float semis = 0;
-    apply(&e, (int)set_[S_ACROSS], past(down_of(f, f->sx)), 1, f, &semis);
-    apply(&e, (int)set_[S_UPDOWN], past(across_of(f, f->sy)), 0, f, &semis);
+    /* Out past the line: what each way is set to do; sliding between notes, nothing (the next
+       square plays instead). */
+    if (!sliding()) {
+        apply(&e, (int)set_[S_ACROSS], past(down_of(f, f->sx)), 1, f, &semis);
+        apply(&e, (int)set_[S_UPDOWN], past(across_of(f, f->sy)), 0, f, &semis);
+    }
     semis += side_bend;
     /* Snap the bend onto semitones, as the gyro's does: the middle of each semitone holds the note
        and the move to the next is squeezed toward the edges (all of it, at full snap). Not the
@@ -620,7 +619,7 @@ static void down_in(int id, float x, float y, int h) {
     f->x0 = f->x = f->sx = x; f->y0 = f->y = f->sy = y;
     f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
     f->ux = 1; f->uy = 0;
-    f->strike = sliding() ? SLIDE_STRIKE : level_at(f, x, y);
+    f->strike = level_at(f, x, y);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
@@ -650,7 +649,7 @@ static void slide_to(Finger* f, float x, float y) {
     f->voice = next_voice++; f->n = n; f->note = note_of(n); f->half = h;
     f->x0 = f->sx = x; f->y0 = f->sy = y;
     f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
-    f->strike = SLIDE_STRIKE;
+    f->strike = level_at(f, x, y);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     hv = was;
     Expr e = expression(f);
@@ -1041,6 +1040,7 @@ static float section(float x, float y, const char* title, const Theme* th) {
 /* What sliding out of a square one way does: axis 0 left/right (positive: right), 1 up/down
    (positive: down). */
 static const char* arrow_word(int axis, int positive) {
+    if (sliding()) return "the next square";
     int t = (int)set_[axis ? S_ACROSS : S_UPDOWN];
     int more = positive != (set_[axis ? S_AX_FLIP : S_UD_FLIP] != 0);
     switch (t) {
@@ -1086,21 +1086,19 @@ static float demo_part(float x, float y, float cw, const Theme* th) {
     /* The line where sliding starts. */
     mesh_rect(sx - m, sy - m, s + 2 * m, s + 2 * m, 14 + m, 0, out && !eink ? th->hot : mesh_alpha(ink, 0.3f), out ? 2 : 1);
     /* The square: its height the dynamics (lit at the top), across it the tone. */
-    int live = set_[S_INSIDE] == 0;
+    int dyn = set_[S_IN_DYN] != 0, tone = set_[S_IN_TONE] != 0, live = dyn || tone;
     mesh_rect(sx, sy, s, s, s * 0.08f, eink ? WHITE : th->square, 0, 0);
-    if (live && !eink) {
-        mesh_vgradient(sx + 2, sy + 2, s - 4, s - 4, mesh_alpha(th->light, 0.45f), mesh_alpha(th->light, 0.04f));
-        for (int k = 0; k < 6; k++) mesh_rect(sx + 2 + (s - 4) * (float)k / 6, sy + 2, (s - 4) / 6, s - 4, 0, mesh_alpha(th->hot, 0.02f * (float)k), 0, 0);
-    }
+    if (dyn && !eink) mesh_vgradient(sx + 2, sy + 2, s - 4, s - 4, mesh_alpha(th->light, 0.45f), mesh_alpha(th->light, 0.04f));
+    if (tone && !eink) for (int k = 0; k < 6; k++) mesh_rect(sx + 2 + (s - 4) * (float)k / 6, sy + 2, (s - 4) / 6, s - 4, 0, mesh_alpha(th->hot, 0.025f * (float)k), 0, 0);
     mesh_rect(sx, sy, s, s, s * 0.08f, 0, out && !eink ? th->hot : mesh_alpha(ink, 0.8f), 2);
     if (live) {
         char top[16], bot[16];
         put(put_int(top, roundi(dyn_high() * 100), 0), "%");
         put(put_int(bot, roundi(dyn_low() * 100), 0), "%");
-        mesh_text(sx + s / 2, sy + 14, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, top);
-        mesh_text(sx + s / 2, sy + s - 6, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, bot);
-        mesh_text(sx + 6, sy + s / 2 + 4, 10, mesh_alpha(ink, 0.8f), 0, "dark");
-        mesh_text(sx + s - 6, sy + s / 2 + 4, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_RIGHT, "bright");
+        if (dyn) mesh_text(sx + s / 2, sy + 14, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, top);
+        if (dyn) mesh_text(sx + s / 2, sy + s - 6, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER | MESH_TEXT_BOLD, bot);
+        if (tone) mesh_text(sx + 6, sy + s / 2 + 4, 10, mesh_alpha(ink, 0.8f), 0, "dark");
+        if (tone) mesh_text(sx + s - 6, sy + s / 2 + 4, 10, mesh_alpha(ink, 0.8f), MESH_TEXT_RIGHT, "bright");
     } else mesh_text(sx + s / 2, sy + s / 2 + 4, 11, mesh_alpha(ink, 0.8f), MESH_TEXT_CENTER, "press to play");
     (void)live;
     te_x = sx; te_y = sy; te_s = s;
@@ -1137,16 +1135,15 @@ static void ed_draw(const Theme* th) {
     int sliding_ = set_[S_SLIDE] != 0;
     chip(x, y, cw, 32, sliding_ ? "Slide between notes: on" : "Slide between notes: off", sliding_, th, K_SLIDE, 0);
     y += 40;
-    if (sliding_) {
-        mesh_text(x, y + 14, 11, mesh_alpha(ink, 0.8f), 0, "A finger plays whichever square it is on, from one note to the next.");
-        mesh_text(x, y + 30, 11, mesh_alpha(ink, 0.8f), 0, "Dynamics, tone, slides and vibrato are off while it is on.");
-        y += 44;
-    } else {
+    {
         y = demo_part(x, y, cw, th);
         y = section(x, y, "INSIDE A SQUARE", th);
-        static const char* INSIDE[2] = {"Dynamics and tone", "Nothing"};
-        y = chips(x, y, cw, INSIDE, 2, (int)set_[S_INSIDE], th, K_INSIDE, 0);
-        y = range_slider(x, y, cw, th);
+        int dyn = set_[S_IN_DYN] != 0, tone = set_[S_IN_TONE] != 0;
+        float hw = (cw - 6) / 2;
+        chip(x, y, hw, 30, dyn ? "Up/down: dynamics" : "Up/down: off", dyn, th, K_INSIDE, 0);
+        chip(x + hw + 6, y, hw, 30, tone ? "Left/right: tone" : "Left/right: off", tone, th, K_INSIDE, 1);
+        y += 38;
+        if (dyn) y = range_slider(x, y, cw, th);
         /* The Dynamics fader (an expression pedal over every note) stays where it was left: say so
            when it is turned down, as everything is quieter for it. */
         if (set_[S_DYN] < 0.99) {
@@ -1155,20 +1152,26 @@ static void ed_draw(const Theme* th) {
             chip(x, y, cw, 30, d, 0, th, K_DYN_FULL, 0);
             y += 38;
         }
-        y = section(x, y, "SLIDING OUT, PAST THE LINE", th);
-        static const char* AXIS[2] = {"Left/right", "Up/down"};
-        y = chips(x, y, cw, AXIS, 2, te_axis, th, K_AXIS, 0);
-        int target = (int)set_[te_axis ? S_ACROSS : S_UPDOWN];
-        y = chips(x, y, cw, TARGET_NAME, 5, target, th, K_TARGET, te_axis * 8);
-        if (target != T_NONE) {
-            y = slider(x, y, cw, te_axis ? SL_AX_AMOUNT : SL_UD_AMOUNT, th);
-            y = slider(x, y, cw, te_axis ? SL_AX_SENS : SL_UD_SENS, th);
-            static const char* LR[2] = {"Right is more", "Left is more"}, *UD[2] = {"Down is more", "Up is more"};
-            y = chips(x, y, cw, te_axis ? UD : LR, 2, set_[te_axis ? S_AX_FLIP : S_UD_FLIP] != 0, th, K_FLIP, te_axis * 8);
-        }
-        if (target == T_BEND) {
-            y = chips(x, y, cw, BEND_NAME, 7, (int)set_[S_BEND_RANGE], th, K_BRANGE, 0);
-            y = slider(x, y, cw, SL_BEND_SNAP, th);
+        if (sliding_) {
+            y = section(x, y, "SLIDING OUT", th);
+            mesh_text(x, y + 10, 11, mesh_alpha(ink, 0.8f), 0, "Sliding between notes: out of a square, the next one plays.");
+            y += 26;
+        } else {
+            y = section(x, y, "SLIDING OUT, PAST THE LINE", th);
+            static const char* AXIS[2] = {"Left/right", "Up/down"};
+            y = chips(x, y, cw, AXIS, 2, te_axis, th, K_AXIS, 0);
+            int target = (int)set_[te_axis ? S_ACROSS : S_UPDOWN];
+            y = chips(x, y, cw, TARGET_NAME, 5, target, th, K_TARGET, te_axis * 8);
+            if (target != T_NONE) {
+                y = slider(x, y, cw, te_axis ? SL_AX_AMOUNT : SL_UD_AMOUNT, th);
+                y = slider(x, y, cw, te_axis ? SL_AX_SENS : SL_UD_SENS, th);
+                static const char* LR[2] = {"Right is more", "Left is more"}, *UD[2] = {"Down is more", "Up is more"};
+                y = chips(x, y, cw, te_axis ? UD : LR, 2, set_[te_axis ? S_AX_FLIP : S_UD_FLIP] != 0, th, K_FLIP, te_axis * 8);
+            }
+            if (target == T_BEND) {
+                y = chips(x, y, cw, BEND_NAME, 7, (int)set_[S_BEND_RANGE], th, K_BRANGE, 0);
+                y = slider(x, y, cw, SL_BEND_SNAP, th);
+            }
         }
         y = section(x, y, "WIGGLE: VIBRATO, ANY WAY", th);
         y = chips(x, y, cw, VIB_NAME, 4, (int)set_[S_VIBRATO], th, K_VIB, 0);
@@ -1222,7 +1225,7 @@ static void ed_touch(int id, int phase, float x, float y) {
         switch (h->kind) {
         case K_DONE: keep(S_TOUCH_EDIT, 0); break;
         case K_SLIDE: keep(S_SLIDE, set_[S_SLIDE] != 0 ? 0 : 1); break;
-        case K_INSIDE: keep(S_INSIDE, h->arg); break;
+        case K_INSIDE: { int s = h->arg ? S_IN_TONE : S_IN_DYN; keep(s, set_[s] != 0 ? 0 : 1); break; }
         case K_AXIS: te_axis = h->arg; break;
         case K_TARGET: keep(h->arg >= 8 ? S_ACROSS : S_UPDOWN, h->arg % 8); break;
         case K_FLIP: keep(h->arg >= 8 ? S_AX_FLIP : S_UD_FLIP, h->arg % 8); break;
