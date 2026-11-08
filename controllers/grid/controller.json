@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -931,6 +931,116 @@
       "type": "switch",
       "default": false,
       "group": "Layout"
+    },
+    {
+      "id": "slideOnly",
+      "name": "Only slide between notes",
+      "type": "switch",
+      "default": false,
+      "group": "Touch"
+    },
+    {
+      "id": "sideSlide",
+      "name": "Slide only button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "place0",
+      "name": "Moved control 1",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place1",
+      "name": "Moved control 2",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place2",
+      "name": "Moved control 3",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place3",
+      "name": "Moved control 4",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place4",
+      "name": "Moved control 5",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place5",
+      "name": "Moved control 6",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place6",
+      "name": "Moved control 7",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "placeReset",
+      "name": "Put moved controls back",
+      "type": "switch",
+      "default": false,
+      "group": "Controls"
+    },
+    {
+      "id": "moveControls",
+      "name": "Move controls with two fingers",
+      "type": "switch",
+      "default": true,
+      "group": "Controls"
     }
   ]
 }

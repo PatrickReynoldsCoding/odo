@@ -75,18 +75,25 @@ enum {
     /* which ways it glides (on screen); the other way, the note jumps to the next square's */
     S_GLIDE_LR, S_GLIDE_UD,
     /* Flip 90°: drawn upright (rows across the screen, low notes at the bottom) instead of turned */
-    S_FLIP90, S_COUNT
+    S_FLIP90,
+    /* Only slide between notes: slide on, and nothing else a finger does (in a square, past it,
+       vibrato); the others keep their settings for when it is off. Its button's place. */
+    S_SLIDE_ONLY, S_SIDE_SLIDE,
+    /* The controls moved off their gutters (hidden): 0 in the gutter, else where (packed: place()) */
+    S_PLACE0, S_PLACE_RESET = S_PLACE0 + 7,
+    /* Two fingers on a control move, size and turn it */
+    S_MOVE_CTL, S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1, [S_MOVE_CTL] = 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
-enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_COUNT };   /* the side controls */
+enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_SLIDE, C_COUNT };   /* the side controls */
 enum { COL_PLAIN, COL_DEGREES, COL_CHORD, COL_PILLARS, COL_NAMES };
 /* Same notes elsewhere: how the other squares of a held note's pitch, in any octave, are marked. */
 enum { ECHO_OFF, ECHO_RING, ECHO_GLOW };
@@ -144,6 +151,7 @@ static void turn_to(float sw, float sh);
    the left, its right edge at the bottom. SW x SH is the surface itself. */
 static float W = 400, H = 700, SW = 400, SH = 700;
 static int turned;
+static int reset_places;           /* Put the moved controls back: asked, not yet done */
 static int eink;
 static float center[2] = {60, 60}; /* the middle of each part's instrument, as a MIDI note */
 static int have_top;               /* the host has said where the top part's instrument is */
@@ -173,7 +181,9 @@ static Half* hv = &halves[0];
 static int nhalves = 1;
 static int half_index(void) { return (int)(hv - halves); }
 static float bar_x = -1;                                   /* the scroll bar's left edge, or -1 */
-typedef struct { int control; float x, y, w, h; } SideRect;
+/* A control: its rect on the upright grid (in its gutter, or, moved, as it is before it is moved,
+   sized and turned onto the surface: free, with its middle cx, cy on the surface). */
+typedef struct { int control; float x, y, w, h; int free; float cx, cy, s, a; } SideRect;
 static SideRect sides[MAX_SIDE];
 static int nsides;
 
@@ -193,14 +203,43 @@ static int intervals(void) { return (int)set_[S_LAYOUT] == 3; }
 static const int INTERVAL_SEMIS[5] = {4, 5, 7, 9, 12};      /* 3rds, 4ths, 5ths, 6ths, octaves */
 static int locked(void) { return set_[S_LOCK] != 0; }
 /* The Lock button only means something with the columns. */
-static int side_of(int c) { return c == C_LOCK && !columns() ? SIDE_OFF : (int)set_[S_SIDE0 + c]; }
-static int is_button(int c) { return c <= C_HOLD || c == C_LOCK; }
+static int side_of(int c) {
+    if (c == C_LOCK && !columns()) return SIDE_OFF;
+    return (int)set_[c == C_SLIDE ? S_SIDE_SLIDE : S_SIDE0 + c];
+}
+static int is_button(int c) { return c <= C_HOLD || c == C_LOCK || c == C_SLIDE; }
+/* Only slide between notes. */
+static int slide_only(void) { return set_[S_SLIDE_ONLY] != 0; }
+
+/* ---- a control moved off its gutter --------------------------------------------------------------- */
+/* Where a moved control is, on the surface: its middle (as a share of the surface), its size and
+   its turn (degrees). Kept in one number: 0 is "in its gutter". */
+typedef struct { float fx, fy, scale, deg; } Place;
+static int placed(int c) { return set_[S_PLACE0 + c] != 0; }
+static Place place_of(int c) {
+    double v = set_[S_PLACE0 + c] - 1;
+    Place p = {0.5f, 0.5f, 1, 0};
+    if (v < 0) return p;
+    unsigned long long u = (unsigned long long)v;
+    p.fx = (float)(u % 4096) / 4095.0f; u /= 4096;
+    p.fy = (float)(u % 4096) / 4095.0f; u /= 4096;
+    p.scale = 0.4f + (float)(u % 512) * 0.01f; u /= 512;
+    p.deg = (float)(u % 360);
+    return p;
+}
+static double pack_place(Place p) {
+    unsigned long long x = (unsigned long long)(clampf(p.fx, 0, 1) * 4095 + 0.5f), y = (unsigned long long)(clampf(p.fy, 0, 1) * 4095 + 0.5f);
+    unsigned long long s = (unsigned long long)((clampf(p.scale, 0.4f, 5) - 0.4f) / 0.01f + 0.5f);
+    int d = (int)(p.deg + 0.5f) % 360;
+    if (d < 0) d += 360;
+    return 1 + (double)(x + 4096ull * (y + 4096ull * (s + 512ull * (unsigned long long)d)));
+}
 
 /* The strip of one side, from the bottom up as the thumb reaches: buttons their own height,
    sliders sharing the rest, none taller than 300. */
 static void strip(int where, float x) {
     int list[C_COUNT], n = 0, nb = 0, ns = 0;
-    for (int c = 0; c < C_COUNT; c++) if (side_of(c) == where) { list[n++] = c; if (is_button(c)) nb++; else ns++; }
+    for (int c = 0; c < C_COUNT; c++) if (side_of(c) == where && !placed(c)) { list[n++] = c; if (is_button(c)) nb++; else ns++; }
     if (!n) return;
     float top = SIDE_TOP, bot = H - 10;
     float spare = (bot - top) - 52.0f * (float)nb - 10.0f * (float)(n - 1);
@@ -209,7 +248,7 @@ static void strip(int where, float x) {
     float y = bot - total;
     for (int k = 0; k < n && nsides < MAX_SIDE; k++) {
         float h = is_button(list[k]) ? 52 : sh;
-        SideRect r = {list[k], x + 6, y, STRIP - 12, h};
+        SideRect r = {list[k], x + 6, y, STRIP - 12, h, 0, 0, 0, 1, 0};
         sides[nsides++] = r;
         y += h + 10;
     }
@@ -226,12 +265,19 @@ static void layout(void) {
     /* From the outside in, on each side: the scroll bar, then the strip of controls. */
     /* Up each column there is no scroll bar: each column is dragged on its own instead. */
     int nl = 0, nr = 0, bar = columns() ? SIDE_OFF : (int)set_[S_BAR];
-    for (int c = 0; c < C_COUNT; c++) { if (side_of(c) == SIDE_LEFT) nl = 1; if (side_of(c) == SIDE_RIGHT) nr = 1; }
+    for (int c = 0; c < C_COUNT; c++) if (!placed(c)) { if (side_of(c) == SIDE_LEFT) nl = 1; if (side_of(c) == SIDE_RIGHT) nr = 1; }
     float lw = (bar == SIDE_LEFT ? BAR : 0) + (nl ? STRIP : 0), rw = (bar == SIDE_RIGHT ? BAR : 0) + (nr ? STRIP : 0);
     bar_x = bar == SIDE_LEFT ? 0 : bar == SIDE_RIGHT ? W - BAR : -1;
     nsides = 0;
     strip(SIDE_LEFT, bar == SIDE_LEFT ? BAR : 0);
     strip(SIDE_RIGHT, W - rw);
+    /* The moved ones, over the grid: each its gutter size (a slider 240 long), then sized and turned. */
+    for (int c = 0; c < C_COUNT && nsides < MAX_SIDE; c++) {
+        if (!placed(c) || side_of(c) == SIDE_OFF) continue;
+        Place p = place_of(c);
+        SideRect r = {c, 0, 0, STRIP - 12, is_button(c) ? 52 : 240, 1, p.fx * SW, p.fy * SH, p.scale, p.deg * 3.14159265f / 180};
+        sides[nsides++] = r;
+    }
     float gx = lw, gw = W - lw - rw;
     if (gw < 40) gw = 40;
     /* Full size: the squares reach both edges, with the spacing for a margin: a row's pitch p,
@@ -419,7 +465,8 @@ static int next_voice = 1;
 /* Editing your own notes: the square chosen (its index k, or -1) and its half; Reset all asked once. */
 static int sel = -1, sel_half, resetting;
 
-typedef struct { int id, control, col, half; float from, top, h; float start, y; } SideTouch;
+/* cancel: taken by a two-finger move, it does nothing more; sx, sy: where it is on the surface. */
+typedef struct { int id, control, col, half; float from, top, h; float start, y; int cancel; float sx, sy; } SideTouch;
 enum { C_COL = 98, C_BAR = 99 };     /* a finger scrolling a column (unlocked), or on the scroll bar */
 static SideTouch side_touches[MAX_FINGERS];
 static int touched[C_COUNT];
@@ -450,11 +497,11 @@ static float down_of(const Finger* f, float x) { return (x - f->rx) / f->rs; }
 static float level_at(const Finger* f, float x, float y) {
     (void)y;
     float lo = dyn_low(), hi = dyn_high();
-    if (set_[S_IN_DYN] == 0) return hi;
+    if (set_[S_IN_DYN] == 0 || slide_only()) return hi;
     return lo + (hi - lo) * (1 - clampf(down_of(f, x), 0, 1));
 }
 static float tone_at(const Finger* f, float y) {
-    if (set_[S_IN_TONE] == 0) return 0.5f;
+    if (set_[S_IN_TONE] == 0 || slide_only()) return 0.5f;
     return clampf(across_of(f, y), 0, 1);
 }
 
@@ -515,7 +562,7 @@ static Expr expression(const Finger* f) {
     return e;
 }
 
-static int sliding(void) { return set_[S_SLIDE] != 0; }
+static int sliding(void) { return set_[S_SLIDE] != 0 || slide_only(); }
 
 static Expr expression_in(const Finger* f) {
     /* In the square: the dynamics and tone where the finger is (slowly), held at the square's edge
@@ -547,7 +594,7 @@ static Expr expression_in(const Finger* f) {
     e.pressure *= 0.4f + 0.6f * dyn;
     e.slide = clampf(e.slide + side_tone, 0, 1);
     int vi = (int)set_[S_VIBRATO];
-    float depth = VIBRATO_DEPTH[vi < 0 || vi > 3 ? 0 : vi];
+    float depth = slide_only() ? 0 : VIBRATO_DEPTH[vi < 0 || vi > 3 ? 0 : vi];
     if (depth > 0) {
         /* A wiggle: what the slow position misses, along the way the finger rocks, once it is more
            than the wiggle sensitivity lets by (so a slow move never wobbles the pitch). */
@@ -735,23 +782,90 @@ static void resend_all(void) {
    from the bottom, goes left to right. */
 static float tx(float x, float y) { return turned ? H - y : x; }
 static float ty(float x, float y) { return turned ? x : y; }
+
+/* Small maths for turning controls (no libm in here). */
+static float sinf_(float x) {
+    const float PI = 3.14159265f;
+    x = x - 2 * PI * floorf_(x / (2 * PI) + 0.5f);              /* -pi..pi */
+    float y = 1.27323954f * x - 0.40528473f * x * absf(x);
+    return 0.225f * (y * absf(y) - y) + y;
+}
+static float cosf_(float x) { return sinf_(x + 1.57079633f); }
+static float atan2f_(float y, float x) {
+    const float PI = 3.14159265f;
+    if (x == 0 && y == 0) return 0;
+    float ax = absf(x), ay = absf(y), a = (ax > ay ? ay / ax : ax / ay), s2 = a * a;
+    float r = ((-0.0464964749f * s2 + 0.15931422f) * s2 - 0.327622764f) * s2 * a + a;
+    if (ay > ax) r = PI / 2 - r;
+    if (x < 0) r = PI - r;
+    return y < 0 ? -r : r;
+}
+
+/* A moved control is drawn as it would be in its gutter, then sized and turned about its middle
+   onto its place: xf is that control while it is drawn. Its text stays upright. */
+static const SideRect* xf;
+static void to_surface(float x, float y, float* sx, float* sy) {
+    float px = tx(x, y), py = ty(x, y);
+    if (!xf) { *sx = px; *sy = py; return; }
+    float mx = xf->x + xf->w / 2, my = xf->y + xf->h / 2;
+    float dx = (px - tx(mx, my)) * xf->s, dy = (py - ty(mx, my)) * xf->s, c = cosf_(xf->a), n = sinf_(xf->a);
+    *sx = xf->cx + dx * c - dy * n;
+    *sy = xf->cy + dx * n + dy * c;
+}
+/* A point on the surface to the upright grid, inside a moved control r (as its gutter rect). */
+static void from_surface(const SideRect* r, float sx, float sy, float* x, float* y) {
+    float mx = r->x + r->w / 2, my = r->y + r->h / 2, c = cosf_(-r->a), n = sinf_(-r->a);
+    float dx = (sx - r->cx) / r->s, dy = (sy - r->cy) / r->s;
+    float px = tx(mx, my) + dx * c - dy * n, py = ty(mx, my) + dx * n + dy * c;
+    if (turned) { *x = py; *y = H - px; } else { *x = px; *y = py; }
+}
+
 static void g_clear(unsigned c) { mesh_clear(c); }
 static void g_rect(float x, float y, float w, float h, float r, unsigned fill, unsigned stroke, float sw) {
+    if (xf) {
+        /* Turned: a polygon, its corners rounded in four steps each. */
+        float pts[2 * 20];
+        int n = 0;
+        if (r > w / 2) r = w / 2;
+        if (r > h / 2) r = h / 2;
+        float cxs[4] = {x + w - r, x + w - r, x + r, x + r}, cys[4] = {y + r, y + h - r, y + h - r, y + r};
+        for (int k = 0; k < 4; k++)
+            for (int i = 0; i < 5; i++) {
+                float a = (-90.0f + 90.0f * (float)k + 22.5f * (float)i) * 3.14159265f / 180;
+                to_surface(cxs[k] + r * cosf_(a), cys[k] + r * sinf_(a), &pts[2 * n], &pts[2 * n + 1]);
+                n++;
+            }
+        mesh_poly(n, pts, fill, stroke, sw * xf->s);
+        return;
+    }
     if (turned) mesh_rect(H - (y + h), x, h, w, r, fill, stroke, sw);
     else mesh_rect(x, y, w, h, r, fill, stroke, sw);
 }
-static void g_circle(float x, float y, float r, unsigned fill, unsigned stroke, float sw) { mesh_circle(tx(x, y), ty(x, y), r, fill, stroke, sw); }
-static void g_line(float x1, float y1, float x2, float y2, unsigned c, float w) { mesh_line(tx(x1, y1), ty(x1, y1), tx(x2, y2), ty(x2, y2), c, w); }
-static void g_glow(float x, float y, float r, unsigned a, unsigned b) { mesh_glow(tx(x, y), ty(x, y), r, a, b); }
+static void g_circle(float x, float y, float r, unsigned fill, unsigned stroke, float sw) {
+    float sx, sy; to_surface(x, y, &sx, &sy);
+    float k = xf ? xf->s : 1;
+    mesh_circle(sx, sy, r * k, fill, stroke, sw * k);
+}
+static void g_line(float x1, float y1, float x2, float y2, unsigned c, float w) {
+    float ax, ay, bx, by; to_surface(x1, y1, &ax, &ay); to_surface(x2, y2, &bx, &by);
+    mesh_line(ax, ay, bx, by, c, w * (xf ? xf->s : 1));
+}
+static void g_glow(float x, float y, float r, unsigned a, unsigned b) {
+    float sx, sy; to_surface(x, y, &sx, &sy);
+    mesh_glow(sx, sy, r * (xf ? xf->s : 1), a, b);
+}
 /* Text centred on an upright point, then moved by (dx, dy) on the surface itself: lines of a
-   button stay one above the other, turned or not. */
+   button stay one above the other, turned or not (and on a moved control, however it is turned). */
 static void g_text_at(float x, float y, float dx, float dy, float size, unsigned c, int flags, const char* str) {
-    mesh_text(tx(x, y) + dx, ty(x, y) + dy + size * 0.35f, size, c, flags, str);
+    float k = xf ? xf->s : 1, sx, sy;
+    to_surface(x, y, &sx, &sy);
+    mesh_text(sx + dx * k, sy + (dy + size * 0.35f) * k, size * k, c, flags, str);
 }
 /* Text stays upright: its middle is moved, and it is drawn level there. */
 static void g_text(float x, float y, float size, unsigned c, int flags, const char* str) {
-    float my = y - size * 0.35f;
-    mesh_text(tx(x, my), ty(x, my) + size * 0.35f, size, c, flags, str);
+    float my = y - size * 0.35f, k = xf ? xf->s : 1, sx, sy;
+    to_surface(x, my, &sx, &sy);
+    mesh_text(sx, sy + size * 0.35f * k, size * k, c, flags, str);
 }
 
 /* ---- the side controls ---------------------------------------------------------------------- */
@@ -804,32 +918,116 @@ static void col_down(int id, float x, float y) {
     dirty = 1;
 }
 
-static int side_down(int id, float x, float y) {
+/* A finger down on control r, at upright height y in its rect. */
+static void side_start(int id, SideRect* r, float y, float sx, float sy) {
+    for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
+        SideTouch* s = &side_touches[j];
+        s->id = id; s->control = r->control; s->top = r->y; s->h = r->h; s->cancel = 0; s->sx = sx; s->sy = sy;
+        s->from = frac(s, y);
+        touched[r->control]++;
+        if (r->control == C_HOLD) hold(1);
+        side_drag(s, s->from);
+        break;
+    }
+}
+
+/* Inside control r (slack: points more all round)? (x, y) upright, (sx, sy) on the surface. */
+static int in_control(const SideRect* r, float x, float y, float sx, float sy, float slack, float* ly) {
+    if (r->free) {
+        from_surface(r, sx, sy, &x, &y);
+        slack /= r->s;
+    }
+    *ly = y;
+    return x >= r->x - 5 - slack && x <= r->x + r->w + 5 + slack && y >= r->y - slack && y <= r->y + r->h + slack;
+}
+
+static int side_down(int id, float x, float y, float sx, float sy) {
+    float ly;
+    /* The moved controls first: they are over everything (the last drawn on top). */
+    for (int k = nsides - 1; k >= 0; k--)
+        if (sides[k].free && in_control(&sides[k], x, y, sx, sy, 0, &ly)) { side_start(id, &sides[k], ly, sx, sy); return 1; }
     if (bar_x >= 0 && x >= bar_x - 4 && x <= bar_x + BAR + 4) {
         for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
             SideTouch* s = &side_touches[j];
             int h = half_at(y);
             s->half = h < 0 ? 0 : h;
-            s->id = id; s->control = C_BAR; s->start = halves[s->half].pos; s->y = y;
+            s->id = id; s->control = C_BAR; s->start = halves[s->half].pos; s->y = y; s->cancel = 0;
             break;
         }
         return 1;
     }
-    for (int k = 0; k < nsides; k++) {
-        SideRect* r = &sides[k];
-        if (x < r->x - 5 || x > r->x + r->w + 5 || y < r->y || y > r->y + r->h) continue;
-        for (int j = 0; j < MAX_FINGERS; j++) if (side_touches[j].id == 0) {
-            SideTouch* s = &side_touches[j];
-            s->id = id; s->control = r->control; s->top = r->y; s->h = r->h;
-            s->from = frac(s, y);
-            touched[r->control]++;
-            if (r->control == C_HOLD) hold(1);
-            side_drag(s, s->from);
+    for (int k = 0; k < nsides; k++)
+        if (!sides[k].free && in_control(&sides[k], x, y, sx, sy, 0, &ly)) { side_start(id, &sides[k], ly, sx, sy); return 1; }
+    return 0;
+}
+
+/* ---- two fingers on a control: move it, size it (pinch), turn it (twist) ---------------------------- */
+static struct { int on, c, id1, id2; float p1x, p1y, p2x, p2y, q1x, q1y, q2x, q2y; Place p0; } gest;
+
+static SideRect* rect_of(int c) {
+    for (int k = 0; k < nsides; k++) if (sides[k].control == c) return &sides[k];
+    return 0;
+}
+
+/* A second finger near a control a finger is on: the control is picked up. */
+static int gesture_down(int id, float x, float y, float sx, float sy) {
+    if (set_[S_MOVE_CTL] == 0 || gest.on) return 0;
+    for (int j = 0; j < MAX_FINGERS; j++) {
+        SideTouch* s1 = &side_touches[j];
+        if (s1->id == 0 || s1->cancel || s1->control >= C_COUNT) continue;
+        SideRect* r = rect_of(s1->control);
+        float ly;
+        if (!r || !in_control(r, x, y, sx, sy, 40, &ly)) continue;
+        gest.on = 1; gest.c = s1->control; gest.id1 = s1->id; gest.id2 = id;
+        gest.p1x = gest.q1x = s1->sx; gest.p1y = gest.q1y = s1->sy;
+        gest.p2x = gest.q2x = sx; gest.p2y = gest.q2y = sy;
+        if (r->free) gest.p0 = place_of(r->control);
+        else {
+            /* From its gutter: where it is now, as it is. */
+            float cx = tx(r->x + r->w / 2, r->y + r->h / 2), cy = ty(r->x + r->w / 2, r->y + r->h / 2);
+            Place p = {cx / SW, cy / SH, 1, 0};
+            gest.p0 = p;
+        }
+        /* The first finger stops playing the control. */
+        s1->cancel = 1;
+        if (s1->control == C_HOLD) hold(0);
+        if (s1->control == C_BEND) { side_bend = 0; resend_all(); }
+        for (int k = 0; k < MAX_FINGERS; k++) if (side_touches[k].id == 0) {
+            SideTouch* s2 = &side_touches[k];
+            s2->id = id; s2->control = s1->control; s2->cancel = 1; s2->sx = sx; s2->sy = sy;
+            touched[s1->control]++;
             break;
         }
+        dirty = 1;
         return 1;
     }
     return 0;
+}
+
+static void gesture_move(void) {
+    const float PI = 3.14159265f;
+    float d0x = gest.p2x - gest.p1x, d0y = gest.p2y - gest.p1y, d1x = gest.q2x - gest.q1x, d1y = gest.q2y - gest.q1y;
+    float l0 = __builtin_sqrtf(d0x * d0x + d0y * d0y), l1 = __builtin_sqrtf(d1x * d1x + d1y * d1y);
+    float ds = l0 > 12 ? l1 / l0 : 1, da = l0 > 12 && l1 > 12 ? atan2f_(d1y, d1x) - atan2f_(d0y, d0x) : 0;
+    Place p = gest.p0;
+    float scale = clampf(p.scale * ds, 0.4f, 5);
+    ds = scale / p.scale;
+    /* The point between the fingers keeps its place on the control. */
+    float vx = p.fx * SW - (gest.p1x + gest.p2x) / 2, vy = p.fy * SH - (gest.p1y + gest.p2y) / 2, c = cosf_(da), n = sinf_(da);
+    float cx = (gest.q1x + gest.q2x) / 2 + (vx * c - vy * n) * ds, cy = (gest.q1y + gest.q2y) / 2 + (vx * n + vy * c) * ds;
+    float deg = p.deg + da * 180 / PI;
+    deg -= 360 * floorf_(deg / 360);
+    float q = 90 * floorf_(deg / 90 + 0.5f);              /* square to the screen when nearly so */
+    if (absf(deg - q) < 6) deg = q;
+    Place out = {clampf(cx, 0, SW) / SW, clampf(cy, 0, SH) / SH, scale, deg};
+    set_[S_PLACE0 + gest.c] = pack_place(out);
+    layout();
+    dirty = 1;
+}
+
+static void gesture_up(void) {
+    keep(S_PLACE0 + gest.c, set_[S_PLACE0 + gest.c]);    /* kept, and in presets */
+    gest.on = 0;
 }
 
 static SideTouch* side_find(int id) {
@@ -839,6 +1037,8 @@ static SideTouch* side_find(int id) {
 
 static void side_up(SideTouch* s) {
     if (s->control == C_BAR) { s->id = 0; dirty = 1; return; }
+    if (gest.on && (s->id == gest.id1 || s->id == gest.id2)) gesture_up();
+    if (s->cancel && s->control < C_COUNT) { touched[s->control]--; s->id = 0; dirty = 1; return; }
     if (s->control == C_COL) {
         halves[s->half].colpos[s->col] = (float)roundi(halves[s->half].colpos[s->col]);
         clamp_pos();
@@ -854,6 +1054,7 @@ static void side_up(SideTouch* s) {
     else if (s->control == C_BEND) { side_bend = 0; resend_all(); }
     else if (s->control == C_DYN) mesh_set_setting(S_DYN, set_[S_DYN]);   /* remembered */
     else if (s->control == C_LOCK) keep(S_LOCK, locked() ? 0 : 1);         /* the rail shows it */
+    else if (s->control == C_SLIDE) keep(S_SLIDE_ONLY, slide_only() ? 0 : 1);
     s->id = 0;
     dirty = 1;
 }
@@ -890,7 +1091,7 @@ static void draw_slider(SideRect* r, const char* label, const char* value, float
     while (label[n]) n++;
     float lw = (float)n * 11;
     char cut[8];
-    if (!turned && lw > r->w - 4) {
+    if (!turned && !xf && lw > r->w - 4) {      /* moved, it has room: the whole name */
         int keep = (int)((r->w - 4) / 11);
         if (keep < 3) keep = 3;
         if (keep > 6) keep = 6;
@@ -922,6 +1123,7 @@ static void draw_sides(const Theme* th) {
     char v[24];
     for (int k = 0; k < nsides; k++) {
         SideRect* r = &sides[k];
+        xf = r->free ? r : 0;
         switch (r->control) {
         case C_LATCH:
             if (!latch_on) put(v, "off");
@@ -931,6 +1133,7 @@ static void draw_sides(const Theme* th) {
             break;
         case C_HOLD: draw_button(r, "Hold", holding ? "holding" : "press", holding, th, ink); break;
         case C_LOCK: draw_button(r, "Lock", locked() ? "on" : "off", !locked(), th, ink); break;
+        case C_SLIDE: draw_button(r, "Slide", slide_only() ? "only" : "all", slide_only(), th, ink); break;
         case C_BEND: {
             int tenths = roundi(side_bend * 10);
             if (tenths == 0) put(v, "0");
@@ -954,6 +1157,7 @@ static void draw_sides(const Theme* th) {
             break;
         }
     }
+    xf = 0;
 }
 
 
@@ -964,7 +1168,7 @@ static void draw_sides(const Theme* th) {
    round it is where sliding starts. Below: what moving inside a square does, what sliding out each
    way does (how much, how readily, which way is more; bend's range and snap), and vibrato, with
    how readily a wiggle is taken for it. Scrolled by dragging its background. */
-enum { K_DONE, K_SLIDE, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL, K_GLIDE_WAY };
+enum { K_DONE, K_SLIDE, K_SLIDE_ONLY, K_INSIDE, K_AXIS, K_TARGET, K_FLIP, K_BRANGE, K_VIB, K_SLIDER, K_RANGE, K_DYN_FULL, K_GLIDE_WAY };
 typedef struct { float x, y, w, h; int kind, arg; } Hit;
 #define MAX_HITS 64
 static Hit hits[MAX_HITS];
@@ -1181,6 +1385,8 @@ static void ed_draw(const Theme* th) {
     int sliding_ = set_[S_SLIDE] != 0;
     chip(x, y, cw, 32, sliding_ ? "Slide between notes: on" : "Slide between notes: off", sliding_, th, K_SLIDE, 0);
     y += 40;
+    chip(x, y, cw, 32, slide_only() ? "Only slide between notes: on" : "Only slide between notes: off", slide_only(), th, K_SLIDE_ONLY, 0);
+    y += 40;
     {
         y = demo_part(x, y, cw, th);
         y = section(x, y, "INSIDE A SQUARE", th);
@@ -1280,6 +1486,7 @@ static void ed_touch(int id, int phase, float x, float y) {
         switch (h->kind) {
         case K_DONE: keep(S_TOUCH_EDIT, 0); break;
         case K_SLIDE: keep(S_SLIDE, set_[S_SLIDE] != 0 ? 0 : 1); break;
+        case K_SLIDE_ONLY: keep(S_SLIDE_ONLY, slide_only() ? 0 : 1); break;
         case K_INSIDE: { int s = h->arg ? S_IN_TONE : S_IN_DYN; keep(s, set_[s] != 0 ? 0 : 1); break; }
         case K_AXIS: te_axis = h->arg; break;
         case K_TARGET: keep(h->arg >= 8 ? S_ACROSS : S_UPDOWN, h->arg % 8); break;
@@ -1649,6 +1856,7 @@ MESH_EXPORT(setting) void setting(int index, double value) {
     if (index < 0 || index >= S_COUNT) return;
     set_[index] = value;
     if (index == S_FLIP90) turn_to(SW, SH);
+    if (index == S_PLACE_RESET && value != 0) reset_places = 1;   /* done in tick(), outside the host's call */
     if (index == S_LATCH) set_latch(value != 0);
     if (index == S_TOUCH_EDIT) { ed_scroll = 0; if (value != 0) stop(); }   /* opening the panel lets go of what plays */
     if (index == S_NOTE_EDIT) { sel = -1; resetting = 0; if (value != 0) stop(); }
@@ -1662,21 +1870,34 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
     /* The Touch panel takes every touch while it is open, on the surface as it is. */
     if (editing()) { ed_touch(id + 1, phase, x, y); dirty = 1; return; }
     if (note_editing() && ne_touch(id, phase, x, y)) { dirty = 1; return; }
+    float sx = x, sy = y;                                        /* on the surface, for moved controls */
     if (turned) { float ux = y, uy = H - x; x = ux; y = uy; }   /* the touch, as on the upright grid */
     id += 1;    /* 0 marks a free side touch */
     if (phase == MESH_DOWN) {
         if (find(id)) up(id);
         layout();
-        if (!side_down(id, x, y)) { if (columns() && !locked()) col_down(id, x, y); else down(id, x, y); }
+        if (gesture_down(id, x, y, sx, sy)) { dirty = 1; return; }
+        if (!side_down(id, x, y, sx, sy)) { if (columns() && !locked()) col_down(id, x, y); else down(id, x, y); }
         /* Editing your own notes: the square played is the one to change. */
         Finger* f = note_editing() ? find(id) : 0;
         if (f) { sel = f->n; sel_half = f->half; resetting = 0; }
     } else if (phase == MESH_MOVE) {
         SideTouch* s = side_find(id);
         if (s) {
+            s->sx = sx; s->sy = sy;
+            if (gest.on && (id == gest.id1 || id == gest.id2)) {
+                if (id == gest.id1) { gest.q1x = sx; gest.q1y = sy; } else { gest.q2x = sx; gest.q2y = sy; }
+                gesture_move();
+                return;
+            }
+            if (s->cancel) return;
             if (s->control == C_BAR) bar_drag(s, y);
             else if (s->control == C_COL) col_drag(s, y);
-            else side_drag(s, frac(s, y));
+            else {
+                SideRect* r = rect_of(s->control);
+                if (r && r->free) { float lx; from_surface(r, sx, sy, &lx, &y); }
+                side_drag(s, frac(s, y));
+            }
             return;
         }
         Finger* f = find(id);
@@ -1698,6 +1919,12 @@ MESH_EXPORT(tick) void tick(double t) {
     if (dt > 0.25f) dt = 0.25f;
     last_tick = t;
     now = t;
+    if (reset_places) {
+        reset_places = 0;
+        for (int c = 0; c < 7; c++) if (set_[S_PLACE0 + c] != 0) keep(S_PLACE0 + c, 0);
+        keep(S_PLACE_RESET, 0);
+        layout();
+    }
     /* The slow position trails the finger by about 0.12 s: a wiggle is faster than that. */
     float k = 1 - expf_(-dt / 0.12f);
     int any = 0;
@@ -1729,6 +1956,7 @@ MESH_EXPORT(tick) void tick(double t) {
 MESH_EXPORT(stop) void stop(void) {
     for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) { let_go(&fingers[k]); fingers[k].used = 0; }
     for (int k = 0; k < MAX_FINGERS; k++) side_touches[k].id = 0;
+    gest.on = 0;
     for (int c = 0; c < C_COUNT; c++) touched[c] = 0;
     nspent = 0;
     holding = 0;
