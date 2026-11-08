@@ -1,6 +1,6 @@
 /*
  * The Grid as a MESH controller: square keys, played landscape. It is laid out upright (as below)
- * and always drawn a quarter turned: the upright grid's bottom (its low notes) on the left, its
+ * and drawn a quarter turned (Flip 90° draws it upright instead, its text the right way up too): the upright grid's bottom (its low notes) on the left, its
  * right edge at the bottom of the screen. So the rows of the upright grid are the screen's
  * columns, the notes climbing up each and on to the next to the right. Each square a note of a
  * scale, or every semitone with the notes outside the scale darkened. A square is lit while its
@@ -73,7 +73,9 @@ enum {
     /* Slide between notes: the glide from one square's note to the next, 0 (each a new note) to 1 */
     S_GLIDE,
     /* which ways it glides (on screen); the other way, the note jumps to the next square's */
-    S_GLIDE_LR, S_GLIDE_UD, S_COUNT
+    S_GLIDE_LR, S_GLIDE_UD,
+    /* Flip 90°: drawn upright (rows across the screen, low notes at the bottom) instead of turned */
+    S_FLIP90, S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
@@ -1621,7 +1623,7 @@ static void draw(void) {
 /* Upright or sideways: Auto turns it sideways when the surface is wider than it is tall. */
 static void turn_to(float sw, float sh) {
     SW = sw; SH = sh;
-    turned = 1;
+    turned = set_[S_FLIP90] == 0;
     W = turned ? sh : sw;
     H = turned ? sw : sh;
 }
@@ -1646,6 +1648,7 @@ void stop(void);
 MESH_EXPORT(setting) void setting(int index, double value) {
     if (index < 0 || index >= S_COUNT) return;
     set_[index] = value;
+    if (index == S_FLIP90) turn_to(SW, SH);
     if (index == S_LATCH) set_latch(value != 0);
     if (index == S_TOUCH_EDIT) { ed_scroll = 0; if (value != 0) stop(); }   /* opening the panel lets go of what plays */
     if (index == S_NOTE_EDIT) { sel = -1; resetting = 0; if (value != 0) stop(); }

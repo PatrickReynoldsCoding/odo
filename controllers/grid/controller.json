@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -924,6 +924,13 @@
       "showIf": {
         "slide": true
       }
+    },
+    {
+      "id": "flip90",
+      "name": "Flip 90°",
+      "type": "switch",
+      "default": false,
+      "group": "Layout"
     }
   ]
 }
