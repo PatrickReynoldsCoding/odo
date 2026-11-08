@@ -9,7 +9,6 @@ import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.EngineShape
 import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.ui.PackageSurface
-import com.patrickreynolds.mpeinstruments.ui.packageOptions
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.zip.ZipInputStream
@@ -155,8 +154,9 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
         loaded = false
     }
 
+    /** Its settings are on the rail by group, from [railGroups] (PlayHost), not as options. */
     @Composable
-    override fun options(part: Int) = packageOptions(this)
+    override fun options(part: Int) = emptyList<Option>()
 
     @Composable
     override fun Surface(part: Int) = PackageSurface(this)

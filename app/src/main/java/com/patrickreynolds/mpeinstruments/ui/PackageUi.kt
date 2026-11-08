@@ -33,39 +33,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.Native
-import com.patrickreynolds.mpeinstruments.controllers.Option
 import com.patrickreynolds.mpeinstruments.controllers.PackageController
-import com.patrickreynolds.mpeinstruments.controllers.RailWidget
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-
-/**
- * A controller package's settings on the rail, from the engine's rail model (mpe/rail.h), as odo
- * for computers shows them: grouped, each group's name over its first setting; a switch flips in
- * place, a choice or a number with a few steps is chips, any other number a slider.
- */
-@Composable
-fun packageOptions(c: PackageController): List<Option> {
-    val accent = if (Eink) Color.Black else PartColors[0]
-    val groups = remember(c, c.values) { c.railGroups() }
-    return groups.flatMap { g ->
-        g.rows.mapIndexed { n, row ->
-            val k = row.index
-            val heading = g.name.takeIf { n == 0 && it.isNotEmpty() }
-            when (row.widget) {
-                RailWidget.Switch -> Option(row.label, row.display, perPart = false, on = row.value != 0.0, heading = heading,
-                                            tap = { c.change(k, c.stepped(k, row.value, 1)) })
-                RailWidget.Chips -> Option(row.label, row.display, perPart = false, heading = heading) {
-                    Chips(row.choices, row.chosen, accent) { i -> c.change(k, c.chipValue(k, i)) }
-                }
-                RailWidget.Slider -> Option(row.label, row.display, perPart = false, heading = heading) {
-                    LabeledSlider(row.label, c.toFraction(k, row.value).toFloat(), 0f..1f, row.display, accent = accent) { t ->
-                        c.change(k, c.fromFraction(k, t.toDouble())) }
-                }
-            }
-        }
-    }
-}
 
 /** A controller package's play surface: its draw list drawn, the fingers sent to it, its time ticked. */
 @Composable

@@ -62,7 +62,7 @@ fun externalMidiOptions(@Suppress("UNUSED_PARAMETER") part: Int): List<Option> {
     val name = MidiConnector.connectedName
     return listOf(
         Option("Device", name.ifEmpty { "None" }, perPart = false) {
-            Column(Modifier.verticalScroll(rememberScrollState())) { MidiDevices(); LinkWatchdog() }
+            MidiDevices(); LinkWatchdog()
         },
         Option("Bend", "±${s.bendRange.roundToInt()}", perPart = false) {
             val ranges = listOf(48f, 24f, 12f, 2f)
@@ -74,10 +74,8 @@ fun externalMidiOptions(@Suppress("UNUSED_PARAMETER") part: Int): List<Option> {
             Text("Moves every note you play. The sound's own octave is under Sound.", color = TextDim, fontSize = 12.sp)
         },
         Option("Assist", if (s.scale == 0) "Off" else SCALES[s.scale].name, perPart = false) {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                PitchAssistControls(s.scale, s.scaleRoot, s.assist, accent) { sc, root, st ->
-                    ExternalMidi.update { it.copy(scale = sc, scaleRoot = root, assist = st) } }
-            }
+            PitchAssistControls(s.scale, s.scaleRoot, s.assist, accent) { sc, root, st ->
+                ExternalMidi.update { it.copy(scale = sc, scaleRoot = root, assist = st) } }
         },
     )
 }

@@ -1,13 +1,17 @@
 package com.patrickreynolds.mpeinstruments.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,20 +19,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -36,264 +32,375 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
+import com.patrickreynolds.mpeinstruments.ARP_ORDERS
 import com.patrickreynolds.mpeinstruments.AppState
+import com.patrickreynolds.mpeinstruments.BuildConfig
 import com.patrickreynolds.mpeinstruments.GyroSettings
+import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.PadSettings
 import com.patrickreynolds.mpeinstruments.Part
 import com.patrickreynolds.mpeinstruments.PhoneMods
-import com.patrickreynolds.mpeinstruments.ARP_ORDERS
+import com.patrickreynolds.mpeinstruments.Stats
+import com.patrickreynolds.mpeinstruments.Updater
 import com.patrickreynolds.mpeinstruments.controllers.ArpUse
-import com.patrickreynolds.mpeinstruments.controllers.Controllers
-import com.patrickreynolds.mpeinstruments.controllers.Option
 import com.patrickreynolds.mpeinstruments.controllers.LegacyTouchPad
 import com.patrickreynolds.mpeinstruments.controllers.PackageController
+import com.patrickreynolds.mpeinstruments.controllers.RailGroup
 import com.patrickreynolds.mpeinstruments.releaseName
+import kotlinx.coroutines.delay
 
-/** The rail's colours: the touch pad's look while it is in use, else the default one. */
 /** The colour of part [k] on the rail: the controller's own, else the theme's, else the app's. */
 fun partColor(t: PadTheme, k: Int): Color =
     AppState.controller.partColors?.getOrNull(k) ?: t.parts.getOrNull(k) ?: PartColors.getOrElse(k) { PartColors[0] }
 
+/** The touch pad's look while it is in use (the loop buttons take their colours from it), else the default one. */
 fun hostTheme(): PadTheme {
-    // The touch pad's look, while it is in use.
     val c = AppState.controller as? PackageController
     val look = if (c?.id == LegacyTouchPad.PACKAGE) c.valueOf("theme")?.toInt() ?: 0 else 0
     return padTheme(PadSettings(theme = look))
 }
 
 /**
- * The play screen, the same for every controller: the rail at the left (the controller to play
- * with, its own options, then what every controller shares), the controller's surface filling the
- * rest, and the loop buttons over it.
+ * The play screen, as odo for computers': the rail at the left, the controller's surface filling
+ * the rest, and the loop buttons over it. The rail (RailUi.kt): tiles for the preset, the
+ * controller and the sound, each opening its picker beside the rail; the controller's settings by
+ * group, each opening a panel with all of them; then the sound's own (effects, arp: Android's), and
+ * the app's. Hidden, a button in the corner brings it back.
  */
 @Composable
 fun PlayHost(onClose: () -> Unit) {
-    var panel by remember { mutableStateOf<String?>(null) }
+    var pane by remember { mutableStateOf<Pane?>(null) }
     val c = AppState.controller
     val part = AppState.part
     val theme = hostTheme()
     LoopTicker()
-    // The controller's options and the shared ones, built once for the rail and the open panel.
-    val own = c.options(part)
-    val shared = sharedOptions(part)
-    val pickController = Option("Controller", c.name, perPart = false) { ControllerPicker { panel = null } }
-    Box(Modifier.fillMaxSize().background(theme.bottom)) {
-        // An upright controller (the grid) keeps its size and place: the rail lies over it rather than
-        // squeezing it, hiding what is under it until it is tucked away again.
+    // The controller's own panel open (the Grid's Touch): the loop buttons keep out of its way.
+    val ownPanel = (c as? PackageController)?.let { pc ->
+        remember(pc, pc.values) { pc.railGroups().any { g -> g.rows.any { it.panel && it.value != 0.0 } } }
+    } ?: false
+    val dock = AppState.loopDock && !ownPanel
+    BoxWithConstraints(Modifier.fillMaxSize().background(theme.bottom)) {
+        // A phone gets a narrower rail than a tablet or a computer's 300.
+        val railW = if (maxWidth >= 1000.dp) 300.dp else 256.dp
+        // An upright controller keeps its size and place: the rail lies over it.
         val over = c.upright
         if (over) Box(Modifier.fillMaxSize()) {
             key(c.id) { c.Surface(part) }
-            if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
+            if (dock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
         Row(Modifier.fillMaxSize()) {
-            if (!AppState.railHidden) Box(if (over) Modifier.background(theme.bottom) else Modifier) {
-                Rail(pickController, own, shared, theme, panel, { panel = if (panel == it) null else it }, onClose)
-            }
+            if (!AppState.railHidden) Rail(railW, pane, { p -> pane = if (pane == p) null else p }, onClose)
             if (!over) Box(Modifier.weight(1f).fillMaxHeight()) {
                 // A new surface for each controller: the old one lets go of its notes as it goes.
                 key(c.id) { c.Surface(part) }
-                if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
+                if (dock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
             }
         }
-        if (!AppState.railHidden) panel?.let { label ->
-            (listOf(pickController) + own + shared).firstOrNull { it.label == label && it.panel != null }?.let { o ->
-                SettingPanel(o, part, theme) { panel = null }
-            }
+        if (!AppState.railHidden) pane?.let { p ->
+            // Beside the rail, over the play area; on a narrow screen over the rail too.
+            val start = if (maxWidth - railW >= 300.dp) railW + 8.dp else 8.dp
+            RailPanel(p, start, min(440.dp, maxWidth - start - 8.dp), { pane = it }) { pane = null }
         }
         // The rail tucked away: one small button in the corner brings it back.
         else Box(Modifier.padding(6.dp).size(44.dp)
-                     .background(if (theme.flat) Color.White else theme.rail, RoundedCornerShape(12.dp))
-                     .border(BorderStroke(if (theme.flat) 2.dp else 1.dp, if (theme.flat) Color.Black else theme.railDim), RoundedCornerShape(12.dp))
+                     .background(if (Eink) Color.White else Panel, RoundedCornerShape(12.dp))
+                     .border(BorderStroke(if (Eink) 2.dp else 1.dp, if (Eink) Color.Black else Line), RoundedCornerShape(12.dp))
                      .clickable { AppState.changeRailHidden(false) },
                  contentAlignment = Alignment.Center) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show the settings", tint = theme.railText)
+            Canvas(Modifier.size(20.dp)) {
+                chevron(size.width / 2 - 3.dp.toPx(), size.height / 2, size.height * 0.6f, 1, Fg)
+                chevron(size.width / 2 + 3.dp.toPx(), size.height / 2, size.height * 0.6f, 1, Fg)
+            }
         }
     }
 }
 
-/** What every controller shares: presets, the sound and its effects, release, the arp, loops, and the phone's gyro and breath. */
+/** What the panel beside the rail shows. */
+sealed interface Pane {
+    data object Presets : Pane
+    data object Controller : Pane
+    /** The sound picker for part [part]. */
+    data class Sound(val part: Int) : Pane
+    /** A group of the controller's settings, by name. */
+    data class Group(val name: String) : Pane
+    /** One of the app's own groups (Effects, Arp, Loop...), by name. */
+    data class Own(val name: String) : Pane
+    data object App : Pane
+}
+
+/** A group of settings on the rail: its name, a few of its values, and how many settings it has. */
+class RailEntry(val name: String, val summary: String, val count: Int?, val pane: Pane?, val on: Boolean = false,
+                val tap: (() -> Unit)? = null)
+
+/**
+ * The rail. Under its top row (odo, close, hide), scrolled: the preset, the controller and the
+ * sound tiles; the controller's groups; the sound's own (the part the rail is on); the app's.
+ * At the bottom, the version (and an update) and how the engine is doing.
+ */
 @Composable
-private fun sharedOptions(k: Int): List<Option> {
-    val part = AppState.perf.part(k)
-    val accent = if (Eink) Color.Black else partColor(hostTheme(), k)
-    val two = AppState.twoParts
-    return listOfNotNull(
-        Option("Presets", AppState.presetName.ifEmpty { "None" }, perPart = false) {
-            Column(Modifier.verticalScroll(rememberScrollState())) { PresetLibrary(accent) }
-        },
-        Option("Sound", AppState.instrument(k)?.name ?: "") {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                SoundControls(k, accent)
-                SoundPicker(k, accent)
+private fun Rail(width: Dp, pane: Pane?, open: (Pane) -> Unit, onClose: () -> Unit) {
+    val c = AppState.controller
+    val accent = PartColors[0]
+    Column(Modifier.width(width).fillMaxHeight().background(Ink)
+               .then(if (Eink) Modifier.border(BorderStroke(2.dp, Line)) else Modifier)) {
+        Row(Modifier.fillMaxWidth().height(46.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("odo", color = accent, fontSize = Tokens.Type.title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TopButton("Close") { onClose() }
+            TopButton("Hide the rail") { AppState.changeRailHidden(true) }
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 2.dp),
+               verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PresetTile(pane == Pane.Presets) { open(Pane.Presets) }
+            ControllerTile(pane == Pane.Controller) { open(Pane.Controller) }
+            SoundTile(pane) { k -> AppState.side = k; open(Pane.Sound(k)) }
+            Column {
+                Eyebrow(c.name.uppercase())
+                for (e in controllerEntries()) GroupRow(e, e.on || (e.pane != null && pane == e.pane)) { e.tap?.invoke() ?: e.pane?.let(open) }
+                Eyebrow(if (AppState.twoParts) "SOUND · ${partLabel(AppState.part).uppercase()}" else "SOUND")
+                for (e in soundEntries()) GroupRow(e, pane == e.pane) { e.pane?.let(open) }
+                Eyebrow("APP")
+                for (e in appEntries()) GroupRow(e, pane == e.pane) { e.pane?.let(open) }
             }
-        },
-        Option("Effects", effectsSummary(part)) {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                PartEffects(k, accent)
-                TextButton(onClick = { AppState.resetEffects(k) }) {
-                    Text("As the pack means it (${AppState.instrument(k)?.name ?: "this sound"})", color = accent) }
-                LabeledSlider("Level", part.volume, 0f..1.5f, pct(part.volume), accent = accent) { v ->
-                    AppState.updatePart(k) { it.copy(volume = v) } }
-                Text(if (two) "Reverb (all the sounds)" else "Reverb", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                     modifier = Modifier.padding(top = 12.dp))
-                ReverbControls()
-                Text(if (two) "Delay (all the sounds)" else "Delay", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                     modifier = Modifier.padding(top = 12.dp))
-                DelayControls()
+        }
+        RailFoot()
+    }
+}
+
+/** The top row's buttons: close the play screen (an X), hide the rail (two chevrons). */
+@Composable
+private fun TopButton(what: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(Tokens.Radius.control)
+    Box(Modifier.padding(horizontal = 2.dp).size(width = 38.dp, height = 36.dp).clip(shape).background(PanelHigh)
+            .then(if (Eink) Modifier.border(2.dp, Line, shape) else Modifier)
+            // Not a key's to press: Enter after typing a name must not close the play screen.
+            .focusProperties { canFocus = false }.clickable(onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        val ink = Fg
+        Canvas(Modifier.size(16.dp)) {
+            val w = 2.dp.toPx()
+            if (what == "Close") {
+                drawLine(ink, Offset(2f, 2f), Offset(size.width - 2f, size.height - 2f), w, StrokeCap.Round)
+                drawLine(ink, Offset(size.width - 2f, 2f), Offset(2f, size.height - 2f), w, StrokeCap.Round)
+            } else {
+                chevron(size.width / 2 - 4.dp.toPx(), size.height / 2, size.height * 0.75f, -1, ink)
+                chevron(size.width / 2 + 4.dp.toPx(), size.height / 2, size.height * 0.75f, -1, ink)
             }
-        },
-        Option("Release", releaseName(part.release)) {
-            ReleaseSlider(k, accent)
-            Text(if (part.release < 0.01f) "A note ends the instrument's own way when you lift your finger."
-                 else "When you lift your finger the note plays on as it was and fades out over this time, " +
-                      "like holding a piano's sustain pedal. A new note on the same finger cuts it off.",
-                 color = TextDim, fontSize = 12.sp)
-        },
-        // The app's arp, a modifier: on the rail unless the controller has none, or its own.
-        if (AppState.controller.arpUse == ArpUse.App) {
-            // Layered, both parts arpeggiate as the main one does, so that one is changed.
-            val layered = AppState.perf.layout(AppState.shape) == 2
-            val a = if (layered) 0 else k
-            val arp = AppState.perf.part(a).arp
-            Option("Arp", if (arp.on) ARP_ORDERS[arp.order.coerceIn(ARP_ORDERS.indices)] else "Off", perPart = !layered) {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    ArpControls(arp, accent, latch = AppState.shape.arpLatch) { c -> AppState.updatePart(a) { it.copy(arp = c(it.arp)) } }
-                    if (arp.on) AppState.controller.arpNote?.let { Text(it, color = TextDim, fontSize = 12.sp) }
-                    TempoControls(accent)
+        }
+    }
+}
+
+/** A tile on the rail: the panel colour, rounded; outlined in the accent while its picker is open. */
+@Composable
+private fun Tile(open: Boolean, modifier: Modifier = Modifier, onClick: (() -> Unit)?, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(modifier.fillMaxWidth().clip(shape).background(if (open) PanelHigh else Panel)
+               .then(if (open || Eink) Modifier.border(if (open) 2.dp else 1.5.dp, if (open && !Eink) PartColors[0] else Line, shape) else Modifier)
+               .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+               .padding(horizontal = 12.dp, vertical = 8.dp), content = content)
+}
+
+@Composable
+private fun Eyebrow(text: String, modifier: Modifier = Modifier) =
+    Text(text, color = TextDim, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp, maxLines = 1,
+         overflow = TextOverflow.Ellipsis, modifier = modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp))
+
+@Composable
+private fun TileEyebrow(text: String) = Text(text, color = TextDim, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
+
+/** The preset: its name, and what it is (or that it changed since it was loaded). */
+@Composable
+private fun PresetTile(open: Boolean, onClick: () -> Unit) = Tile(open, onClick = onClick) {
+    val name = AppState.presetName
+    val p = AppState.allPresets.firstOrNull { it.name == name }
+    val edited = p?.builtIn == true && AppState.presetEdited
+    TileEyebrow("PRESET")
+    Text(name.ifEmpty { "None" }, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Text(when { edited -> "Changed since loaded"; p == null -> "Keep what plays as a preset"; else -> presetSummary(p) },
+         color = if (edited) PartColors[0] else TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/** The controller: its drawing and its name. */
+@Composable
+private fun ControllerTile(open: Boolean, onClick: () -> Unit) = Tile(open, onClick = onClick) {
+    val c = AppState.controller
+    TileEyebrow("CONTROLLER")
+    ControllerPic(c.id, c.name, if (Eink) Fg else PartColors[0], Modifier.padding(vertical = 4.dp).size(46.dp, 32.dp))
+    Text(c.name, color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/** The sound, or each part's (a split's, or the main sound and its layer): a badge, the name, its pack and group. */
+@Composable
+private fun SoundTile(pane: Pane?, pick: (Int) -> Unit) = Tile(pane is Pane.Sound, onClick = null) {
+    val n = AppState.partCount
+    TileEyebrow(if (n > 1) "SOUNDS" else "SOUND")
+    for (k in 0 until n) {
+        val inst = AppState.instrument(k)
+        val open = pane == Pane.Sound(k)
+        // With two, the one the rail's sound settings change is marked.
+        val on = n > 1 && k == AppState.part
+        Row(Modifier.padding(top = 4.dp).fillMaxWidth().height(44.dp).clip(RoundedCornerShape(8.dp))
+                .then(if (on) Modifier.background(if (Eink) Color.White else Ink.copy(alpha = 0.6f)) else Modifier)
+                .then(if (on && Eink) Modifier.border(1.5.dp, Line, RoundedCornerShape(8.dp)) else Modifier)
+                .clickable { pick(k) }.padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            SoundBadge(inst, 30.dp)
+            Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                Row {
+                    if (n > 1) Text(partLabel(k) + " ", color = TextDim, fontSize = 14.sp, maxLines = 1)
+                    Text(inst?.name ?: "?", color = if (open) PartColors[0] else Fg, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                val id = inst?.id ?: ""
+                val pack = com.patrickreynolds.mpeinstruments.packs.Packs.packOf(id)
+                val group = com.patrickreynolds.mpeinstruments.packs.Packs.groupOf(id)
+                if (pack != null) Text("${pack.name} · ${group?.name ?: ""}", color = TextDim, fontSize = 11.sp, maxLines = 1,
+                                       overflow = TextOverflow.Ellipsis)
             }
-        } else null,
-        Option("Loop", loopSummary(), perPart = false) {
-            Column(Modifier.verticalScroll(rememberScrollState())) { LoopControls(accent) }
-        },
-        // Experimental: on the rail once turned on in Settings.
-        if (AppState.mods.gyroOn) Option("Gyro", gyroSummary(AppState.mods), perPart = false) {
-            // The gyro's tabs and meter stay at the top; the rest scrolls under them.
-            Column { GyroPanel(liveModReading(), scroll = true) }
-        } else null,
-        if (AppState.mods.breath != 0) Option("Breath", PhoneMods.BREATH[AppState.mods.breath], perPart = false) {
-            Column(Modifier.verticalScroll(rememberScrollState())) { BreathControls(liveModReading()) }
+        }
+    }
+}
+
+/** A group's row: its name, its first few values, how many settings it has, and a chevron. */
+@Composable
+private fun GroupRow(e: RailEntry, open: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(10.dp)
+    val nameColour = when { open && Eink -> Ink; open -> PartColors[0]; else -> Fg }
+    val dim = if (open && Eink) Ink else TextDim
+    Row(Modifier.fillMaxWidth().height(50.dp).padding(bottom = 2.dp).clip(shape)
+            .then(if (open) Modifier.background(if (Eink) Fg else PanelHigh) else Modifier)
+            .clickable(onClick = onClick).padding(start = 12.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(e.name, color = nameColour, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (e.summary.isNotEmpty()) Text(e.summary, color = dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        e.count?.let { Text("$it", color = dim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp)) }
+        Canvas(Modifier.size(12.dp)) { chevron(size.width / 2, size.height / 2, size.height * 0.9f, 1, dim) }
+    }
+}
+
+/** The bottom of the rail: the version, an update if there is one, the latency and the load. */
+@Composable
+private fun RailFoot() {
+    val context = LocalContext.current
+    var stats by remember { mutableStateOf<Stats?>(null) }
+    LaunchedEffect(Unit) { while (true) { stats = Stats.from(Native.nativeStats()); delay(500) } }
+    val s = Updater.state
+    val (msg, act) = when (s) {
+        is Updater.State.Checking -> "checking for updates" to null
+        is Updater.State.UpToDate -> "up to date" to null
+        is Updater.State.Available -> "Update to ${s.release.version}: tap here" to { Updater.downloadAndInstall(context, s.release) }
+        is Updater.State.Downloading -> "Downloading ${s.release.version}… ${(s.progress * 100).toInt()}%" to null
+        is Updater.State.NeedsPermission -> "Allow odo to install its update: tap here" to
+            { context.startActivity(Updater.permissionSettings(context)) }
+        is Updater.State.Installing -> "Installing ${s.release.version}…" to null
+        is Updater.State.Failed -> s.message to s.release?.let { r -> { Updater.downloadAndInstall(context, r) } }
+        else -> "" to null
+    }
+    // Two lines, where odo for computers has four: a phone's rail is short.
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Text("odo ${BuildConfig.VERSION_NAME}" + if (msg.isNotEmpty() && act == null) " · $msg" else "", color = TextDim,
+             fontSize = Tokens.Type.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (act != null) Text(msg, color = PartColors[0], fontSize = Tokens.Type.header, fontWeight = FontWeight.Bold, maxLines = 1,
+                              overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = act))
+        stats?.let { st ->
+            Text("Latency %.1f ms, max %.1f · Load %.0f%% · Voices %d".format(st.eventAgeAvgMs, st.eventAgeMaxMs, 100 * st.loadAvg, st.voices),
+                 color = TextDim, fontSize = Tokens.Type.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+// ---- what the groups on the rail are ----------------------------------------------------------
+
+/**
+ * The controller's groups: a package's from the engine's rail model (mpe/rail.h), as odo for
+ * computers shows them; a group with a "panel" switch (the Grid's Touch) flips it, opening the
+ * controller's own panel. A built-in controller's options (External MIDI's), each a group of one.
+ */
+@Composable
+private fun controllerEntries(): List<RailEntry> {
+    val c = AppState.controller
+    if (c is PackageController) {
+        val groups = remember(c, c.values) { c.railGroups() }
+        return groups.map { g ->
+            val own = g.rows.firstOrNull { it.panel }
+            if (own != null) RailEntry(groupLabel(g.name), groupSummary(g), null, null, on = own.value != 0.0,
+                                       tap = { c.change(own.index, if (own.value != 0.0) 0.0 else 1.0) })
+            else RailEntry(groupLabel(g.name), groupSummary(g), g.rows.size, Pane.Group(g.name))
+        }
+    }
+    return c.options(AppState.part).map { o ->
+        if (o.tap != null) RailEntry(o.label, o.value, null, null, on = o.on, tap = o.tap)
+        else RailEntry(o.label, o.value, null, Pane.Group(o.label))
+    }
+}
+
+fun groupLabel(name: String) = name.ifEmpty { "Settings" }
+
+/** A group's row on the rail: its first few values (a switch as its name, on or off). */
+fun groupSummary(g: RailGroup): String {
+    val shown = g.rows.filter { !it.panel }.take(3).map { r ->
+        if (r.widget == com.patrickreynolds.mpeinstruments.controllers.RailWidget.Switch) r.label + if (r.value != 0.0) " on" else " off"
+        else r.display
+    }
+    return if (g.rows.isEmpty()) "Nothing to set in this mode" else shown.joinToString(" · ")
+}
+
+/** The sound's own (Android's): its octave and layer, its effects, the arp. For the part the rail is on. */
+private fun soundEntries(): List<RailEntry> {
+    val k = AppState.part
+    val p = AppState.perf.part(k)
+    return listOfNotNull(
+        RailEntry("Octave and layer", "Octave " + (if (p.transpose == 0) "0" else "%+d".format(p.transpose / 12)) +
+                  if (AppState.shape.split) "" else " · layer " + if (AppState.perf.layered) "on" else "off", null, Pane.Own("Octave and layer")),
+        RailEntry("Effects", effectsSummary(p) + " · release " + releaseName(p.release).lowercase(), null, Pane.Own("Effects")),
+        if (AppState.controller.arpUse == ArpUse.App) {
+            val arp = AppState.perf.part(arpPart(k)).arp
+            RailEntry("Arp", if (arp.on) ARP_ORDERS[arp.order.coerceIn(ARP_ORDERS.indices)] else "Off", null, Pane.Own("Arp"))
         } else null,
     )
 }
 
-/** The controllers there are, to play with another. */
-@Composable
-private fun ControllerPicker(done: () -> Unit) {
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        for (c in Controllers.all) {
-            val on = c === AppState.controller
-            Column(Modifier.fillMaxWidth().clickable { AppState.switchController(c); done() }.padding(vertical = 8.dp)) {
-                Text(c.name, fontSize = 17.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                     color = if (on) PartColors[0] else Color.Unspecified)
-                Text(c.description, color = TextDim, fontSize = 12.sp)
-            }
-        }
-        Text("Each controller keeps its own settings. The sound, its arp, effects, loops and presets stay as they are when you switch.",
-             color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-    }
+/** The app's: the volume and look, the loops, the phone's gyro and breath (once turned on in Settings). None in presets. */
+private fun appEntries(): List<RailEntry> = listOfNotNull(
+    RailEntry("App", "Volume ${masterPercent()}% · " + if (Eink) "E-ink" else "Dark", null, Pane.App),
+    RailEntry("Loop", loopSummary(), null, Pane.Own("Loop")),
+    if (AppState.mods.gyroOn) RailEntry("Gyro", gyroSummary(AppState.mods), null, Pane.Own("Gyro")) else null,
+    if (AppState.mods.breath != 0) RailEntry("Breath", PhoneMods.BREATH[AppState.mods.breath], null, Pane.Own("Breath")) else null,
+)
+
+/** Layered, both parts arpeggiate as the main one does, so that one is changed. */
+internal fun arpPart(k: Int) = if (AppState.perf.layout(AppState.shape) == 2) 0 else k
+
+/** The volume as odo for computers shows it: 100% is the engine's usual level. */
+internal fun masterPercent() = Math.round(AppState.volume / 0.8f * 100)
+
+/** A word or two for the rail: the effects that are on for this part. */
+private fun effectsSummary(p: Part): String {
+    val on = listOfNotNull("Verb".takeIf { p.reverb > 0.01f }, "Delay".takeIf { p.delay > 0.01f },
+                           "Drive".takeIf { p.drive > 0.01f }, "Tone".takeIf { p.brightness < 0.999f })
+    return when { on.isEmpty() -> "Dry"; on.size <= 2 -> on.joinToString(" + "); else -> "${on.size} on" }
 }
 
-/**
- * The rail at the left edge, Etherpad style: tap a setting to change it. At the top the
- * controller; with two sounds (a split, or a layer) a toggle for the one the settings below change.
- */
-@Composable
-private fun Rail(pick: Option, own: List<Option>, shared: List<Option>, t: PadTheme, open: String?,
-                 tap: (String) -> Unit, onClose: () -> Unit) {
-    val accent = partColor(t, AppState.part)
-    Column(Modifier.fillMaxHeight().width(92.dp).background(t.rail)
-               .then(if (t.flat) Modifier.border(BorderStroke(2.dp, Color.Black)) else Modifier)
-               .verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
-           horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row {
-            IconButton(onClick = onClose, Modifier.size(44.dp)) { Icon(Icons.Filled.Close, "Close", tint = t.railDim) }
-            // Tuck the rail away for the whole width to play on; the corner button brings it back.
-            IconButton(onClick = { AppState.changeRailHidden(true) }, Modifier.size(44.dp)) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Hide the settings", tint = t.railDim) }
-        }
-        // An upright controller keeps the screen still: turn the phone and only the labels turn, to stay readable.
-        val turn = if (AppState.controller.upright) rememberPhoneTurn() else 0f
-        RailItem(pick, open == pick.label, t, accent, tap, turn)
-        if (AppState.twoParts) PartToggle(AppState.controller.splitNames ?: listOf("Main", "Layer"), t)
-        for (o in own) {
-            o.heading?.let { RailHeading(it, t, turn) }
-            RailItem(o, open == o.label, t, accent, tap, turn)
-        }
-        Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(t.railDim.copy(alpha = 0.4f)))
-        for (o in shared) RailItem(o, open == o.label, t, accent, tap, turn)
-    }
-}
-
-/** A group's name over its settings, in the section-header style (SectionCard's), sized for the rail. */
-@Composable
-private fun RailHeading(name: String, t: PadTheme, turn: Float) {
-    // Turned (an upright controller's), it gets a square of its own as the items do.
-    Box(if (turn != 0f) Modifier.size(86.dp).rotate(turn) else Modifier.padding(top = 4.dp), contentAlignment = Alignment.Center) {
-        Text(name.uppercase(), fontSize = Tokens.Type.header, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp,
-             color = t.railDim, maxLines = 1)
-    }
-}
-
-@Composable
-private fun RailItem(o: Option, open: Boolean, t: PadTheme, accent: Color, tap: (String) -> Unit, turn: Float = 0f) {
-    val on = open || o.on
-    // Turned, each item gets a square of its own, so the turned words do not run into the next.
-    Column(Modifier.clickable { o.tap?.invoke() ?: tap(o.label) }
-               .then(if (on && t.flat) Modifier.background(Color.Black) else Modifier)
-               .then(if (turn != 0f) Modifier.size(86.dp).rotate(turn) else Modifier)
-               .padding(horizontal = 4.dp, vertical = 2.dp),
-           horizontalAlignment = Alignment.CenterHorizontally,
-           verticalArrangement = if (turn != 0f) Arrangement.Center else Arrangement.Top) {
-        Text(o.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-             color = when { on && t.flat -> Color.White; on -> accent; else -> t.railText })
-        Text(o.value, fontSize = 10.sp, color = if (on && t.flat) Color.White else t.railDim, maxLines = 1)
-    }
-}
-
-/**
- * Which sound the rail changes: the left or right pad of a split, the main sound or its layer, or
- * one of a grid's sections (more than two: stacked as on the grid, the top one at the top).
- */
-@Composable
-private fun PartToggle(names: List<String>, t: PadTheme) {
-    val n = AppState.partCount
-    @Composable
-    fun cell(k: Int, m: Modifier) {
-        val on = k == AppState.part
-        val col = partColor(t, k)
-        Box(m.background(when { !on -> Color.Transparent; t.flat -> Color.Black; else -> col.copy(alpha = 0.3f) }, RoundedCornerShape(8.dp))
-                .clickable { AppState.side = k },
-            contentAlignment = Alignment.Center) {
-            Text(names.getOrElse(k) { "${k + 1}" }, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                 maxLines = 1, color = when { on && t.flat -> Color.White; on -> col; else -> t.railText })
-        }
-    }
-    val edge = Modifier.padding(horizontal = 6.dp).fillMaxWidth()
-        .border(BorderStroke(if (t.flat) 2.dp else 1.dp, if (t.flat) Color.Black else t.railDim), RoundedCornerShape(8.dp))
-    if (n <= 2) Row(edge.height(34.dp)) { for (k in 0 until n) cell(k, Modifier.weight(1f).fillMaxHeight()) }
-    else Column(edge) { for (k in n - 1 downTo 0) cell(k, Modifier.fillMaxWidth().height(30.dp)) }
-}
-
-@Composable
-private fun SettingPanel(o: Option, part: Int, t: PadTheme, close: () -> Unit) {
-    val names = AppState.controller.splitNames ?: listOf("main", "layer")
-    Surface(Modifier.padding(start = 100.dp, top = 12.dp, bottom = 12.dp).widthIn(max = 380.dp),
-            shape = RoundedCornerShape(18.dp), color = if (t.flat) Color.White else Panel.copy(alpha = 0.96f), contentColor = Fg,
-            border = if (t.flat) BorderStroke(Edge, Color.Black) else null) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (AppState.twoParts && o.perPart) "${o.label} · ${names.getOrElse(part) { "${part + 1}" }.lowercase()}" else o.label,
-                     fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                TextButton(onClick = close) { Text("Done") }
-            }
-            o.panel?.invoke()
-        }
+/** A word or two for the rail: what the gyro's sources do ("Off", "Twist: Bend", "2 on"). */
+internal fun gyroSummary(m: PhoneMods): String {
+    val on = m.gyro.withIndex().filter { it.value.target != 0 }
+    return when (on.size) {
+        0 -> "Off"
+        1 -> "${PhoneMods.SOURCES[on[0].index]}: ${GyroSettings.TARGETS[on[0].value.target]}"
+        else -> "${on.size} on"
     }
 }
 
@@ -304,7 +411,7 @@ private fun SettingPanel(o: Option, part: Int, t: PadTheme, close: () -> Unit) {
  */
 @Composable
 internal fun rememberPhoneTurn(): Float {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var turn by remember { mutableStateOf(0f) }
     androidx.compose.runtime.DisposableEffect(Unit) {
         val l = object : android.view.OrientationEventListener(context) {
@@ -322,21 +429,4 @@ internal fun rememberPhoneTurn(): Float {
         onDispose { l.disable() }
     }
     return turn
-}
-
-/** A word or two for the rail: the effects that are on for this part. */
-private fun effectsSummary(p: Part): String {
-    val on = listOfNotNull("Verb".takeIf { p.reverb > 0.01f }, "Delay".takeIf { p.delay > 0.01f },
-                           "Drive".takeIf { p.drive > 0.01f }, "Tone".takeIf { p.brightness < 0.999f })
-    return when { on.isEmpty() -> "Dry"; on.size <= 2 -> on.joinToString(" + "); else -> "${on.size} on" }
-}
-
-/** A word or two for the rail: what the gyro's sources do ("Off", "Twist: Bend", "2 on"). */
-internal fun gyroSummary(m: PhoneMods): String {
-    val on = m.gyro.withIndex().filter { it.value.target != 0 }
-    return when (on.size) {
-        0 -> "Off"
-        1 -> "${PhoneMods.SOURCES[on[0].index]}: ${GyroSettings.TARGETS[on[0].value.target]}"
-        else -> "${on.size} on"
-    }
 }

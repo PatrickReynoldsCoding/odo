@@ -940,7 +940,7 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aSoundFilter, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
+    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1094,6 +1094,9 @@ struct App {
                 it.act = aGestures; it.on = blockGestures; it.rule = true;
                 p.items.push_back(it); y += 50;
             }
+            PItem pn{PItem::Row, "Panic: stop every note", "", x, y, in, 40};
+            pn.act = aPanic; pn.rule = true;
+            p.items.push_back(pn); y += 40;
         } else if (panelKey == kGroupKey) {
             if (!sd.host) { panelKey = kNone; return Panel(); }
             auto gs = mpe::rail::groups(sd.host->manifest(), sd.settings);
@@ -1196,6 +1199,7 @@ struct App {
                 case aSound: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
                 case aLook: setEink(it.arg2 == 1); break;
                 case aGestures: setBlockGestures(!blockGestures); break;
+                case aPanic: engine->panic(); break;                  // every note stops, as on Android
                 case aFlip: setSetting(size_t(it.arg), cur().settings[size_t(it.arg)] != 0 ? 0 : 1); break;
                 case aChip: setSetting(size_t(it.arg), mpe::rail::chipValue(settingOf(size_t(it.arg)), it.arg2)); break;
                 case aFold: folded = folded == it.arg ? -1 : it.arg; break;

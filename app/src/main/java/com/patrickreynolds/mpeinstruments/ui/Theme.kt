@@ -1,6 +1,20 @@
 package com.patrickreynolds.mpeinstruments.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -134,9 +148,46 @@ fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<F
             Text(label, modifier = Modifier.weight(1f), fontSize = 14.sp)
             Text(valueText, color = TextDim, fontSize = 14.sp)
         }
-        Slider(value = value, onValueChange = onChange, valueRange = range, steps = steps,
-               colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent,
-                                              inactiveTrackColor = if (Eink) Color(0xFFBBBBBB) else Line))
+        val span = range.endInclusive - range.start
+        OdoSlider(if (span > 0f) (value - range.start) / span else 0f, accent) { t ->
+            // steps: that many stops between the ends, as Material's slider has.
+            val snapped = if (steps > 0) Math.round(t * (steps + 1)) / (steps + 1f) else t
+            onChange(range.start + snapped * span)
+        }
+    }
+}
+
+/**
+ * A slider as odo for computers draws one: a thin track, filled in the accent up to a round
+ * thumb. Tap or drag anywhere on it; [onChange] gets the place, 0 to 1.
+ */
+@Composable
+fun OdoSlider(fraction: Float, accent: Color = PartColors[0], onChange: (Float) -> Unit) {
+    val track = if (Eink) Color(0xFFBBBBBB) else Line
+    val ink = if (Eink) Color.Black else accent
+    val change by rememberUpdatedState(onChange)
+    Canvas(Modifier.fillMaxWidth().height(36.dp).pointerInput(Unit) {
+        val pad = 9.dp.toPx()
+        fun at(x: Float) = ((x - pad) / (size.width - 2 * pad)).coerceIn(0f, 1f)
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            down.consume()
+            change(at(down.position.x))
+            while (true) {
+                val e = awaitPointerEvent()
+                val p = e.changes.firstOrNull { it.id == down.id } ?: break
+                if (!p.pressed) break
+                p.consume()
+                change(at(p.position.x))
+            }
+        }
+    }) {
+        val pad = 9.dp.toPx()
+        val y = size.height / 2
+        val x = pad + fraction.coerceIn(0f, 1f) * (size.width - 2 * pad)
+        drawLine(track, Offset(pad, y), Offset(size.width - pad, y), 4.dp.toPx(), StrokeCap.Round)
+        drawLine(ink, Offset(pad, y), Offset(x, y), 4.dp.toPx(), StrokeCap.Round)
+        drawCircle(ink, 9.dp.toPx(), Offset(x, y))
     }
 }
 
@@ -180,16 +231,25 @@ fun Chips(options: List<String>, selected: Int, accent: Color = PartColors[0], o
 
 @Composable
 fun SwitchRow(label: String, checked: Boolean, detail: String? = null, accent: Color = PartColors[0], onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 14.sp)
             if (detail != null) Text(detail, color = TextDim, fontSize = 12.sp)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange,
-               colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Ink,
-                   uncheckedBorderColor = if (Eink) Color.Black else Color.Unspecified,
-                   uncheckedThumbColor = if (Eink) Color.Black else Color.Unspecified))
+        OdoSwitch(checked, accent)
+    }
+}
+
+/** A switch as odo for computers draws one: a small track, the accent when on, a round knob. Its row flips it. */
+@Composable
+fun OdoSwitch(on: Boolean, accent: Color = PartColors[0]) {
+    val shape = RoundedCornerShape(10.dp)
+    Box(Modifier.size(36.dp, 20.dp).clip(shape).background(when { on && Eink -> Color.Black; on -> accent; else -> Line })
+            .then(if (Eink) Modifier.border(1.5.dp, Color.Black, shape) else Modifier),
+        contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
+        Box(Modifier.padding(horizontal = 2.dp).size(16.dp).clip(RoundedCornerShape(8.dp))
+                .background(if (on && Eink) Color.White else Color(0xFFECEFF5)))
     }
 }
 

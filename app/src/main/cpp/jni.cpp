@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include "Synth.h"
+#include "mpe/package.h"
 
 static Synth& synth() { static Synth s; return s; }
 
@@ -29,7 +30,8 @@ FN(jstring, nativeInstrumentField)(JNIEnv* env, jobject, jint index, jint field)
     const char* v = field == 0 ? (i.aliases.empty() ? i.id : i.aliases[0]).c_str() : field == 1 ? i.group.c_str()
                   : field == 2 ? i.name.c_str() : field == 3 ? i.description.c_str()
                   : field == 4 ? i.meta("range")     // field 4: "low high" in Hz, or ""
-                  : i.meta("sound");                 // field 5: its own effects, `declare sound "reverb=0.3 ..."`, or ""
+                  : field == 5 ? i.meta("sound")     // field 5: its own effects, `declare sound "reverb=0.3 ..."`, or ""
+                  : mpe::sustains({i.group}, i.aliases.empty() ? i.id : i.aliases[0]) ? "1" : "0";   // 6: it sustains
     return env->NewStringUTF(v ? v : "");
 }
 

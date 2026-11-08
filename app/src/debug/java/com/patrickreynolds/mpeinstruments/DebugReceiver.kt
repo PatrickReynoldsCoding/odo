@@ -6,7 +6,7 @@ import android.content.Intent
 import android.util.Log
 import com.patrickreynolds.mpeinstruments.controllers.Controllers
 import com.patrickreynolds.mpeinstruments.controllers.ExternalMidi
-import com.patrickreynolds.mpeinstruments.controllers.TouchPad
+import com.patrickreynolds.mpeinstruments.controllers.LegacyTouchPad
 import java.io.File
 
 /**
@@ -66,8 +66,10 @@ class DebugReceiver : BroadcastReceiver() {
                 intent.getStringExtra("grid")?.let { j ->
                     com.patrickreynolds.mpeinstruments.controllers.KeyGrid.load(org.json.JSONObject(j))
                     AppState.controllerChanged(com.patrickreynolds.mpeinstruments.controllers.KeyGrid, true) }
+                // --es pad '<touch pad settings json>' (the package's, or the Kotlin pad's of before 0.26).
                 intent.getStringExtra("pad")?.let { j ->
-                    TouchPad.loadPreset(org.json.JSONObject(j)); AppState.controllerChanged(TouchPad) }
+                    val pad = Controllers.byId(LegacyTouchPad.PACKAGE)
+                    pad.loadPreset(org.json.JSONObject(j)); AppState.controllerChanged(pad) }
                 if (intent.hasExtra("eink")) AppState.changeEink(intent.getBooleanExtra("eink", false))
                 // --es perf '<Perf json>' sets the whole sound (parts, layer, effects); --es preset <name> loads one.
                 intent.getStringExtra("perf")?.let { j -> AppState.update { Perf.from(org.json.JSONObject(j)) } }

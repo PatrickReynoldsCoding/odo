@@ -45,7 +45,7 @@ object Native {
     external fun nativeRailChipValue(manifest: Int, index: Int, k: Int): Double
 
     external fun nativeInstrumentCount(): Int
-    /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or "") */
+    /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or ""), 5 its own effects, 6 "1" if it sustains (mpe::sustains) */
     external fun nativeInstrumentField(index: Int, field: Int): String
 
     external fun nativeSetInstrument(index: Int)
@@ -88,7 +88,9 @@ object Native {
     external fun nativeCaptureSave(path: String): Boolean
 
     data class Instrument(val index: Int, val id: String, val group: String, val name: String, val description: String,
-                          val lowHz: Float, val highHz: Float, val sound: String = "") {
+                          val lowHz: Float, val highHz: Float, val sound: String = "",
+                          /** A held note keeps sounding (bowed, blown, sung, organs, most synths), or it fades on its own: mpe::sustains. */
+                          val sustains: Boolean = true) {
         /** The middle of the instrument's range as a MIDI note, for the octave check. */
         val centerNote: Float get() = if (lowHz > 0 && highHz > 0)
             69f + 12f * (kotlin.math.ln(kotlin.math.sqrt(lowHz * highHz) / 440f) / kotlin.math.ln(2f)) else 60f
@@ -98,6 +100,7 @@ object Native {
         val range = nativeInstrumentField(it, 4).trim().split(Regex("\\s+")).mapNotNull { v -> v.toFloatOrNull() }
         Instrument(it, nativeInstrumentField(it, 0), nativeInstrumentField(it, 1),
                    nativeInstrumentField(it, 2), nativeInstrumentField(it, 3),
-                   range.getOrElse(0) { 0f }, range.getOrElse(1) { 0f }, nativeInstrumentField(it, 5))
+                   range.getOrElse(0) { 0f }, range.getOrElse(1) { 0f }, nativeInstrumentField(it, 5),
+                   nativeInstrumentField(it, 6) == "1")
     }
 }

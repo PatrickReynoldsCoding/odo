@@ -85,7 +85,8 @@ fun PlayScreen(stats: Stats?, openPlay: () -> Unit, openSetup: () -> Unit) {
         val parts = (0 until AppState.partCount).toList()
         SectionCard(AppState.presetName.ifEmpty { "Playing" }) {
             for (k in parts) InstrumentRow(k, label = partLabel(k))
-            LabeledSlider("Volume", AppState.volume, 0f..1f, pct(AppState.volume)) { AppState.changeVolume(it) }
+            // As on the rail's App panel (and odo for computers'): 0 to 200%, 100% the engine's usual level.
+            LabeledSlider("Volume", AppState.volume / 1.6f, 0f..1f, "${masterPercent()}%") { AppState.changeVolume(Math.round(it * 40) / 20f * 0.8f) }
             Spacer(Modifier.height(8.dp))
             Button(onClick = { Native.nativePanic() }, modifier = Modifier.fillMaxWidth(),
                    colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Fg), border = ButtonEdge) {
@@ -207,5 +208,6 @@ internal fun presetSummary(p: Preset): String {
         p.perf.layered -> "${desc(0)} + ${name(p.perf.part(1).instrument)}"
         else -> desc(0)
     }
-    return sound + (p.controller?.let { " · " + Controllers.byId(it).name } ?: "")
+    // The controller first, then the sounds, as odo for computers says it.
+    return (p.controller?.let { Controllers.byId(it).name + " · " } ?: "") + sound
 }
