@@ -78,6 +78,16 @@ struct Instrument {
     int index = -1;                     // in the engine's table, once compiled
     std::string error;
     std::string pack, group;            // where odo's sound packs put it ("" if none does)
+    // Whether a held note keeps sounding (bowed, blown, sung, an organ or most synths) or fades on
+    // its own however long it is held (struck, plucked: keys, guitars, bells, drums).
+    bool sustains() const {
+        const mpe::Json& tags = pkg->manifest["tags"];
+        std::string alias = pkg->manifest["aliases"][size_t(0)].str();
+        if (alias == "synths/pluck-synth" || alias == "synths/fm-keys") return false;
+        for (size_t i = 0; i < tags.size(); i++)
+            for (const char* t : {"percussion", "plucked", "struck", "drums", "keys"}) if (tags[i].str() == t) return false;
+        return true;
+    }
 };
 
 struct Library {
@@ -852,6 +862,7 @@ struct App {
     int folded = -1;                               // a group's panel: the setting whose long list of chips is open
     bool renaming = false;                         // the preset panel: a new name being typed
     std::string editText, search;                  // that name; the sound panel's search
+    int soundFilter = 0;                           // the sound panel: all, sustained, or fading ones
 
     // ---- the rail's boxes: drawing and tapping use this one layout ----
 
@@ -930,7 +941,7 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
+    enum Act { aNone, aSoundFilter, aLoadPreset, aNewPreset, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1050,6 +1061,8 @@ struct App {
             p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? 1 : 0)].str() : "Sound";
             p.sub = forSide.empty() ? "Type to find one" : forSide + " \xC2\xB7 type to find one";
             p.items.push_back({PItem::Field, search, "Find a sound", x, y, in, 38}); y += 46;
+            chips({"All", "Sustained", "Fading"}, soundFilter, aSoundFilter, 0);
+            size_t filterChips = p.items.size();
             int chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
             std::string q = lower(search), pack, group;
             std::vector<std::string> names;
@@ -1059,14 +1072,16 @@ struct App {
             for (int i : lib.soundOrder) {
                 const Instrument& s = lib.instruments[size_t(i)];
                 if (!q.empty() && lower(s.pkg->name() + " " + s.pack + " " + s.group).find(q) == std::string::npos) continue;
+                if (soundFilter && s.sustains() != (soundFilter == 1)) continue;
                 any = true;
                 if (s.pack != pack) { flush(); pack = s.pack; group.clear(); heading(upper(pack), packColour(pack)); }
                 if (s.group != group) { flush(); group = s.group; p.items.push_back({PItem::Sub, group, "", x, y, in, 20}); y += 22; }
                 names.push_back(s.pkg->name()); ids.push_back(i);
             }
             flush();
-            for (PItem& it : p.items) if (it.kind == PItem::Chip) it.on = it.arg2 == chosen;
-            if (!any) note("No sound matches \xE2\x80\x9C" + search + "\xE2\x80\x9D.");
+            for (size_t k = filterChips; k < p.items.size(); k++) if (p.items[k].kind == PItem::Chip) p.items[k].on = p.items[k].arg2 == chosen;
+            if (!any) note(search.empty() ? std::string("None here.") : "No sound matches \xE2\x80\x9C" + search + "\xE2\x80\x9D.");
+            if (soundFilter) note(soundFilter == 1 ? "Sustained: a held note keeps sounding." : "Fading: a held note dies away on its own.");
         } else if (panelKey == kAppKey) {
             p.title = "App"; p.sub = "For all of odo, not kept in presets";
             p.items.push_back({PItem::Label, "Volume", std::to_string(int(std::lround(masterVolume * 100))) + "%", x, y, in, 40}); y += 40;
@@ -1181,6 +1196,7 @@ struct App {
                 case aDelete: if (confirmDelete) deletePreset(presetName); else confirmDelete = true; break;
                 case aSplit: setSplit(it.arg); break;
                 case aController: chooseController(active, it.arg); break;
+                case aSoundFilter: soundFilter = it.arg2; panelScroll = 0; break;
                 case aSound: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
                 case aLook: setEink(it.arg2 == 1); break;
                 case aGestures: setBlockGestures(!blockGestures); break;
