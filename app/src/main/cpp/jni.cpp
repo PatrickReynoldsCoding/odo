@@ -285,7 +285,7 @@ FN(jdouble, nativeRailChipValue)(JNIEnv*, jobject, jint h, jint index, jint k) {
     return mpe::rail::chipValue(railSetting(h, index), k);
 }
 
-// ---- preset files (PRESET_FORMAT.md, mpe::preset) ---------------------------------------------
+// ---- preset files (docs/formats/PRESET_FORMAT.md, mpe::preset) ---------------------------------------------
 // Kotlin knows a controller package as "pkg:<id>" and a sound by its id from before packages (its
 // first alias, "strings/cello"); a file has the package ids. As UTF-8 bytes both ways: a name may
 // have characters NewStringUTF's modified UTF-8 cannot take.

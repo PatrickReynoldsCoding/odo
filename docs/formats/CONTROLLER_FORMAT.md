@@ -21,7 +21,7 @@ every system, the way one Faust file does for instruments.
   plays instruments from a hardware MPE controller, or from a phone through MIDI out.
 - **A controller says what it needs** (several fingers, touch size or force). A MESH that
   can't give it shows the controller as unavailable, and why.
-- **Sensors belong to the MESH, not the controller** ([VISION_PLAN.md](VISION_PLAN.md)
+- **Sensors belong to the MESH, not the controller** ([VISION_PLAN.md](../vision/VISION_PLAN.md)
   decision 5). A phone MESH has tilt and breath; a computer MESH can have the keyboard and
   mouse instead. A controller never sees them: they modify what it plays.
 

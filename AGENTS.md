@@ -20,3 +20,9 @@ as alike as you can. A user who knows one app should know the other.
   in both apps. Only change something because the platform needs it (touch vs. mouse, screen
   size, system back).
 - **Same file formats.** A preset or a setting saved by one app must load in the other.
+
+## Docs
+
+Docs go in `docs/`, by kind: `formats/` (files both apps read and write), `vision/`, `plans/`,
+`android/`. List a new one in `docs/README.md`. Keep `README.md` and this file at the top.
+

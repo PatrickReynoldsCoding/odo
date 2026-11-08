@@ -1,5 +1,5 @@
-// MESH packages: instruments (.odoi) and controllers (.odoc), as INSTRUMENT_FORMAT.md and
-// CONTROLLER_FORMAT.md describe. A package is a zip with a JSON manifest.
+// MESH packages: instruments (.odoi) and controllers (.odoc), as docs/formats/INSTRUMENT_FORMAT.md and
+// docs/formats/CONTROLLER_FORMAT.md describe. A package is a zip with a JSON manifest.
 #pragma once
 #include <cstdint>
 #include <map>

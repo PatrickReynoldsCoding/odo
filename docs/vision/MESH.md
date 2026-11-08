@@ -81,7 +81,7 @@ example, its own arpeggiator).
 - Offer sensors (tilt, breath, ...) as modifiers on any controller.
 - Let the user add stores, and show everything they own, from every store, in one place.
 - Feel instant: a target of under about 30 ms from touch to sound. (The Android app does
-  about 25 ms today; see [LATENCY.md](LATENCY.md).)
+  about 25 ms today; see [LATENCY.md](../android/LATENCY.md).)
 - Be ready to play within seconds of opening.
 
 **May:**

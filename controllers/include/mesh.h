@@ -1,5 +1,5 @@
 /*
- * Writing a MESH controller in C: the interface of CONTROLLER_FORMAT.md, for clang's wasm32
+ * Writing a MESH controller in C: the interface of docs/formats/CONTROLLER_FORMAT.md, for clang's wasm32
  * target, with no C library. Build with controllers/build.sh.
  *
  * A controller exports:

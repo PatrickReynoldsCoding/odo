@@ -1,7 +1,7 @@
 // Instruments as WebAssembly, run by wasm3: the interpreter way. A Faust instrument compiled with
 // `faust -lang wasm` (engine/tools/wasm_instruments.py) is portable code a store allows an app to
 // download, unlike native code. Each voice is its own wasm3 instance; the engine sees an ordinary
-// Faust dsp. For the interpreter experiment (VISION_PLAN.md decision 3).
+// Faust dsp. For the interpreter experiment (docs/vision/VISION_PLAN.md decision 3).
 #pragma once
 #include <string>
 

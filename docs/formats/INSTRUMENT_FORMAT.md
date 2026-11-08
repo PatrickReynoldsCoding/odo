@@ -2,7 +2,7 @@
 
 How a MESH instrument is packaged, so that the same instrument plays, and sounds the same,
 on every system: Android, iOS, Windows, macOS, Linux, and in the odo plugin in a DAW
-([VISION_PLAN.md](VISION_PLAN.md) decisions 20 and 22).
+([VISION_PLAN.md](../vision/VISION_PLAN.md) decisions 20 and 22).
 
 Status: version 1, in use since 2026-11-06. `tools/pack.py` in the instruments repo makes the
 packages; odo on Android compiles them in, and odo for computers (`desktop/`) compiles them
@@ -116,11 +116,49 @@ Test hints stay as they are (`ringout`, `window`, `pitched`) and go into the man
 
 An instrument you own should not change under you, like an old guitar.
 
-- A new version is **offered**, not forced. You choose to move to it.
-- Old versions stay installed. Each is a few KB of source.
-- A preset remembers the version it used (`patrickreynolds/flute@1.2.0`) and plays that one.
+- Old versions stay installed beside the new one. Each is one package, about 100 KB.
+- A preset file remembers the version it used and plays that one (if it is there).
 - Ids never change. An instrument that moves (today's `winds/flute`) keeps its old id as an
   alias.
+
+Today (since 2026-11-08) the newest version plays unless you pick another, and you can always go
+back. A new version is not yet held back for you to opt in to.
+
+### How it works
+
+- **The version** is the instrument's `declare version "1.1.0";` (none: `1.0.0`). It is
+  `major.minor.patch`, compared by number (`1.10.0` is newer than `1.9.2`).
+- **Keeping a version.** Before changing how an instrument sounds, keep the version it is now,
+  then raise its `declare version`:
+
+      tools/pack.py --keep instruments/keys/piano.dsp    # versions/piano@1.0.0.odoi
+      # edit piano.dsp, then: declare version "1.1.0";
+
+  `--keep` packs the instrument as it is into `versions/<name>@<version>.odoi` in the instruments
+  repo and never overwrites one that is there. The package carries its own copy of every library,
+  so the old version still sounds the same after a library changes. Commit `versions/`.
+- **Building.** `tools/pack.py` copies the kept packages beside the new ones (`build/packages`).
+  The engine compiles all of them in (Android); odo for computers finds them in its library.
+- **Finding one.** `mpe::findInstrument("patrickreynolds/piano")` (or the old id `keys/piano`)
+  gives the newest; `"patrickreynolds/piano@1.0.0"` gives that version. `instrumentVersions`
+  lists an instrument's versions, newest first; `isNewestVersion`; `compareVersions`.
+- **In the apps.** The sound pickers list only the newest version of each sound. For a sound with
+  older versions, the picker shows **Version** above *Find a sound*: `1.1.0 · newest`, `1.0.0`,
+  and "older versions are kept as they were, to go back to." The sound tile shows an older
+  version's number (`Piano 1.0.0`). Picking a sound from the list plays its newest.
+- **What is saved.** An app's own settings and presets name only an older version
+  (`"version": "1.0.0"` on Android's part; `patrickreynolds/piano@1.0.0` in odo for computers'
+  config), so a sound left on the newest moves on when a new version comes. A preset *file*
+  always names the version (`parts[].version`, [PRESET_FORMAT.md](PRESET_FORMAT.md)); if that
+  version isn't there, the newest plays and the app says so.
+- **Rolling back for good** (everyone gets the old sound): restore the old `.dsp` from git and
+  raise its version again, so the version that sounded wrong is still kept to compare.
+
+### Versions so far
+
+| instrument | version | what changed |
+|---|---|---|
+| cello, violin, pad, lead, piano, max-richter | 1.1.0 | level only, to about -20 dBFS a note in odo (1.0.0 kept) |
 
 ## Packs
 

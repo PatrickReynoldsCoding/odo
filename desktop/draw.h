@@ -1,4 +1,4 @@
-// Drawing a controller's draw list (CONTROLLER_FORMAT.md) with SDL3, and plain text for the rail.
+// Drawing a controller's draw list (docs/formats/CONTROLLER_FORMAT.md) with SDL3, and plain text for the rail.
 #pragma once
 #include <SDL3/SDL.h>
 #include <cstdint>

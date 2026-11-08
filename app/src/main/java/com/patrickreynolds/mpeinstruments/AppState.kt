@@ -434,7 +434,7 @@ object AppState {
         savePresets()
     }
 
-    // ---- preset files (PRESET_FORMAT.md), the same as odo for computers' -----------------------
+    // ---- preset files (docs/formats/PRESET_FORMAT.md), the same as odo for computers' -----------------------
 
     /**
      * What Share sends: the preset on view as it plays now; a built-in one for any controller as it

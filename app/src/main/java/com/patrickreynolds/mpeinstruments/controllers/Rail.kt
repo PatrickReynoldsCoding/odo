@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /**
  * A controller's settings as the rail shows them, from the engine's rail model (mpe/rail.h, and
- * CONTROLLER_FORMAT.md "Settings on the rail"): odo for computers shows the same.
+ * docs/formats/CONTROLLER_FORMAT.md "Settings on the rail"): odo for computers shows the same.
  */
 enum class RailWidget { Switch, Chips, Slider }
 

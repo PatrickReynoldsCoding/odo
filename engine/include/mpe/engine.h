@@ -42,7 +42,7 @@ int addInstrument(InstrumentInfo info);             // its index
 // By id or alias: the newest version there is, or with "@<version>" ("patrickreynolds/cello@1.0.0")
 // that one. Index, or -1.
 int findInstrument(const char* id);
-// Versions sit side by side (INSTRUMENT_FORMAT.md): the instrument's versions, newest first
+// Versions sit side by side (docs/formats/INSTRUMENT_FORMAT.md): the instrument's versions, newest first
 // (index's own id; just index if it has no others).
 std::vector<int> instrumentVersions(int index);
 bool isNewestVersion(int index);

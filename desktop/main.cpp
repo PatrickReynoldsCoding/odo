@@ -79,7 +79,7 @@ struct Instrument {
     int index = -1;                     // in the engine's table, once compiled
     std::string error;
     std::string pack, group;            // where odo's sound packs put it ("" if none does)
-    // Versions sit side by side (INSTRUMENT_FORMAT.md): an older one is kept to go back to, but
+    // Versions sit side by side (docs/formats/INSTRUMENT_FORMAT.md): an older one is kept to go back to, but
     // only the newest is listed with the sounds; the sound picker offers the others under Version.
     bool newest = true;
     std::string version() const { return pkg->version(); }
@@ -588,7 +588,7 @@ struct App {
         saveConfig();
     }
 
-    // ---- preset files (PRESET_FORMAT.md) ------------------------------------------------------
+    // ---- preset files (docs/formats/PRESET_FORMAT.md) ------------------------------------------------------
 
     // A preset as a file: each side's controller, its settings and its parts (the sound, the
     // second sound, then what the preset carries from a file).

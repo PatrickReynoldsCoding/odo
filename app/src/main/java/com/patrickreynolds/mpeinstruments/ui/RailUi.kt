@@ -305,7 +305,7 @@ private fun PresetsPanel() {
     PRow("+ Keep what is playing as a new preset") {
         AppState.newPreset(if (on?.builtIn == true) current else AppState.soundName()); renaming = false; confirmDelete = false
     }
-    // As a file, to another odo (PRESET_FORMAT.md): the same rows as odo for computers'.
+    // As a file, to another odo (docs/formats/PRESET_FORMAT.md): the same rows as odo for computers'.
     val context = androidx.compose.ui.platform.LocalContext.current
     val openFile = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->

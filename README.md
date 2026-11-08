@@ -1,8 +1,8 @@
 # odo
 
-odo is a [MESH](MESH.md) (Multimodal Expression Sensor Host) for Android: an app that plays the Faust instruments from `mpe-instruments` from a
+odo is a [MESH](docs/vision/MESH.md) (Multimodal Expression Sensor Host) for Android: an app that plays the Faust instruments from `mpe-instruments` from a
 Seaboard BLOCK (or any MPE controller) over USB or Bluetooth LE, with low latency: about
-25 ms from note to sound on a POCO F2 Pro, measured ([LATENCY.md](LATENCY.md)).
+25 ms from note to sound on a POCO F2 Pro, measured ([LATENCY.md](docs/android/LATENCY.md)).
 
 ```
 Seaboard -> android.media.midi -> core (clean) -> parts (play / arp) -> Faust voices -> effects -> Oboe
@@ -25,7 +25,7 @@ What it does:
   glides and vibrato are left alone.
 - **Sound**: per part brightness, drive, touch response, reverb and delay sends; a Zita reverb
   and a tempo-synced ping-pong delay. Tap tempo.
-- **Presets**: ten built in, save your own, and share them as files between your phone and computer ([PRESET_FORMAT.md](PRESET_FORMAT.md)).
+- **Presets**: ten built in, save your own, and share them as files between your phone and computer ([PRESET_FORMAT.md](docs/formats/PRESET_FORMAT.md)).
 - **A fullscreen touch pad**: play with your fingers, no controller needed. Columns of notes in
   a key and scale, slide to glide, higher up for louder and brighter; each finger its own MPE
   voice, so the arp, split and effects apply. A Seaboard played at the same time shows there too.
@@ -127,6 +127,10 @@ app/       Kotlin: MIDI devices, service, UI. Calls engine through JNI.
 tests/     host tests for engine; emulator tests for app
 captures/  recorded Seaboard MIDI to replay in tests
 ```
+
+## Docs
+
+The file formats, the vision and plans, and the phone notes are in [docs/](docs/README.md).
 
 ## Test plan: what runs where
 

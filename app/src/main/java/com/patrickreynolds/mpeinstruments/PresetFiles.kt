@@ -11,7 +11,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 /**
- * Presets as files (PRESET_FORMAT.md), to give one to another odo: Share sends the preset on view
+ * Presets as files (docs/formats/PRESET_FORMAT.md), to give one to another odo: Share sends the preset on view
  * through the share sheet; a file opened in the app, or from another app, becomes one of yours.
  * AppState turns them to and from text (with mpe::preset, as odo for computers does).
  */

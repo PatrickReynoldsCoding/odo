@@ -15,7 +15,7 @@ import java.util.zip.ZipInputStream
 
 /**
  * A controller package (.odoc): its WebAssembly runs in the engine (Native.nativeCtl*), the same
- * file a computer MESH plays (CONTROLLER_FORMAT.md). Its settings come from its manifest and are
+ * file a computer MESH plays (docs/formats/CONTROLLER_FORMAT.md). Its settings come from its manifest and are
  * shown on the rail like any controller's. One runs at a time: the one in use.
  */
 class PackageController(private val bytes: ByteArray, val manifest: JSONObject,

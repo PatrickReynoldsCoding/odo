@@ -39,7 +39,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- A preset file (PRESET_FORMAT.md) opened with odo, or shared to it: one of yours. -->
+            <!-- A preset file (docs/formats/PRESET_FORMAT.md) opened with odo, or shared to it: one of yours. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

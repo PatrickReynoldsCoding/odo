@@ -1,5 +1,5 @@
 // Runs a controller package (.odoc): its WebAssembly in a sandbox (wasm3), as
-// CONTROLLER_FORMAT.md describes. Touches and time in; MPE MIDI bytes and a draw list out.
+// docs/formats/CONTROLLER_FORMAT.md describes. Touches and time in; MPE MIDI bytes and a draw list out.
 // One thread (the UI's) calls everything.
 #pragma once
 #include <cstdint>

@@ -1,4 +1,4 @@
-// The rail's settings model (mpe/rail.h): every rule in CONTROLLER_FORMAT.md's "Settings on the
+// The rail's settings model (mpe/rail.h): every rule in docs/formats/CONTROLLER_FORMAT.md's "Settings on the
 // rail", against the controllers' own manifests and against small made-up ones.
 #include <cstring>
 #include <fstream>

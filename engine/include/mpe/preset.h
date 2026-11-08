@@ -1,5 +1,5 @@
 // A preset as a file: what one odo sends another (a phone to a computer, say). Both apps read and
-// write presets through here, so a file made by one loads in the other. PRESET_FORMAT.md has the
+// write presets through here, so a file made by one loads in the other. docs/formats/PRESET_FORMAT.md has the
 // format; this is the one reader and the one writer of it.
 #pragma once
 #include <string>

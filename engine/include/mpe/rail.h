@@ -1,6 +1,6 @@
 // The rail's settings model: how a controller's settings (its manifest's "settings") are shown and
 // edited on a MESH's rail. Both apps use it, so they show and step them the same way.
-// CONTROLLER_FORMAT.md ("Settings on the rail") has the rules.
+// docs/formats/CONTROLLER_FORMAT.md ("Settings on the rail") has the rules.
 #pragma once
 #include <string>
 #include <vector>

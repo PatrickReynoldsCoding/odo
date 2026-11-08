@@ -102,7 +102,7 @@ private fun color(c: Int): Color {
                  alpha = (u and 255).toInt())
 }
 
-/** A draw list (CONTROLLER_FORMAT.md), in dp, its text in odo's Roboto. An operation it doesn't know ends the drawing. */
+/** A draw list (docs/formats/CONTROLLER_FORMAT.md), in dp, its text in odo's Roboto. An operation it doesn't know ends the drawing. */
 private fun DrawScope.drawList(bytes: ByteArray, w: Float, h: Float, faces: OdoTypefaces) {
     val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     val text = android.graphics.Paint().apply { isAntiAlias = true }

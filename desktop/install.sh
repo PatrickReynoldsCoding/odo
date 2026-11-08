@@ -38,7 +38,7 @@ Categories=AudioVideo;Audio;Music;
 Keywords=music;instrument;MPE;touch;synth;
 StartupWMClass=odo
 DESKTOP
-# Preset files (PRESET_FORMAT.md): known by their extension, opened with odo.
+# Preset files (docs/formats/PRESET_FORMAT.md): known by their extension, opened with odo.
 mkdir -p "$HOME/.local/share/mime/packages"
 cat > "$HOME/.local/share/mime/packages/odo.xml" <<'MIME'
 <?xml version="1.0" encoding="UTF-8"?>

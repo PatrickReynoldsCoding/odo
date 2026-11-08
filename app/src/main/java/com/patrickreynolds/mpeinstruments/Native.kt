@@ -25,7 +25,7 @@ object Native {
     external fun nativeCtlTouch(id: Int, phase: Int, x: Float, y: Float, size: Float, force: Float)
     external fun nativeCtlSetting(index: Int, value: Double)
     external fun nativeCtlStop()
-    /** A frame: its draw list if it changed (CONTROLLER_FORMAT.md), else null. */
+    /** A frame: its draw list if it changed (docs/formats/CONTROLLER_FORMAT.md), else null. */
     external fun nativeCtlTick(): ByteArray?
     /** Settings it changed itself (its editor, a button on its surface): index, value pairs, or null. */
     external fun nativeCtlTakeSettings(): DoubleArray?
@@ -89,7 +89,7 @@ object Native {
     external fun nativeCaptureProgress(): Double
     external fun nativeCaptureSave(path: String): Boolean
 
-    // Preset files (PRESET_FORMAT.md): mpe::preset reads and writes them, with this app's ids
+    // Preset files (docs/formats/PRESET_FORMAT.md): mpe::preset reads and writes them, with this app's ids
     // ("pkg:" controllers, sounds by their first alias) changed to and from the files'. UTF-8 bytes.
     /** The app's preset in the file's shape to the file's text; empty if it isn't one. */
     external fun nativePresetWrite(json: ByteArray): ByteArray
@@ -101,7 +101,7 @@ object Native {
                           val lowHz: Float, val highHz: Float, val sound: String = "",
                           /** A held note keeps sounding (bowed, blown, sung, organs, most synths), or it fades on its own: mpe::sustains. */
                           val sustains: Boolean = true,
-                          /** Its version; versions sit side by side, older ones kept to go back to (INSTRUMENT_FORMAT.md). */
+                          /** Its version; versions sit side by side, older ones kept to go back to (docs/formats/INSTRUMENT_FORMAT.md). */
                           val version: String = "", val newest: Boolean = true) {
         /** The middle of the instrument's range as a MIDI note, for the octave check. */
         val centerNote: Float get() = if (lowHz > 0 && highHz > 0)

@@ -307,12 +307,12 @@ All nine first questions are answered; see the Decisions log. What's left is und
     means a MESH app there, and, for music made in a DAW, the odo plugin playing the same
     instruments (decision 13).
 
-23. **The instrument format** (2026-11-06): see [INSTRUMENT_FORMAT.md](INSTRUMENT_FORMAT.md).
+23. **The instrument format** (2026-11-06): see [INSTRUMENT_FORMAT.md](../formats/INSTRUMENT_FORMAT.md).
     One package per instrument (manifest + self-contained Faust). Versions sit side by side
     and presets remember theirs, so an instrument never changes under you. Instruments may
     have a few knobs of their own, and be mono or stereo.
 
-24. **The controller format** (2026-11-06): see [CONTROLLER_FORMAT.md](CONTROLLER_FORMAT.md).
+24. **The controller format** (2026-11-06): see [CONTROLLER_FORMAT.md](../formats/CONTROLLER_FORMAT.md).
     A controller is a WebAssembly program and a manifest, the same on every system. Touch
     screens only: a controller says what it needs. Sensors stay the MESH's, so a computer
     MESH can offer keyboard and mouse where a phone offers tilt and breath.

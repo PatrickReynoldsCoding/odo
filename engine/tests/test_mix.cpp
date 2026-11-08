@@ -1,7 +1,7 @@
 // The mix of many notes: a chord must sound like its notes played together, not bent out of shape.
 // The output used to go through tanh(1.2x), which made the notes of a chord beat against each
 // other (a 4-note piano chord came out with distortion at -7 dB); now a limiter turns the whole
-// sound down instead. And instrument versions side by side (INSTRUMENT_FORMAT.md).
+// sound down instead. And instrument versions side by side (docs/formats/INSTRUMENT_FORMAT.md).
 #include <string>
 #include "check.h"
 

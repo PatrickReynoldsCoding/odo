@@ -21,7 +21,7 @@ On iOS this space is crowded: GeoShred, ThumbJam, Animoog, and the AUv3 world wi
 such as AUM. On Android there is very little, mostly because Android audio latency was bad
 for years.
 
-About 25 ms from touch to sound ([LATENCY.md](LATENCY.md)), with MPE, tilt and breath, on a
+About 25 ms from touch to sound ([LATENCY.md](../android/LATENCY.md)), with MPE, tilt and breath, on a
 phone people already own, fills a real gap. This is the strongest card, and the app already
 has it.
 
