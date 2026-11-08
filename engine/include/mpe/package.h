@@ -46,4 +46,10 @@ struct Package {
     static std::unique_ptr<Package> fromBytes(const void* data, size_t size, std::string* error = nullptr);
 };
 
+// Whether a sound sustains: a held note keeps sounding (bowed, blown, sung, an organ, most synths),
+// or fades on its own however long it is held (struck, plucked: keys, guitars, bells, drums). By
+// its tags (an instrument.json's "tags"; a built-in instrument's group is its first) and its first
+// alias ("synths/pluck-synth"). Both apps' sound pickers filter by it.
+bool sustains(const std::vector<std::string>& tags, const std::string& alias);
+
 }  // namespace mpe

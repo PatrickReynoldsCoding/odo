@@ -79,14 +79,13 @@ struct Instrument {
     std::string error;
     std::string pack, group;            // where odo's sound packs put it ("" if none does)
     // Whether a held note keeps sounding (bowed, blown, sung, an organ or most synths) or fades on
-    // its own however long it is held (struck, plucked: keys, guitars, bells, drums).
+    // its own however long it is held (struck, plucked: keys, guitars, bells, drums): mpe::sustains,
+    // as odo on Android's sound picker tells.
     bool sustains() const {
-        const mpe::Json& tags = pkg->manifest["tags"];
-        std::string alias = pkg->manifest["aliases"][size_t(0)].str();
-        if (alias == "synths/pluck-synth" || alias == "synths/fm-keys") return false;
-        for (size_t i = 0; i < tags.size(); i++)
-            for (const char* t : {"percussion", "plucked", "struck", "drums", "keys"}) if (tags[i].str() == t) return false;
-        return true;
+        const mpe::Json& t = pkg->manifest["tags"];
+        std::vector<std::string> tags;
+        for (size_t i = 0; i < t.size(); i++) tags.push_back(t[i].str());
+        return mpe::sustains(tags, pkg->manifest["aliases"][size_t(0)].str());
     }
 };
 
@@ -1146,13 +1145,10 @@ struct App {
         return p;
     }
 
-    // The colour of a pack's heading and its sounds' badges.
+    // The colour of a pack's heading and its sounds' badges (ui/tokens.json, as Android's).
     static uint32_t packColour(const std::string& pack) {
-        static const struct { const char* name; uint32_t c; } kPacks[] = {
-            {"Classical", 0xFF8A65FFu}, {"Keys & Organs", 0xFFC857FFu}, {"Plucked & Struck", 0xAEEA70FFu},
-            {"Winds, Brass & Voices", 0x4DD0E1FFu}, {"Synthesizers", 0xC792EAFFu}, {"Percussion", 0xFF6B6BFFu}};
-        for (const auto& k : kPacks) if (pack == k.name) return k.c;
-        return 0x9AA2B4FFu;
+        for (const auto& k : tokens::packs) if (pack == k.name) return k.colour;
+        return tokens::packOther;
     }
 
     bool typing() const { return renaming || panelKey == kSoundKey || panelKey == kSound2Key; }

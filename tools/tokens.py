@@ -31,6 +31,10 @@ def kotlin(t):
             out.append("        %s = Color(0xFF%s)," % (k, p[k]))
         out.append("        eink = %s," % ("true" if p["eink"] else "false"))
         out.append("    )")
+    packs = {k: v for k, v in t["packs"].items() if not k.startswith("_")}
+    out.append("    /** Each sound pack's colour, by its name; [packOther] for any other. */")
+    out.append("    val packs = mapOf(%s)" % ", ".join('"%s" to Color(0xFF%s)' % (k, v) for k, v in packs.items() if k != "other"))
+    out.append("    val packOther = Color(0xFF%s)" % packs["other"])
     out.append("    object Type {")
     for k, v in t["type"].items():
         out.append("        val %s = %s.sp" % (k, num(v)))
@@ -57,6 +61,11 @@ def cpp(t):
         parts = ", ".join("0x%sFFu" % c for c in p["parts"])
         sig = ", ".join("0x%sFFu" % p[k] for k in SIGNALS)
         out.append("inline constexpr Palette %s{%s, {%s}, %s, %s};" % (name, vals, parts, sig, "true" if p["eink"] else "false"))
+    packs = {k: v for k, v in t["packs"].items() if not k.startswith("_")}
+    out += ["", "// Each sound pack's colour, by its name; packOther for any other.",
+            "struct PackColour { const char* name; uint32_t colour; };",
+            "inline constexpr PackColour packs[] = {%s};" % ", ".join('{"%s", 0x%sFFu}' % (k, v) for k, v in packs.items() if k != "other"),
+            "inline constexpr uint32_t packOther = 0x%sFFu;" % packs["other"]]
     out += ["", "// The same colour at alpha a (0..255).",
             "constexpr uint32_t alpha(uint32_t c, uint32_t a) { return (c & 0xFFFFFF00u) | (a & 0xFFu); }", "",
             "namespace type {"]

@@ -31,6 +31,9 @@ object Tokens {
         danger = Color(0xFF000000),
         eink = true,
     )
+    /** Each sound pack's colour, by its name; [packOther] for any other. */
+    val packs = mapOf("Classical" to Color(0xFFFF8A65), "Keys & Organs" to Color(0xFFFFC857), "Plucked & Struck" to Color(0xFFAEEA70), "Winds, Brass & Voices" to Color(0xFF4DD0E1), "Synthesizers" to Color(0xFFC792EA), "Percussion" to Color(0xFFFF6B6B))
+    val packOther = Color(0xFF9AA2B4)
     object Type {
         val caption = 10.sp
         val label = 11.sp

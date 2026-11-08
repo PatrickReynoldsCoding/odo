@@ -15,6 +15,11 @@ struct Palette {
 inline constexpr Palette dark{0x0E1014FFu, 0x181B22FFu, 0x222632FFu, 0x2E3341FFu, 0xECEFF5FFu, 0x9AA2B4FFu, {0xFF8A65FFu, 0x4DD0E1FFu, 0xAEEA70FFu, 0xC792EAFFu}, 0xFFC857FFu, 0xFF6B6BFFu, false};
 inline constexpr Palette eink{0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x000000FFu, 0x000000FFu, 0x333333FFu, {0x000000FFu, 0x666666FFu, 0x333333FFu, 0x999999FFu}, 0x000000FFu, 0x000000FFu, true};
 
+// Each sound pack's colour, by its name; packOther for any other.
+struct PackColour { const char* name; uint32_t colour; };
+inline constexpr PackColour packs[] = {{"Classical", 0xFF8A65FFu}, {"Keys & Organs", 0xFFC857FFu}, {"Plucked & Struck", 0xAEEA70FFu}, {"Winds, Brass & Voices", 0x4DD0E1FFu}, {"Synthesizers", 0xC792EAFFu}, {"Percussion", 0xFF6B6BFFu}};
+inline constexpr uint32_t packOther = 0x9AA2B4FFu;
+
 // The same colour at alpha a (0..255).
 constexpr uint32_t alpha(uint32_t c, uint32_t a) { return (c & 0xFFFFFF00u) | (a & 0xFFu); }
 

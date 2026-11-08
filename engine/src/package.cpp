@@ -178,4 +178,11 @@ std::unique_ptr<Package> Package::read(const std::string& path, std::string* err
     return pkg;
 }
 
+bool sustains(const std::vector<std::string>& tags, const std::string& alias) {
+    if (alias == "synths/pluck-synth" || alias == "synths/fm-keys") return false;
+    for (const std::string& t : tags)
+        for (const char* f : {"percussion", "plucked", "struck", "drums", "keys"}) if (t == f) return false;
+    return true;
+}
+
 }  // namespace mpe
