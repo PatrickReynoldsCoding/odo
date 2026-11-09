@@ -23,7 +23,12 @@
 #define CELL_UPPER "KEY"
 #define KEYS_MAX_COLS 16
 /* Its own settings, after the Grid's (the manifest lists them in this order, at the end). */
-#define KEYS_EXTRA_SETTINGS S_HEX_LAYOUT, S_TUNING, S_STEP_E, S_STEP_NE, S_PRESS,
+#define SCALA_MAX 128           /* tuning.h's HT_MAX_N; the manifest's "scala" max */
+#define KEYS_EXTRA_SETTINGS S_HEX_LAYOUT, S_TUNING, S_STEP_E, S_STEP_NE, S_PRESS, S_SCALA, S_SCALA1, \
+                            S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1,
+/* A Scala file's tuning is built again when its settings (or the tuning) change. */
+static int scala_dirty = 1;
+#define KEYS_ON_SETTING(i) do { if ((i) == S_TUNING || (i) >= S_SCALA) scala_dirty = 1; } while (0)
 #define KEYS_EXTRA_DEFAULTS [S_STEP_E] = 2, [S_STEP_NE] = 7, [S_PRESS] = 1
 
 #include "../grid/grid.c"
@@ -36,7 +41,24 @@ enum { COL_WHITE = 5, COL_ACCIDENTALS, COL_RAINBOW, COL_DISTANCE };
 enum { PRESS_OFF, PRESS_PRESSURE, PRESS_BOTH };
 
 /* ---- the notes ----------------------------------------------------------------------------------- */
-static const HexTuning* tuning(void) { return ht_tuning((int)set_[S_TUNING]); }
+/* The tuning the rail lists after the built-in ones: a Scala file's, which the MESH reads and gives
+   as settings (scala: how many notes; scala1.. each one's cents, the last where it repeats). Until
+   one is given, 12 equal. */
+enum { HT_SCALA = HT_COUNT };
+static HexTuning scala_t;
+static double scala_table[HT_MAX_N];
+static int scala_val[3], scala_ok;
+static const HexTuning* tuning(void) {
+    if ((int)set_[S_TUNING] != HT_SCALA) return ht_tuning((int)set_[S_TUNING]);
+    if (scala_dirty) {
+        double cents[HT_MAX_N];
+        int n = (int)set_[S_SCALA];
+        for (int k = 0; k < n && k < HT_MAX_N; k++) cents[k] = set_[S_SCALA1 + k];
+        scala_ok = ht_scala(&scala_t, scala_table, scala_val, cents, n);
+        scala_dirty = 0;
+    }
+    return scala_ok ? &scala_t : ht_tuning(HT_12);
+}
 /* The current half's key's root, in the tuning's steps (0..n-1 above C). */
 static int key_step(void) { return ht_key_step(tuning(), key()); }
 
@@ -110,7 +132,7 @@ static void clamp_pos(void) {
         int e, d;
         steps(&e, &d);
         float per = (float)d - (float)e / 2;                   /* steps a row, straight up */
-        float semis = per * 12.0f / (float)tuning()->n;
+        float semis = per * (float)(ht_period(tuning()) / 100.0) / (float)tuning()->n;
         if (absf(semis) < 0.25f) { hv->pos = 0; continue; }
         float mid = pitch_of(note_rc(mid_row(), cols / 2));
         float a = (8 - mid) / semis, b = (120 - mid) / semis;
@@ -259,7 +281,7 @@ static unsigned note_colour(int note) {
     case COL_ACCIDENTALS:
         return p >= -1 && p <= 5 ? NATURAL : p >= 6 && p <= 12 ? SHARP : p <= -2 && p >= -8 ? FLAT
              : p >= 13 && p <= 19 ? SHARP2 : p <= -9 && p >= -15 ? FLAT2 : FURTHER;
-    case COL_RAINBOW: return hsv((float)(ht_cents(t, rel) / 1200.0), 0.6f, 1);
+    case COL_RAINBOW: return hsv((float)(ht_cents(t, rel) / ht_period(t)), 0.6f, 1);
     case COL_DISTANCE: {
         int a = p < 0 ? -p : p;
         return hsv(0.66f * (float)(a > 12 ? 12 : a) / 12.0f, p < 0 ? 0.45f : 0.7f, a > 12 ? 0.7f : 1);
@@ -292,10 +314,10 @@ static void draw_keys(const Theme* th) {
     float w = key_w(), R = w / 1.7320508f;
     unsigned light = flat ? BLACK : th->light;
     int n = tuning()->n;
-    unsigned long long sounding = 0;
+    unsigned char sounding[HT_MAX_N] = {0};      /* which of the tuning's notes are playing, in any octave */
     int echo = (int)set_[S_ECHO];
-    for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) sounding |= 1ull << floormod(fingers[k].note, n);
-    for (int k = 0; k < nlatched; k++) sounding |= 1ull << floormod(latched[k].note, n);
+    for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) sounding[floormod(fingers[k].note, n)] = 1;
+    for (int k = 0; k < nlatched; k++) sounding[floormod(latched[k].note, n)] = 1;
     for (int h = 0; h < nhalves; h++) {
         hv = &halves[h];
         int ks = key_step();
@@ -328,7 +350,7 @@ static void draw_keys(const Theme* th) {
                 else edge = root ? light : mesh_alpha(light, flat ? 0.8f : 0.38f);
                 if (root && !flat && !on && !th->bright) hexagon(cx, cy, w + 6, 0, mesh_alpha(colour ? colour : light, 0.18f), 6);
                 hexagon(cx, cy, w, 0, edge, off ? 1.0f : root ? 2.5f : 1.5f);
-                int same = echo != ECHO_OFF && !on && !kept && glow < 0.5f && ((sounding >> floormod(note, n)) & 1);
+                int same = echo != ECHO_OFF && !on && !kept && glow < 0.5f && sounding[floormod(note, n)];
                 unsigned ec = flat ? BLACK : colour ? colour : th->hot;
                 if (same) {
                     if (echo == ECHO_RING) hexagon(cx, cy, w * 0.72f, 0, mesh_alpha(ec, 0.95f), 3);

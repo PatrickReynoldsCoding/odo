@@ -195,7 +195,7 @@ target_compile_options(mpe_thirdparty PRIVATE -w -O2)
 target_compile_definitions(mpe_thirdparty PUBLIC d_m3HasWASI=0 d_m3HasUVWASI=0 d_m3HasMetaWASI=0 d_m3HasTracer=0)
 
 set(ENGINE_SOURCES src/clean.cpp src/engine.cpp src/breath.cpp src/looper.cpp src/registry.cpp src/package.cpp
-                   src/controller.cpp src/wasm_dsp.cpp src/rail.cpp src/preset.cpp src/take.cpp src/take_score.cpp "${GEN_DIR}/builtins.cpp" ${INSTR_SOURCES})
+                   src/controller.cpp src/wasm_dsp.cpp src/rail.cpp src/scala.cpp src/preset.cpp src/take.cpp src/take_score.cpp "${GEN_DIR}/builtins.cpp" ${INSTR_SOURCES})
 if(MPE_LIBFAUST)
   list(APPEND ENGINE_SOURCES src/faust_loader.cpp)
 endif()

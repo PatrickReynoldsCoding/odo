@@ -248,13 +248,17 @@ static void hex() {
     Json g = load("grid"), m = load("hex");
     const Json& gs = g["settings"];
     const Json& hs = m["settings"];
-    bool same = hs.size() == gs.size() + 5;
+    // Its own, in hex.c's order (KEYS_EXTRA_SETTINGS): five, then a Scala file's count and its 128 places.
+    std::vector<std::string> own = {"hexLayout", "tuning", "stepRight", "stepUpRight", "press", "scala"};
+    for (int k = 1; k <= 128; k++) own.push_back("scala" + std::to_string(k));
+    bool same = hs.size() == gs.size() + own.size();
     for (size_t i = 0; i < gs.size() && same; i++)
         if (hs[i]["id"].str() != gs[i]["id"].str() || hs[i]["type"].str() != gs[i]["type"].str()) {
             same = false;
             CHECK(false, "hex setting %zu is %s, the Grid's %s", i, hs[i]["id"].str().c_str(), gs[i]["id"].str().c_str());
         }
-    CHECK(same, "the Hex keyboard has the Grid's %zu settings in its order, then its own 5", gs.size());
+    for (size_t i = 0; i < own.size() && same; i++) same = hs[gs.size() + i]["id"].str() == own[i];
+    CHECK(same, "the Hex keyboard has the Grid's %zu settings in its order, then its own %zu", gs.size(), own.size());
     auto v = defaults(m);
     auto groups = rail::groups(m, v);
     std::string names;
@@ -266,7 +270,7 @@ static void hex() {
     auto hl = find(rs, "hexLayout");
     CHECK(hl && hl->group == "Layout" && hl->choices.size() == 4 && hl->display == "Wicki-Hayden", "Note layout: 4 chips, Wicki-Hayden");
     auto tu = find(rs, "tuning");
-    CHECK(tu && tu->group == "Notes" && tu->choices.size() == 9 && tu->display == "12 equal", "Tuning: 9, 12 equal");
+    CHECK(tu && tu->group == "Notes" && tu->choices.size() == 10 && tu->choices.back() == "Scala file" && tu->display == "12 equal", "Tuning: 10, 12 equal, the last Scala file");
     CHECK(!find(rs, "stepRight"), "Your own steps: not until chosen");
     auto vo = v;
     vo[idx(m, "hexLayout")] = 3;

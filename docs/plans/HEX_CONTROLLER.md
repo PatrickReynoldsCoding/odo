@@ -136,10 +136,24 @@ hard. Pressing a finger harder spreads it. So **Press harder** (Touch):
 Inside a key, its height is still the dynamics and its place across the tone, as on the Grid;
 Press harder adds to the pressure from there.
 
+## Scala files
+
+Tuning → **Scala file**, then **Open a Scala file…** (Notes, in both apps). The app reads the `.scl`
+with the engine's `mpe::scala` and gives it to the keyboard as settings (CONTROLLER_FORMAT.md,
+"Scala tunings"), so a preset or a take keeps the tuning and it loads in the other app.
+
+- Up to 128 notes before it repeats; cents, ratios and whole numbers, as the Scala format has them.
+- It repeats where the file says: an octave, or another interval (Bohlen-Pierce's 3/1). With an
+  octave the root plays where 12-tone has it; with another, the root above middle C does.
+- The layouts take each tuning's nearest steps to 2/1, 3/2 and 5/4, so Wicki-Hayden, Harmonic
+  table and Bosanquet work in any of them; Your own steps for anything else.
+- A 12-note file is named by letter in the key; others by step (0 the root).
+- Until a file is opened, Scala file plays 12 equal. The file's name isn't kept: the rail shows
+  how many notes it has and where it repeats.
+
 ## Not done yet
 
-- **Scala files**: a controller can't read files. A `.scl` (or a Lumatone `.ltn` mapping) would
-  need the rail to load one into hidden settings, as Your own notes keeps notes.
+- **Lumatone `.ltn` mappings**: a key-by-key layout, not a tuning; not read.
 - **The tilt**: the Lumatone's rows rise, and Hexatone turns its keyboard by any angle; here the
   rows are level, so Bosanquet's rows (a sharp up to the right, a flat up to the left) do not climb
   and it does not scroll: its range is the keys across a row (Keys top to bottom, up to 16).

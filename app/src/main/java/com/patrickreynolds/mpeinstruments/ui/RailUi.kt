@@ -67,6 +67,7 @@ import com.patrickreynolds.mpeinstruments.controllers.Controllers
 import com.patrickreynolds.mpeinstruments.controllers.PackageController
 import com.patrickreynolds.mpeinstruments.controllers.RailGroup
 import com.patrickreynolds.mpeinstruments.controllers.RailWidget
+import com.patrickreynolds.mpeinstruments.controllers.RailRow
 import com.patrickreynolds.mpeinstruments.packs.Packs
 
 /*
@@ -437,11 +438,39 @@ private fun GroupPanel(c: PackageController, g: RailGroup) {
                 PLabel(r.label, r.display, !first)
                 PSlider(c.toFraction(k, r.value).toFloat()) { t -> c.change(k, c.fromFraction(k, t.toDouble())) }
             }
+            RailWidget.Scala -> ScalaRow(c, r, !first)
         }
         first = false
     }
     if (g.rows.isEmpty()) PNote("Nothing to set in this mode.")
     if (g.hiddenNow > 0) PNote("${g.hiddenNow} " + (if (g.hiddenNow == 1) "option" else "options") + " hidden in this mode")
+}
+
+/** What the last Scala file did ("Playing “…”." or why not), shown under its row. */
+private var scalaNote by mutableStateOf("")
+
+/** A "scala" setting: what tuning it holds, and a row that opens a Scala (.scl) file for it, as odo
+ *  for computers' (desktop/main.cpp, openScalaFile). */
+@Composable
+private fun ScalaRow(c: PackageController, r: RailRow, rule: Boolean) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val openFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { s ->
+                val buf = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(16 * 1024)
+                while (buf.size() < 1 shl 20) { val n = s.read(chunk); if (n < 0) break; buf.write(chunk, 0, n) }
+                buf.toByteArray()
+            }
+        }.getOrNull()
+        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "tuning"
+        scalaNote = if (bytes == null) "Could not open that file." else c.openScala(r.index, bytes, name)
+    }
+    PLabel(r.label, r.display, rule)
+    PRow("Open a Scala file…") { openFile.launch(arrayOf("*/*")) }
+    if (scalaNote.isNotEmpty()) PNote(scalaNote)
 }
 
 /** The sound's effects (Android's): its tone, drive, touch, release and sends; its level; the shared reverb and delay. */

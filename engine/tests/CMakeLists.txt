@@ -12,6 +12,12 @@ add_executable(test_hex test_hex.cpp)
 target_link_libraries(test_hex mpe_engine Threads::Threads)
 add_test(NAME test_hex COMMAND test_hex WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Scala tunings (mpe/scala.h): .scl files, as a controller's settings, on the rail and in the Hex keyboard.
+add_executable(test_scala test_scala.cpp)
+target_link_libraries(test_scala mpe_engine Threads::Threads)
+target_compile_definitions(test_scala PRIVATE MPE_TEST_CONTROLLER_SOURCES="${CMAKE_CURRENT_SOURCE_DIR}/../../controllers")
+add_test(NAME test_scala COMMAND test_scala WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 # The rail's settings model, against the controllers' own manifests (no build of them needed).
 add_executable(test_rail test_rail.cpp)
 target_link_libraries(test_rail mpe_engine Threads::Threads)

@@ -1,5 +1,6 @@
 // The rail's settings model (rail.h).
 #include "mpe/rail.h"
+#include "mpe/scala.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -8,12 +9,13 @@ namespace mpe::rail {
 
 namespace {
 
-enum class Kind { Switch, Choice, Number };
+enum class Kind { Switch, Choice, Number, Scala };
 
 Kind kind(const Json& s) {
     std::string t = s["type"].str();
     if (t == "switch") return Kind::Switch;
     if (t == "choice") return Kind::Choice;
+    if (t == "scala") return Kind::Scala;
     return Kind::Number;
 }
 
@@ -25,6 +27,7 @@ Range range(const Json& s) {
     switch (kind(s)) {
     case Kind::Switch: return {0, 1, 1};
     case Kind::Choice: return {0, std::max(0.0, double(s["options"].size()) - 1), 1};
+    case Kind::Scala: return {0, double(scala::capacity(s)), 1};
     default: break;
     }
     double lo = s["min"].num(0), hi = s["max"].num(1), step = s["step"].num(0);
@@ -138,6 +141,7 @@ Widget widget(const Json& s) {
     switch (kind(s)) {
     case Kind::Switch: return Widget::Switch;
     case Kind::Choice: return Widget::Chips;
+    case Kind::Scala: return Widget::Scala;
     default: break;
     }
     int n = gridCount(range(s));
@@ -191,6 +195,7 @@ std::vector<Group> groups(const Json& manifest, const std::vector<double>& value
         if (it == out.end()) { out.push_back({g, {}, 0}); it = out.end() - 1; }
         if (!shown(manifest, s, values)) { it->hiddenNow++; continue; }
         it->rows.push_back(row(s, i, valueOf(s, i, values)));
+        if (kind(s) == Kind::Scala) it->rows.back().display = scala::describe(manifest, i, values);
     }
     return out;
 }
@@ -211,6 +216,7 @@ double stepped(const Json& s, double v, int dir) {
         int k = int(std::lround(v)) + (dir > 0 ? 1 : dir < 0 ? -1 : 0);
         return double(((k % n) + n) % n);
     }
+    case Kind::Scala: return v;                              // set from a file, not stepped
     default: break;
     }
     double by = r.step > 0 ? r.step : (r.max - r.min) / 20;
@@ -246,6 +252,7 @@ std::string display(const Json& s, double v) {
         if (n == 0) return "";
         return s["options"][size_t(std::clamp(int(std::lround(v)), 0, n - 1))].str();
     }
+    case Kind::Scala: return v < 0.5 ? "None" : std::to_string(int(std::lround(v))) + " notes";
     default: break;
     }
     return number(v, range(s)) + unit(name(s));
@@ -275,7 +282,8 @@ std::string toJson(const std::vector<Group>& gs) {
             o += ",\"label\":"; quote(o, r.label);
             o += ",\"group\":"; quote(o, r.group);
             o += ",\"widget\":";
-            o += r.widget == Widget::Switch ? "\"switch\"" : r.widget == Widget::Chips ? "\"chips\"" : "\"slider\"";
+            o += r.widget == Widget::Switch ? "\"switch\"" : r.widget == Widget::Chips ? "\"chips\""
+                 : r.widget == Widget::Scala ? "\"scala\"" : "\"slider\"";
             o += ",\"choices\":[";
             for (size_t k = 0; k < r.choices.size(); k++) { if (k) o += ','; quote(o, r.choices[k]); }
             o += "],\"chosen\":"; num(o, r.chosen);

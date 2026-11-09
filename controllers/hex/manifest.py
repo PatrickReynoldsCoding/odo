@@ -9,11 +9,11 @@ g = json.load(open(root + '/controllers/grid/controller.json'), object_pairs_hoo
 m = collections.OrderedDict()
 m['format'] = 1
 m['id'] = 'patrickreynolds/hex'
-m['version'] = '1.0.0'
+m['version'] = '1.1.0'
 m['name'] = 'Hex'
 m['description'] = ("Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape "
                     "in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or "
-                    "just intonation. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to "
+                    "just intonation, or a Scala file's tuning. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to "
                     "bend, wiggle for vibrato; press harder for pressure")
 for k in ('author', 'licence'):
     m[k] = g[k]
@@ -69,14 +69,18 @@ settings += [
       default=0, group='Layout'),
     S(id='tuning', name='Tuning', type='choice',
       options=['12 equal', '19 equal', '22 equal', '31 equal', '41 equal', '53 equal', 'Just (5-limit)', 'Pythagorean',
-               'Meantone (1/4 comma)'], default=0, group='Notes'),
+               'Meantone (1/4 comma)', 'Scala file'], default=0, group='Notes'),
     S(id='stepRight', name='Steps to the next key in a row', type='number', min=-30, max=30, step=1, default=2, group='Layout',
       showIf={'hexLayout': 3}),
     S(id='stepUpRight', name='Steps up to the right', type='number', min=-30, max=30, step=1, default=7, group='Layout',
       showIf={'hexLayout': 3}),
     S(id='press', name='Press harder', type='choice', options=['Off', 'Pressure', 'Pressure and velocity'], default=1,
       group='Touch'),
+    # A Scala (.scl) file's tuning: the MESH reads the file and sets these (mpe/scala.h); hex.c's SCALA_MAX.
+    S(id='scala', name='Scala file', type='scala', max=128, default=0, group='Notes', showIf={'tuning': 9}),
 ]
+settings += [S(id='scala%d' % k, type='number', min=-1000000, max=1000000, step=0, default=0, hidden=True)
+             for k in range(1, 129)]
 m['settings'] = settings
 out = json.dumps(m, ensure_ascii=False, indent=2)
 open(root + '/controllers/hex/controller.json', 'w').write(out + '\n')

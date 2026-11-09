@@ -239,6 +239,7 @@ FN(jbyteArray, nativeCtlTick)(JNIEnv* env, jobject) {
 #include <deque>
 #include <mutex>
 #include "mpe/rail.h"
+#include "mpe/scala.h"
 
 namespace {
 struct RailManifest { std::string text; mpe::Json json; };
@@ -290,6 +291,45 @@ FN(jdouble, nativeRailToFraction)(JNIEnv*, jobject, jint h, jint index, jdouble 
 }
 FN(jdouble, nativeRailChipValue)(JNIEnv*, jobject, jint h, jint index, jint k) {
     return mpe::rail::chipValue(railSetting(h, index), k);
+}
+// A Scala file (its bytes) for the "scala" setting `index` (mpe/scala.h), as UTF-8 JSON:
+// {"error":"..."}, or {"description":"...","set":[index, value, index, value, ...]}: the settings to give it.
+FN(jbyteArray, nativeRailScala)(JNIEnv* env, jobject, jint h, jint index, jbyteArray file) {
+    jsize n = file ? env->GetArrayLength(file) : 0;
+    std::string text(size_t(n), '\0');
+    if (n) env->GetByteArrayRegion(file, 0, n, reinterpret_cast<jbyte*>(&text[0]));
+    mpe::scala::Scale s;
+    std::string err, out;
+    auto quote = [&](const std::string& v) {
+        out += '"';
+        for (unsigned char c : v) {
+            if (c == '"' || c == '\\') { out += '\\'; out += char(c); }
+            else if (c < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); out += b; }
+            else out += char(c);
+        }
+        out += '"';
+    };
+    std::vector<std::pair<size_t, double>> set;
+    if (mpe::scala::parse(text, &s, &err) && index >= 0)
+        set = mpe::scala::settings(railManifest(h), size_t(index), s, &err);
+    if (set.empty()) {
+        out = "{\"error\":";
+        quote(err.empty() ? std::string("This controller can't take a Scala file.") : err);
+        out += "}";
+    } else {
+        out = "{\"description\":";
+        quote(s.description);
+        out += ",\"set\":[";
+        for (size_t i = 0; i < set.size(); i++) {
+            char b[64];
+            std::snprintf(b, sizeof b, "%s%zu,%.17g", i ? "," : "", set[i].first, set[i].second);
+            out += b;
+        }
+        out += "]}";
+    }
+    jbyteArray a = env->NewByteArray(jsize(out.size()));
+    env->SetByteArrayRegion(a, 0, jsize(out.size()), reinterpret_cast<const jbyte*>(out.data()));
+    return a;
 }
 
 // ---- preset files (docs/formats/PRESET_FORMAT.md, mpe::preset) ---------------------------------------------

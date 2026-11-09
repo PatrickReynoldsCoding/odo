@@ -48,6 +48,7 @@
 #include "mpe/package.h"
 #include "mpe/preset.h"
 #include "mpe/rail.h"
+#include "mpe/scala.h"
 #include "mpe/take.h"
 
 namespace fs = std::filesystem;
@@ -727,7 +728,7 @@ struct App {
         std::string at = (fs::path(home()) / mpe::preset::fileName(f)).string();
         SDL_ShowSaveFileDialog(saveAnswer, this, window, kPresetFilter, 1, at.c_str());
     }
-    void askToOpen() { openingTake = false; SDL_ShowOpenFileDialog(openAnswer, this, window, kPresetFilter, 1, home().c_str(), false); }
+    void askToOpen() { openingTake = false; openingScala = -1; SDL_ShowOpenFileDialog(openAnswer, this, window, kPresetFilter, 1, home().c_str(), false); }
 
     void collectDialogs() {
         std::vector<std::pair<bool, std::string>> done;
@@ -735,10 +736,11 @@ struct App {
         for (const auto& d : done) {
             if (d.first && !sharingTake.empty()) saveTakeFile(d.second);
             else if (d.first) savePresetFile(sharing, d.second);
+            else if (openingScala >= 0) openScalaFile(size_t(openingScala), d.second);
             else if (openingTake) openTakeFile(d.second);
             else if (openPresetFile(d.second)) panelKey = kNone;
         }
-        if (!done.empty()) openingTake = false;
+        if (!done.empty()) { openingTake = false; openingScala = -1; }
     }
 
     // Compiling an instrument takes a moment: done on a worker, handed back to the main thread.
@@ -1271,7 +1273,32 @@ struct App {
         return true;
     }
     static constexpr SDL_DialogFileFilter kTakeFilter[] = {{"odo takes", "odotake"}};
-    void askToOpenTake() { openingTake = true; SDL_ShowOpenFileDialog(openAnswer, this, window, kTakeFilter, 1, home().c_str(), false); }
+
+    // ---- Scala tunings (mpe/scala.h): a .scl file given to the controller as its settings -----------
+    int openingScala = -1;                  // the open dialog is for this "scala" setting
+    std::string scalaNote;                  // what the last one did, shown under it
+    static constexpr SDL_DialogFileFilter kScalaFilter[] = {{"Scala tunings", "scl"}};
+    void askToOpenScala(size_t index) {
+        openingTake = false;
+        openingScala = int(index);
+        SDL_ShowOpenFileDialog(openAnswer, this, window, kScalaFilter, 1, home().c_str(), false);
+    }
+    bool openScalaFile(size_t index, const std::string& from) {
+        Side& sd = cur();
+        if (!sd.host || index >= sd.settings.size()) return false;
+        std::string text, err;
+        mpe::scala::Scale s;
+        if (!readText(from, text)) { scalaNote = "Could not open " + from; return false; }
+        if (!mpe::scala::parse(text, &s, &err)) { scalaNote = err; return false; }
+        auto set = mpe::scala::settings(sd.host->manifest(), index, s, &err);
+        if (set.empty()) { scalaNote = err; return false; }
+        for (const auto& kv : set) setSetting(kv.first, kv.second, false);
+        saveConfig();
+        std::string what = s.description.empty() ? fs::path(from).stem().string() : s.description;
+        scalaNote = "Playing \xE2\x80\x9C" + what + "\xE2\x80\x9D.";
+        return true;
+    }
+    void askToOpenTake() { openingTake = true; openingScala = -1; SDL_ShowOpenFileDialog(openAnswer, this, window, kTakeFilter, 1, home().c_str(), false); }
     std::string sharingTake;                // the take a save dialog is for (its file)
     void askToShareTake() {
         if (takeOn < 0 || takeOn >= int(takes.size())) return;
@@ -1406,7 +1433,7 @@ struct App {
     // ---- the panel beside the rail ----
 
     enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
-               aRecord, aTake, aListen, aAlong, aSpeed, aLoop, aTakeDelete, aTakeOpen, aTakeShare };
+               aRecord, aTake, aListen, aAlong, aSpeed, aLoop, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1649,6 +1676,14 @@ struct App {
                         p.items.push_back(it); y += 44;
                         chips(r.choices, r.chosen, aChip, int(r.index));
                     }
+                } else if (r.widget == mpe::rail::Widget::Scala) {
+                    PItem it{PItem::Label, r.label, r.display, x, y, in, 42};
+                    it.rule = !first;
+                    p.items.push_back(it); y += 44;
+                    PItem o{PItem::Row, "Open a Scala file\xE2\x80\xA6", "", x, y, in, 40};
+                    o.act = aScalaOpen; o.arg = int(r.index);
+                    p.items.push_back(o); y += 40;
+                    if (!scalaNote.empty()) note(scalaNote);
                 } else {
                     PItem it{PItem::Label, r.label, r.display, x, y, in, 42};
                     it.rule = !first;
@@ -1738,6 +1773,7 @@ struct App {
                 case aLoop: takeLoop = it.arg2 - 1; if (player.loaded()) player.loopSection(takeLoop, nowMs(), takeSink()); break;
                 case aTakeDelete: if (confirmTakeDelete) deleteTake(); else confirmTakeDelete = true; break;
                 case aTakeOpen: askToOpenTake(); break;
+                case aScalaOpen: askToOpenScala(size_t(it.arg)); break;
                 case aTakeShare: askToShareTake(); break;
                 default: break;
             }

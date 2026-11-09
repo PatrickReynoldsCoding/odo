@@ -1,9 +1,9 @@
 {
   "format": 1,
   "id": "patrickreynolds/hex",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Hex",
-  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to bend, wiggle for vibrato; press harder for pressure",
+  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to bend, wiggle for vibrato; press harder for pressure",
   "author": "Patrick Reynolds",
   "licence": "MIT",
   "needs": {
@@ -1139,7 +1139,8 @@
         "53 equal",
         "Just (5-limit)",
         "Pythagorean",
-        "Meantone (1/4 comma)"
+        "Meantone (1/4 comma)",
+        "Scala file"
       ],
       "default": 0,
       "group": "Notes"
@@ -1181,6 +1182,1169 @@
       ],
       "default": 1,
       "group": "Touch"
+    },
+    {
+      "id": "scala",
+      "name": "Scala file",
+      "type": "scala",
+      "max": 128,
+      "default": 0,
+      "group": "Notes",
+      "showIf": {
+        "tuning": 9
+      }
+    },
+    {
+      "id": "scala1",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala2",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala3",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala4",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala5",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala6",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala7",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala8",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala9",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala10",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala11",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala12",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala13",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala14",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala15",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala16",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala17",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala18",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala19",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala20",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala21",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala22",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala23",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala24",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala25",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala26",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala27",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala28",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala29",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala30",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala31",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala32",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala33",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala34",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala35",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala36",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala37",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala38",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala39",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala40",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala41",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala42",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala43",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala44",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala45",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala46",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala47",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala48",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala49",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala50",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala51",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala52",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala53",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala54",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala55",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala56",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala57",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala58",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala59",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala60",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala61",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala62",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala63",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala64",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala65",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala66",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala67",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala68",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala69",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala70",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala71",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala72",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala73",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala74",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala75",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala76",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala77",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala78",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala79",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala80",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala81",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala82",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala83",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala84",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala85",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala86",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala87",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala88",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala89",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala90",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala91",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala92",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala93",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala94",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala95",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala96",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala97",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala98",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala99",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala100",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala101",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala102",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala103",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala104",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala105",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala106",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala107",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala108",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala109",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala110",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala111",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala112",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala113",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala114",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala115",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala116",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala117",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala118",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala119",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala120",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala121",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala122",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala123",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala124",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala125",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala126",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala127",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
+    },
+    {
+      "id": "scala128",
+      "type": "number",
+      "min": -1000000,
+      "max": 1000000,
+      "step": 0,
+      "default": 0,
+      "hidden": true
     }
   ]
 }

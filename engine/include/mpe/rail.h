@@ -8,7 +8,8 @@
 
 namespace mpe::rail {
 
-enum class Widget { Switch, Chips, Slider };
+// Scala: a "scala" setting, a tuning from a .scl file (mpe/scala.h): a row that opens one.
+enum class Widget { Switch, Chips, Slider, Scala };
 
 struct Row {
     size_t index;                     // the setting's position in manifest["settings"] (what set_setting/setting() use)
@@ -52,7 +53,7 @@ double snap(const Json& setting, double value);              // clamped to its r
 // [{"name":"Layout","rows":[{"index":0,"id":"cols","label":"Squares across","widget":"chips",
 //   "choices":["2",...],"chosen":1,"min":2,"max":8,"step":1,"value":3,"display":"3"}, ...],"hiddenNow":0}, ...]
 // (a row that opens the controller's own panel also has "panel":true).
-// widget is "switch", "chips" or "slider".
+// widget is "switch", "chips", "slider" or "scala".
 std::string toJson(const std::vector<Group>& groups);
 
 }  // namespace mpe::rail

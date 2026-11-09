@@ -7,7 +7,8 @@ import org.json.JSONObject
  * A controller's settings as the rail shows them, from the engine's rail model (mpe/rail.h, and
  * docs/formats/CONTROLLER_FORMAT.md "Settings on the rail"): odo for computers shows the same.
  */
-enum class RailWidget { Switch, Chips, Slider }
+/** Scala: a "scala" setting, a tuning from a .scl file (mpe/scala.h), shown as a row that opens one. */
+enum class RailWidget { Switch, Chips, Slider, Scala }
 
 /** One setting on the rail. [index] is its place in the manifest's settings (what it is set by). */
 data class RailRow(
@@ -38,7 +39,7 @@ data class RailGroup(val name: String, val rows: List<RailRow>, val hiddenNow: I
             val choices = r.optJSONArray("choices") ?: JSONArray()
             return RailRow(
                 index = r.optInt("index"), id = r.optString("id"), label = r.optString("label"), group = r.optString("group"),
-                widget = when (r.optString("widget")) { "switch" -> RailWidget.Switch; "chips" -> RailWidget.Chips; else -> RailWidget.Slider },
+                widget = when (r.optString("widget")) { "switch" -> RailWidget.Switch; "chips" -> RailWidget.Chips; "scala" -> RailWidget.Scala; else -> RailWidget.Slider },
                 choices = List(choices.length()) { choices.optString(it) }, chosen = r.optInt("chosen", -1),
                 min = r.optDouble("min", 0.0), max = r.optDouble("max", 1.0), step = r.optDouble("step", 0.0),
                 value = r.optDouble("value", 0.0), display = r.optString("display"), panel = r.optBoolean("panel"),

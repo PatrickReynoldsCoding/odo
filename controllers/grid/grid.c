@@ -2023,6 +2023,9 @@ void stop(void);
 MESH_EXPORT(setting) void setting(int index, double value) {
     if (index < 0 || index >= S_COUNT) return;
     set_[index] = value;
+#ifdef KEYS_ON_SETTING
+    KEYS_ON_SETTING(index);
+#endif
     if (index == S_FLIP90) turn_to(SW, SH);
     if (index == S_PLACE_RESET && value != 0) reset_places = 1;   /* done in tick(), outside the host's call */
     if (index == S_LATCH) set_latch(value != 0);

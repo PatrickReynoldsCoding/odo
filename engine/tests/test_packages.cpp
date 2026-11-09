@@ -7,6 +7,7 @@
 #include "mpe/controller.h"
 #include "mpe/package.h"
 #include "../../controllers/hex/tuning.h"
+#include "mpe/scala.h"
 #ifdef MPE_LIBFAUST
 #include "mpe/faust_loader.h"
 #endif
@@ -179,6 +180,54 @@ static void hexPackage() {
             id++;
         }
         CHECK(bad == 0, "%s in %s: all 16 keys play their pitches %s", HT_LAYOUTS[k.layout].name, t->name, worst.c_str());
+    }
+
+    // A Scala file's tuning, given as settings as the apps do (mpe/scala.h): quarter-comma meantone
+    // from a file plays as the built-in one; Bohlen-Pierce (13 to the tritave) as tuning.h has it.
+    {
+        size_t sc = size_t(at("scala"));
+        auto load = [&](const char* text) {
+            scala::Scale s;
+            if (!scala::parse(text, &s)) return false;
+            auto set = scala::settings(pkg->manifest, sc, s);
+            for (auto& p : set) host.setting(int(p.first), p.second);
+            return !set.empty();
+        };
+        std::string mt = "meantone\n12\n";
+        for (int k = 1; k <= 12; k++) { char b[32]; snprintf(b, sizeof b, "%.10f\n", ht_cents(ht_tuning(HT_MEANTONE), k) + (k == 12 ? 1200 : 0)); mt += b; }
+        double bpc[13];
+        std::string bp = "Bohlen-Pierce\n13\n";
+        for (int k = 1; k <= 13; k++) { bpc[k - 1] = 1901.9550008653874 * k / 13; char b[32]; snprintf(b, sizeof b, "%.10f\n", bpc[k - 1]); bp += b; }
+        HexTuning bpt;
+        double table[HT_MAX_N];
+        int val[3];
+        ht_scala(&bpt, table, val, bpc, 13);
+        struct Sc { const char* text; const HexTuning* t; int layout; const char* name; };
+        const Sc scs[] = {{mt.c_str(), ht_tuning(HT_MEANTONE), HL_BOSANQUET, "meantone"}, {bp.c_str(), &bpt, HL_WICKI, "Bohlen-Pierce"}};
+        for (const Sc& k : scs) {
+            CHECK(load(k.text), "a Scala file (%s) given as settings", k.name);
+            host.setting(at("tuning"), HT_COUNT);        // Scala file, after the built-in tunings
+            host.setting(at("hexLayout"), k.layout);
+            int e, ne;
+            ht_layout_steps(k.t, k.layout, 0, 0, &e, &ne);
+            int bad = 0;
+            std::string worst;
+            for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) {
+                float x = 51 + 100 * c + 50 * (r % 2), y = 400 - (r + 0.5f) * 86.60254f;
+                int before = ons;
+                host.touch(id, ControllerHost::Down, x, y, 0, 0);
+                double want = ht_pitch(k.t, 0, 0, ht_note_at(e, ne, ht_root_near(k.t, 0, 0, 60), c - r / 2 - 1, r - 2));
+                float got = ons > before ? ch[lastCh].pitch() : -1;
+                if (std::fabs(got - want) > 0.01) { bad++; worst = std::to_string(got) + " not " + std::to_string(want); }
+                host.touch(id, ControllerHost::Up, x, y, 0, 0);
+                id++;
+            }
+            CHECK(bad == 0, "%s from a Scala file: all 16 keys play their pitches %s", k.name, worst.c_str());
+        }
+        host.setting(int(sc), 0);                         // none loaded: 12 equal
+        host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0);
+        CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "Scala file with none loaded: 12 equal (%.2f)", ch[lastCh].pitch());
+        host.touch(id++, ControllerHost::Up, 251, 400 - 2.5f * 86.60254f, 0, 0);
     }
 
     // Your own steps: 3 to the right, 1 up to the right, in 12.

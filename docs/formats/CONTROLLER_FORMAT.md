@@ -129,7 +129,7 @@ the rest.
 | `partsFrom` | optional: the id of a setting that says how many of `parts` it plays now, its value + 1 (a switch: the first part off, the first two on). The MESH gives it that many sounds, and calls `instrument` for each. Without it, every part always |
 | `drumsFrom` | optional: for each of `parts`, the id of a `switch` the MESH sets on while that part's sound is a drum kit (an instrument in the `drums` group) and off otherwise, when the sound changes and when the controller opens. The touch pad lays out drums on it. Usually `hidden` |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
-| `settings` | its options: `choice`, `number`, `switch`, shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"group"` (optional): a short heading it is shown under |
+| `settings` | its options: `choice`, `number`, `switch`, `scala` ([Scala tunings](#scala-tunings)), shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"group"` (optional): a short heading it is shown under |
 
 ## Settings on the rail
 
@@ -165,6 +165,33 @@ Each setting has an `id`, a `name` (the `id` if none), a `type`, a `default` and
 - **Modes**: a setting whose `showIf` is not met by the values now is left out, as a hidden one
   is, until it is. Its group still shows, with how many it leaves out (`hiddenNow`), even with
   none left in it.
+
+## Scala tunings
+
+A controller that plays in other tunings can take one from a Scala file (`.scl`,
+https://www.huygens-fokker.org/scala/scl_format.html), which it can't read itself: the MESH reads
+it (the engine's `mpe::scala`, `engine/include/mpe/scala.h`, so both apps read a file the same way)
+and gives it as settings.
+
+```json
+{ "id": "scala", "name": "Scala file", "type": "scala", "max": 128, "default": 0, "group": "Notes", "showIf": {"tuning": 9} },
+{ "id": "scala1", "type": "number", "min": -1000000, "max": 1000000, "default": 0, "hidden": true },
+...
+{ "id": "scala128", "type": "number", "min": -1000000, "max": 1000000, "default": 0, "hidden": true }
+```
+
+- **`scala`**: how many notes the tuning has before it repeats (0: none yet); `max` the most it
+  takes (up to 1024). On the rail, a row with what it holds (`None`, `12 notes, to 2/1 (1200 ¢)`,
+  `13 notes, to 1901.955 ¢`) and **Open a Scala file…**. A step doesn't change it.
+- **`<id>1` to `<id><max>`**, hidden numbers, in any place in the manifest: each note's cents
+  above the first, as the file lists them; the last note's, where it repeats. Places past the
+  last note are 0.
+- The MESH sets the places, then the count, so a controller can build its tuning when the count
+  arrives. A preset or take keeps them as any settings, and they go from one app to the other.
+- A file that isn't a Scala file, or has more notes than `max`, is refused with a sentence that
+  says why, and nothing changes.
+
+The Hex keyboard (`controllers/hex/`) is the first: Tuning → Scala file.
 
 ## Takes
 

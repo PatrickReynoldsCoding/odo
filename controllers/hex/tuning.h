@@ -25,7 +25,12 @@ static inline double ht_fmod1200(double c) { c -= 1200.0 * (double)(long long)(c
 /* Equal: n steps to the octave. Chain of fifths: 12 notes, each as many fifths of `fifth` cents from
    the root as its place on the chain (FIFTHS below). A table: the cents of each of n notes above the
    root. */
-typedef struct { const char* name; int n; double fifth; const double* table; } HexTuning;
+/* A Scala file's tuning (from the MESH, as settings) is a table too, with `period`, the interval it
+   repeats at in cents (0: the octave, 1200), and `val`, its nearest steps to 2, 3 and 5 (0: worked
+   out from n, as for an equal tuning). */
+typedef struct { const char* name; int n; double fifth; const double* table; double period; const int* val; } HexTuning;
+/* The most notes a tuning has before it repeats (a Scala file's, as the manifest's "scala" max). */
+#define HT_MAX_N 128
 
 /* 5-limit just intonation (Hexatone's 12-JI-5L): 1/1 16/15 9/8 6/5 5/4 4/3 45/32 3/2 8/5 5/3 9/5 15/8. */
 static const double HT_JUST5[12] = {0, 111.7313, 203.9100, 315.6413, 386.3137, 498.0450,
@@ -34,16 +39,17 @@ static const double HT_JUST5[12] = {0, 111.7313, 203.9100, 315.6413, 386.3137, 4
 /* The order the rail lists them in: add one at the end (a preset keeps the index). */
 enum { HT_12, HT_19, HT_22, HT_31, HT_41, HT_53, HT_JUST, HT_PYTHAGOREAN, HT_MEANTONE, HT_COUNT };
 static const HexTuning HT_TUNINGS[HT_COUNT] = {
-    {"12 equal", 12, 0, 0},
-    {"19 equal", 19, 0, 0},
-    {"22 equal", 22, 0, 0},
-    {"31 equal", 31, 0, 0},
-    {"41 equal", 41, 0, 0},
-    {"53 equal", 53, 0, 0},
-    {"Just (5-limit)", 12, 0, HT_JUST5},
-    {"Pythagorean", 12, 701.955, 0},                  /* pure fifths, 3/2 */
-    {"Meantone (1/4 comma)", 12, 696.5784, 0},        /* pure major thirds, 5/4 */
+    {"12 equal", 12, 0, 0, 0, 0},
+    {"19 equal", 19, 0, 0, 0, 0},
+    {"22 equal", 22, 0, 0, 0, 0},
+    {"31 equal", 31, 0, 0, 0, 0},
+    {"41 equal", 41, 0, 0, 0, 0},
+    {"53 equal", 53, 0, 0, 0, 0},
+    {"Just (5-limit)", 12, 0, HT_JUST5, 0, 0},
+    {"Pythagorean", 12, 701.955, 0, 0, 0},                  /* pure fifths, 3/2 */
+    {"Meantone (1/4 comma)", 12, 696.5784, 0, 0, 0},        /* pure major thirds, 5/4 */
 };
+static inline double ht_period(const HexTuning* t) { return t->period > 0 ? t->period : 1200.0; }
 static inline const HexTuning* ht_tuning(int i) { return &HT_TUNINGS[i < 0 || i >= HT_COUNT ? 0 : i]; }
 
 /* Each semitone above the root, as a place on the chain of fifths (0 the root, 1 its fifth, -1 its
@@ -54,6 +60,7 @@ static const int HT_KEY_FIFTHS[12] = {0, 7, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5};
 
 /* The tuning's val: the nearest whole steps to the octave, 3 and 5. Twelve-note tunings use 12's. */
 static inline void ht_val(const HexTuning* t, int v[3]) {
+    if (t->val) { v[0] = t->val[0]; v[1] = t->val[1]; v[2] = t->val[2]; return; }
     double n = (double)t->n;
     v[0] = t->n;
     v[1] = ht_round(n * 1.5849625007211562);      /* log2 3 */
@@ -80,24 +87,32 @@ static inline double ht_cents(const HexTuning* t, int i) {
 static inline int ht_key_step(const HexTuning* t, int key) {
     key = ht_floormod(key, 12);
     if (t->n == 12) return key;
+    if (t->period > 0) return 0;              /* a Scala file's: its first note is the root */
     return ht_floormod(HT_KEY_FIFTHS[key] * ht_fifth(t), t->n);
 }
 
+/* Where the root's repeats are counted from: the key in the octave below MIDI note 0, so with an
+   octave the root plays where 12-tone has it. A tuning that repeats at another interval (a Scala
+   file's, Bohlen-Pierce's tritave) counts its repeats from the key above middle C, which plays there. */
+static inline double ht_base(const HexTuning* t, int key) {
+    return (double)(60 + ht_floormod(key, 12)) - 5.0 * ht_period(t) / 100.0;
+}
 /* The pitch of a note, as a MIDI note with fractions: the root (key, at step ks) where 12-tone has
    it, the rest tuned from it. */
 static inline double ht_pitch(const HexTuning* t, int key, int ks, int note) {
     int rel = note - ks;
-    return (double)ht_floormod(key, 12) + 12.0 * (double)ht_floordiv(rel, t->n) + ht_cents(t, rel) / 100.0;
+    return ht_base(t, key) + ht_period(t) / 100.0 * (double)ht_floordiv(rel, t->n) + ht_cents(t, rel) / 100.0;
 }
 /* The note nearest to a pitch that is a root (key at step ks): its octave of it. */
 static inline int ht_root_near(const HexTuning* t, int key, int ks, double pitch) {
-    int oct = ht_round((pitch - (double)ht_floormod(key, 12)) / 12.0);
+    int oct = ht_round((pitch - ht_base(t, key)) / (ht_period(t) / 100.0));
     return ks + oct * t->n;
 }
 
 /* Where step i (0..n-1) above the root is on the chain of fifths: the place nearest the root,
-   sharps first on a tie (12 notes: HT_FIFTHS). A tuning whose fifth does not reach every step (none
-   here) gives the nearest it has. */
+   sharps first on a tie (12 notes: HT_FIFTHS). A step the fifth never reaches (in some Scala files'
+   tunings; none of the others) is HT_OFF_CHAIN, past any sharp or flat. */
+#define HT_OFF_CHAIN 99
 static inline int ht_chain(const HexTuning* t, int i) {
     i = ht_floormod(i, t->n);
     if (t->n == 12) return HT_FIFTHS[i];
@@ -106,7 +121,7 @@ static inline int ht_chain(const HexTuning* t, int i) {
         if (ht_floormod(d * f, t->n) == i) return d;
         if (ht_floormod(-d * f, t->n) == i) return -d;
     }
-    return 0;
+    return HT_OFF_CHAIN;
 }
 
 /* Is step i above the root in the scale? mask: bit d for d semitones above the root (12 bits, all
@@ -131,6 +146,7 @@ static inline int ht_name(const HexTuning* t, int note, char* out) {
         *p = 0;
         return 1;
     }
+    if (t->period > 0) { *p = 0; return 0; }   /* a Scala file's other than 12 notes: by step */
     /* The chain from C: F C G D A E B are -1..5; each 7 further a sharp more (or a flat). */
     int c = ht_chain(t, ht_floormod(note, t->n));
     int acc = ht_floordiv(c + 1, 7);
@@ -177,6 +193,40 @@ static inline int ht_gcd(int a, int b) {
     if (b < 0) b = -b;
     while (b) { int t = a % b; a = b; b = t; }
     return a;
+}
+
+/* ---- a Scala file's tuning ---------------------------------------------------------------------- */
+/* Its step nearest to `cents` above the root (counting on through the repeats). */
+static inline int ht_nearest(const HexTuning* t, double cents) {
+    double P = ht_period(t);
+    int best = 0;
+    double bd = 1e300;
+    int top = t->n * ((int)(cents / P) + 2);
+    if (top > 20000) top = 20000;
+    for (int k = 0; k <= top; k++) {
+        double c = P * (double)ht_floordiv(k, t->n) + ht_cents(t, k);
+        double d = c > cents ? c - cents : cents - c;
+        if (d < bd) { bd = d; best = k; }
+    }
+    return best;
+}
+/* Fill *t from a Scala file's notes: cents[0..n-1] above the first, the last where it repeats.
+   table and val are the tuning's own (HT_MAX_N and 3 long). 0 if they can't make a tuning. */
+static inline int ht_scala(HexTuning* t, double* table, int* val, const double* cents, int n) {
+    if (n < 1 || n > HT_MAX_N || !(cents[n - 1] >= 1.0)) return 0;
+    table[0] = 0;
+    for (int k = 1; k < n; k++) table[k] = cents[k - 1];
+    t->name = "Scala file";
+    t->n = n;
+    t->fifth = 0;
+    t->table = table;
+    t->period = cents[n - 1];
+    t->val = 0;
+    val[0] = ht_nearest(t, 1200.0);
+    val[1] = ht_nearest(t, 1901.9550008653874);
+    val[2] = ht_nearest(t, 2786.3137138648348);
+    t->val = val;
+    return 1;
 }
 
 #endif

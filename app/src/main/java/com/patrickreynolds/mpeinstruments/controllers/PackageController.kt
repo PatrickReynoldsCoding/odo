@@ -50,6 +50,26 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     fun toFraction(index: Int, value: Double) = Native.nativeRailToFraction(rail, index, value)
     fun chipValue(index: Int, k: Int) = Native.nativeRailChipValue(rail, index, k)
 
+    /** A Scala file (its bytes) for its "scala" setting [index]: its tuning given as settings, all at
+     *  once. What it did, to show: "Playing “…”." or why not. Words as odo for computers'. */
+    fun openScala(index: Int, file: ByteArray, fileName: String): String {
+        val o = runCatching { org.json.JSONObject(Native.nativeRailScala(rail, index, file).decodeToString()) }.getOrNull()
+            ?: return "Could not read that file."
+        if (o.has("error")) return o.optString("error")
+        val set = o.optJSONArray("set") ?: return "Could not read that file."
+        val next = values.toMutableList()
+        var k = 0
+        while (k + 1 < set.length()) {
+            val i = set.optInt(k); val v = set.optDouble(k + 1)
+            if (i in next.indices) { next[i] = v; if (loaded) Native.nativeCtlSetting(i, v) }
+            k += 2
+        }
+        values = next
+        changed(index)
+        val what = o.optString("description").ifEmpty { fileName.substringBeforeLast('.') }
+        return "Playing “$what”."
+    }
+
     /** "partsFrom": the setting that says how many of its parts it plays now (its value + 1; a switch:
      *  one part off, two on), as the Grid's split does. Without one, all of them. */
     private val partsFrom = manifest.optString("partsFrom").let { id -> settings.indexOfFirst { it.optString("id") == id } }

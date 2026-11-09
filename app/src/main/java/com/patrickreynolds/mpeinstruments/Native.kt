@@ -43,6 +43,9 @@ object Native {
     external fun nativeRailToFraction(manifest: Int, index: Int, value: Double): Double
     /** The value of chip k. */
     external fun nativeRailChipValue(manifest: Int, index: Int, k: Int): Double
+    /** A Scala file's bytes for the "scala" setting `index` (mpe/scala.h), as UTF-8 JSON: {"error": …}, or
+     *  {"description": …, "set": [index, value, …]}, the settings that give the controller its tuning. */
+    external fun nativeRailScala(manifest: Int, index: Int, file: ByteArray): ByteArray
 
     external fun nativeInstrumentCount(): Int
     /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or ""), 5 its own effects, 6 "1" if it sustains (mpe::sustains) */
