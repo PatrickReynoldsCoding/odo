@@ -121,6 +121,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() { ble?.stop(); scanning = false; Motion.setResumed(this, false); super.onPause() }
     override fun onResume() { super.onResume(); Motion.setResumed(this, true) }
+    // Left while recording (home, another app, the screen off): keep what was played, as Stop
+    // recording does, rather than lose it if Android closes odo.
+    override fun onStop() { if (Takes.recording >= 0) Takes.toggleRecord(); super.onStop() }
 
     private fun requestNeededPermissions() {
         val want = mutableListOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)

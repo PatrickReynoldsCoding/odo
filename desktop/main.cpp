@@ -762,6 +762,7 @@ struct App {
 
     // Before SDL_Quit: the audio stream belongs to SDL.
     void shutdown() {
+        if (recorder.recording()) toggleRecord();       // closed while recording: keep what was played
         if (worker.joinable()) worker.join();
         for (Side& s : sides) { if (s.host) s.host->stop(); s.host.reset(); }
         if (audio) SDL_DestroyAudioStream(audio);
