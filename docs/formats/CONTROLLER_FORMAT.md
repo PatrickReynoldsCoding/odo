@@ -166,6 +166,17 @@ Each setting has an `id`, a `name` (the `id` if none), a `type`, a `default` and
   is, until it is. Its group still shows, with how many it leaves out (`hiddenNow`), even with
   none left in it.
 
+## Takes
+
+A take ([TAKE_FORMAT.md](TAKE_FORMAT.md)) records what a controller is given and what it plays,
+and plays it back, with nothing to do in the controller. To play a piece written by hand, the
+MESH touches a copy of the controller all over, on a clock of its own, to find where each note
+starts; so a controller works with takes if:
+
+- a finger down starts its note then, or at the next `tick`;
+- it takes its time from the MESH (`touch`, `tick`), never from anything of its own;
+- a tap on its surface's buttons that changes a setting does it with `set_setting` (the copy's
+  settings are put back after each probe).
 ## Layouts without code
 
 Decision 5's simplest controllers, layouts and mappings, are data: zones, keys and strips,

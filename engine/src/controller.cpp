@@ -63,6 +63,7 @@ ControllerHost::ControllerHost(MidiSink sink) : sink_(std::move(sink)) {
 ControllerHost::~ControllerHost() { stop(); }
 
 double ControllerHost::nowMs() const {
+    if (clock_) return clock_();
     int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     return double(ns - startNs_) / 1e6;
 }
@@ -75,6 +76,8 @@ bool ControllerHost::load(const Package& pkg, std::string* error) {
     w_.reset();
     if (!pkg.isController()) return fail(pkg.id() + ": not a controller package");
     manifest_ = pkg.manifest;
+    pkg_ = pkg;
+    values_.assign(pkg.manifest["settings"].size(), 0.0);
     auto w = std::make_unique<Wasm>();
     w->bytes = pkg.file("controller.wasm");
     if (w->bytes.empty()) return fail(pkg.id() + ": no controller.wasm");
@@ -117,11 +120,14 @@ static void report(std::string& error, M3Result r, const char* what) {
 }
 
 void ControllerHost::init(float width, float height, int flags) {
+    width_ = width;
+    height_ = height;
     if (!w_ || !w_->fInit) return;
     report(error_, m3_CallV(w_->fInit, width, height, int32_t(flags), nowMs()), "init");
 }
 
 void ControllerHost::instrument(int part, float centerNote) {
+    center_[part & 1] = centerNote;
     if (!w_ || !w_->fInstrument) return;
     report(error_, m3_CallV(w_->fInstrument, int32_t(part), centerNote), "instrument");
 }
@@ -129,6 +135,7 @@ void ControllerHost::instrument(int part, float centerNote) {
 void ControllerHost::touch(int id, Phase phase, float x, float y, float size, float force) {
     if (!w_) return;
     double t = nowMs();
+    if (taps_.touch) taps_.touch(id, int(phase), x, y, size, force, t);
     report(error_, m3_CallV(w_->fTouch, int32_t(id), int32_t(phase), x, y, size, force, t), "touch");
     flush(t);
 }
@@ -141,6 +148,10 @@ void ControllerHost::tick() {
 }
 
 void ControllerHost::setting(int index, double value) {
+    if (index >= 0 && size_t(index) < values_.size()) {
+        if (values_[size_t(index)] != value && taps_.setting) taps_.setting(index, value, nowMs());
+        values_[size_t(index)] = value;
+    }
     if (!w_ || !w_->fSetting) return;
     report(error_, m3_CallV(w_->fSetting, int32_t(index), value), "setting");
 }
@@ -163,11 +174,13 @@ void ControllerHost::send(uint8_t a, uint8_t b, uint8_t c, int n) {
 }
 
 void ControllerHost::noteOn(int voice, int part, float pitch, float pressure, float slide, float velocity, double t) {
+    if (taps_.note) taps_.note(0, voice, part, pitch, pressure, slide, velocity, t);
     Note n{voice, part, pitch, pressure, slide, velocity, 0, t};
     if (t > nowMs() + 1) later_.push_back(n); else play(n);
 }
 
 void ControllerHost::noteChange(int voice, float pitch, float pressure, float slide, double t) {
+    if (taps_.note) taps_.note(1, voice, 0, pitch, pressure, slide, 0, t);
     Note n{voice, 0, pitch, pressure, slide, 0, 1, t};
     if (t > nowMs() + 1 || std::any_of(later_.begin(), later_.end(), [&](const Note& o) { return o.voice == voice; }))
         later_.push_back(n);
@@ -175,6 +188,7 @@ void ControllerHost::noteChange(int voice, float pitch, float pressure, float sl
 }
 
 void ControllerHost::noteOff(int voice, double t) {
+    if (taps_.note) taps_.note(2, voice, 0, 0, 0, 0, 0, t);
     Note n{voice, 0, 0, 0, 0, 0, 2, t};
     if (t > nowMs() + 1 || std::any_of(later_.begin(), later_.end(), [&](const Note& o) { return o.voice == voice; }))
         later_.push_back(n);
@@ -182,6 +196,7 @@ void ControllerHost::noteOff(int voice, double t) {
 }
 
 void ControllerHost::noteVolume(int voice, float volume, double t) {
+    if (taps_.note) taps_.note(3, voice, 0, 0, volume, 0, 0, t);
     Note n{voice, 0, 0, volume, 0, 0, 3, t};
     if (t > nowMs() + 1 || std::any_of(later_.begin(), later_.end(), [&](const Note& o) { return o.voice == voice; }))
         later_.push_back(n);
@@ -248,6 +263,12 @@ void ControllerHost::play(const Note& n) {
 void ControllerHost::settingFrom(int index, double value) {
     if (index < 0 || size_t(index) >= manifest_["settings"].size()) { error_ = "set_setting: no setting " + std::to_string(index); return; }
     if (changes_.size() < 256) changes_.push_back({index, value});
+    if (values_[size_t(index)] != value && taps_.setting) taps_.setting(index, value, nowMs());
+    values_[size_t(index)] = value;
+}
+
+void ControllerHost::injectNote(int kind, int voice, int part, float pitch, float pressure, float slide, float velocity) {
+    play(Note{voice, part, pitch, pressure, slide, velocity, kind, nowMs()});
 }
 
 void ControllerHost::drawFrom(uint32_t ptr, uint32_t len) {

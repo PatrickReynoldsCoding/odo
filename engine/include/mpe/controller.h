@@ -52,6 +52,31 @@ public:
     // The engine reads note-on velocity times this (the Seaboard sends small ones): divide by it.
     void setVelocityScale(float s) { velocityScale_ = s; }
     double nowMs() const;
+    // Its clock, in place of the steady clock (ms): for playing a take faster than real time and
+    // for tests. Empty: the steady clock again.
+    void setClock(std::function<double()> clock) { clock_ = std::move(clock); }
+
+    // What it was last told: its surface, its settings by position (also those it changed itself)
+    // and each part's instrument middle. A take (mpe/take.h) keeps these with what was played.
+    float width() const { return width_; }
+    float height() const { return height_; }
+    const std::vector<double>& values() const { return values_; }
+    float centerNote(int part) const { return center_[part & 1]; }
+    const Package& package() const { return pkg_; }
+
+    // Taps: told of every touch it is given, every note it plays (kind 0 on, 1 change, 2 off,
+    // 3 volume; t as it was stamped) and every setting it is given or changes itself. A take's
+    // recorder sets them (mpe/take.h).
+    struct Taps {
+        std::function<void(int id, int phase, float x, float y, float size, float force, double t)> touch;
+        std::function<void(int kind, int voice, int part, float pitch, float pressure, float slide, float velocity, double t)> note;
+        std::function<void(int index, double value, double t)> setting;
+    };
+    void setTaps(Taps taps) { taps_ = std::move(taps); }
+    // A note from outside its WebAssembly (a take playing): to MPE now, on its channels and parts,
+    // as its own notes go; not told to the taps. Give it voices of its own (kInjectedVoice and up).
+    static constexpr int kInjectedVoice = 1 << 24;
+    void injectNote(int kind, int voice, int part, float pitch, float pressure, float slide, float velocity);
     const std::string& lastError() const { return error_; }
 
     // Called by the WebAssembly (through wasm3); not for the app.
@@ -84,6 +109,12 @@ private:
     std::vector<Note> later_;                       // notes it stamped for later (a strum, an arp)
     std::vector<std::pair<int, float>> startVolume_; // note_volume for a voice that hasn't started yet
     std::vector<SettingChange> changes_;
+    std::function<double()> clock_;
+    Taps taps_;
+    Package pkg_;
+    float width_ = 0, height_ = 0;
+    float center_[2] = {60, 60};
+    std::vector<double> values_;
 };
 
 }  // namespace mpe

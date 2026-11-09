@@ -51,6 +51,18 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/vnd.odo.preset+json" />
             </intent-filter>
+            <!-- A take file (docs/formats/TAKE_FORMAT.md) opened with odo, or shared to it: one of your takes. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/vnd.odo.take" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/vnd.odo.take" />
+            </intent-filter>
         </activity>
 
         <!-- The preset file Share sends, read by the app it is sent to. -->

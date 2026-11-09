@@ -116,6 +116,7 @@ object AppState {
         allInstruments = Native.instruments()
         instruments = allInstruments.filter { it.newest }
         com.patrickreynolds.mpeinstruments.packs.Packs.load(appContext, instruments)
+        Takes.init(appContext)
         val perfJson = runCatching { prefs.getString("perf", null)?.let { JSONObject(it) } }.getOrNull()
         perf = runCatching { Perf.from(perfJson) }.getOrDefault(Perf())
         // Before presets existed the instrument was saved as an index.

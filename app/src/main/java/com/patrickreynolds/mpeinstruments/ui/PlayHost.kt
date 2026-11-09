@@ -376,6 +376,7 @@ private fun soundEntries(): List<RailEntry> {
 /** The app's: the volume and look, the loops, the phone's gyro and breath (once turned on in Settings). None in presets. */
 private fun appEntries(): List<RailEntry> = listOfNotNull(
     RailEntry("App", "Volume ${masterPercent()}% · " + if (Eink) "E-ink" else "Dark", null, Pane.App),
+    RailEntry("Takes", com.patrickreynolds.mpeinstruments.Takes.summary(), null, Pane.Own("Takes")),
     RailEntry("Loop", loopSummary(), null, Pane.Own("Loop")),
     if (AppState.mods.gyroOn) RailEntry("Gyro", gyroSummary(AppState.mods), null, Pane.Own("Gyro")) else null,
     if (AppState.mods.breath != 0) RailEntry("Breath", PhoneMods.BREATH[AppState.mods.breath], null, Pane.Own("Breath")) else null,

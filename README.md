@@ -26,6 +26,10 @@ What it does:
 - **Sound**: per part brightness, drive, touch response, reverb and delay sends; a Zita reverb
   and a tempo-synced ping-pong delay. Tap tempo.
 - **Presets**: ten built in, save your own, and share them as files between your phone and computer ([PRESET_FORMAT.md](docs/formats/PRESET_FORMAT.md)).
+- **Takes**: record what you play as the touches themselves (every bend and wiggle), play it back
+  with ghost fingers showing how, slower, or a section round and round; or play along. Pieces can
+  be written by hand, in bars and beats ([TAKE_FORMAT.md](docs/formats/TAKE_FORMAT.md),
+  [TAKE_AUTHORING.md](docs/formats/TAKE_AUTHORING.md), examples in `takes/`).
 - **A fullscreen touch pad**: play with your fingers, no controller needed. Columns of notes in
   a key and scale, slide to glide, higher up for louder and brighter; each finger its own MPE
   voice, so the arp, split and effects apply. A Seaboard played at the same time shows there too.

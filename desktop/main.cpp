@@ -3,8 +3,8 @@
 // on Android. Linux and Windows (SDL3).
 //
 //   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--config FILE] [--no-update]
-//       [--version] [--self-update] [--setting [SIDE:]INDEX=VALUE]...
-//       [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]
+//       [--version] [--self-update] [--setting [SIDE:]INDEX=VALUE]... [--take FILE]...
+//       [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]] (with --take: the take plays)
 //
 // Library folders hold .odoi and .odoc files (default: the library folder beside odo, and
 // ~/.local/share/odo/library). It checks GitHub for a newer odo when it opens (--no-update: not);
@@ -18,6 +18,7 @@
 // four, each side playing its own sound. (--controller and --sound repeat: the first is the
 // first side's, the next the second's.) Presets, as Android's, keep all of that under a name; and
 // on GNOME, odo can keep the desktop's three-finger swipes off it while it has focus (gestures.h).
+// Takes (mpe/take.h) record what is played and play it back, ghost fingers showing how.
 // Keys: Tab hides the rail, F11 full screen, Esc quits.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -47,6 +48,7 @@
 #include "mpe/package.h"
 #include "mpe/preset.h"
 #include "mpe/rail.h"
+#include "mpe/take.h"
 
 namespace fs = std::filesystem;
 using draw::rgba;
@@ -720,19 +722,23 @@ struct App {
 
     void askToShare() {
         sharing = presetName;
+        sharingTake.clear();
         mpe::preset::Preset f; f.name = presetName.empty() ? soundsName() : presetName;
         std::string at = (fs::path(home()) / mpe::preset::fileName(f)).string();
         SDL_ShowSaveFileDialog(saveAnswer, this, window, kPresetFilter, 1, at.c_str());
     }
-    void askToOpen() { SDL_ShowOpenFileDialog(openAnswer, this, window, kPresetFilter, 1, home().c_str(), false); }
+    void askToOpen() { openingTake = false; SDL_ShowOpenFileDialog(openAnswer, this, window, kPresetFilter, 1, home().c_str(), false); }
 
     void collectDialogs() {
         std::vector<std::pair<bool, std::string>> done;
         { std::lock_guard<std::mutex> g(dialogLock); done.swap(dialogDone); }
         for (const auto& d : done) {
-            if (d.first) savePresetFile(sharing, d.second);
+            if (d.first && !sharingTake.empty()) saveTakeFile(d.second);
+            else if (d.first) savePresetFile(sharing, d.second);
+            else if (openingTake) openTakeFile(d.second);
             else if (openPresetFile(d.second)) panelKey = kNone;
         }
+        if (!done.empty()) openingTake = false;
     }
 
     // Compiling an instrument takes a moment: done on a worker, handed back to the main thread.
@@ -1049,6 +1055,255 @@ struct App {
     }
     const mpe::Json& settingOf(size_t i) { return cur().host->manifest()["settings"][i]; }
 
+    // ---- takes (mpe/take.h, docs/formats/TAKE_FORMAT.md) -----------------------------------------
+
+    // A take: what was played, kept as the touches and the notes, in ~/.local/share/odo/takes;
+    // or a piece written by hand (TAKE_AUTHORING.md). Played back, Listen plays it with ghost
+    // fingers showing how; Play along shows only the fingers, for you to play; slower, or one
+    // section round and round. The same panel, words and order as odo on Android's.
+    struct TakeFile { std::string path, name, controller; double length = 0; bool written = false; std::vector<std::string> sections; };
+    std::string takesDir = home() + "/.local/share/odo/takes";
+    std::vector<TakeFile> takes;
+    int takeOn = -1;                       // the take chosen in the panel
+    mpe::take::Recorder recorder;
+    mpe::take::Player player;
+    std::string takeNote;                  // what happened last, for the panel
+    double takeSpeed = 1;
+    int takeLoop = -1;                     // the section played round and round, -1: all of it once
+    bool confirmTakeDelete = false;
+    bool openingTake = false;              // the open dialog is for a take file
+    static constexpr double kSpeeds[3] = {0.5, 0.75, 1};
+
+    static double nowMs() { return double(mpe::steadyNowNs()) / 1e6; }
+
+    static bool readText(const std::string& path, std::string& out) {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return false;
+        out.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return true;
+    }
+
+    static std::string clockText(double ms) {
+        int s = int(std::lround(ms / 1000));
+        char b[16];
+        std::snprintf(b, sizeof b, "%d:%02d", s / 60, s % 60);
+        return b;
+    }
+
+    // "0:38 · Grid · written by hand"
+    std::string takeSub(const TakeFile& f) const {
+        int c = controllerIndex(f.controller);
+        std::string ctl = c >= 0 ? lib.controllers[size_t(c)]->name() : f.controller.empty() ? "any controller" : f.controller;
+        return clockText(f.length) + " \xC2\xB7 " + ctl + " \xC2\xB7 " + (f.written ? "written by hand" : "recorded");
+    }
+
+    void scanTakes() {
+        std::string was = takeOn >= 0 && takeOn < int(takes.size()) ? takes[size_t(takeOn)].path : "";
+        takes.clear();
+        takeOn = -1;
+        std::error_code ec;
+        fs::create_directories(takesDir, ec);
+        for (const auto& e : fs::directory_iterator(takesDir, ec)) {
+            if (e.path().extension() != mpe::take::kExtension) continue;
+            std::string text;
+            mpe::take::Take t;
+            if (!readText(e.path().string(), text) || !mpe::take::parse(text, t)) continue;
+            TakeFile f;
+            f.path = e.path().string();
+            f.name = t.name.empty() ? e.path().stem().string() : t.name;
+            f.controller = t.sides.empty() ? "" : t.sides[0].controller;
+            f.written = !t.performed();
+            f.length = t.length();
+            if (f.written) {
+                mpe::take::Score sc;
+                if (mpe::take::parseScore(t.score, sc, nullptr, nullptr, 1, t.tempo, t.meterBeats, t.meterUnit, t.key)) {
+                    f.length = sc.ms(sc.end);
+                    for (const auto& s : sc.sections) f.sections.push_back(s.second);
+                }
+            } else for (const auto& s : t.sections) f.sections.push_back(s.name);
+            takes.push_back(std::move(f));
+        }
+        std::sort(takes.begin(), takes.end(), [](const TakeFile& a, const TakeFile& b) { return a.name < b.name; });
+        for (size_t i = 0; i < takes.size(); i++) if (takes[i].path == was) takeOn = int(i);
+    }
+
+    void chooseTake(int i) {
+        if (i == takeOn) return;
+        stopTake();
+        takeOn = i;
+        takeLoop = -1;
+        takeNote.clear();
+    }
+
+    // Its notes go into the side it was played on, as that side's controller's own notes go.
+    void takeOut(const mpe::take::Note& n) {
+        Side& sd = sides[n.side % count()];
+        if (sd.host) sd.host->injectNote(n.kind, mpe::ControllerHost::kInjectedVoice + n.voice, n.part, n.pitch, n.pressure, n.slide, n.velocity);
+    }
+    mpe::take::Player::Sink takeSink() { return [this](const mpe::take::Note& n) { takeOut(n); }; }
+
+    void stopTake() { if (player.playing()) player.stop(takeSink()); }
+
+    // Listen, or play along: the controller, its settings and the sound as the take has them, then
+    // (a take written by hand) its score expanded on this controller at this size, and played.
+    void playTake(mpe::take::Player::Mode mode) {
+        if (takeOn < 0 || takeOn >= int(takes.size())) return;
+        if (player.playing() && player.mode() == mode) { stopTake(); return; }
+        stopTake();
+        if (recorder.recording()) toggleRecord();
+        const TakeFile& f = takes[size_t(takeOn)];
+        std::string text, err;
+        mpe::take::Take t;
+        if (!readText(f.path, text) || !mpe::take::parse(text, t, &err)) { takeNote = err.empty() ? "Could not read " + f.path : err; return; }
+        for (size_t k = 0; k < t.sides.size() && int(k) < count(); k++) {
+            const mpe::take::Side& ts = t.sides[k];
+            int c = controllerIndex(ts.controller);
+            if (!ts.controller.empty() && c < 0) { takeNote = "It was played on " + ts.controller + ", which is not in the library."; return; }
+            if (c >= 0 && c != sides[k].controller) { chooseController(int(k), c); layoutSides(); }
+            Side& sd = sides[k];
+            if (!sd.host) continue;
+            int parts = partsOf(int(k));
+            const mpe::Json& st = sd.host->manifest()["settings"];
+            for (const auto& kv : ts.settings)
+                for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
+                    if (st[i]["id"].str() == kv.first && sd.settings[i] != kv.second) { sd.host->setting(int(i), kv.second); keepSetting(int(k), i, kv.second); }
+            if (partsOf(int(k)) != parts) reroute();
+            if (!ts.sounds.empty()) {
+                int n = soundIndex(ts.sounds[0]);
+                if (n >= 0 && n != sd.sound) chooseSound(int(k), n);
+            }
+        }
+        saveConfig();
+        Side& sd = sides[0];
+        if (!sd.host) { takeNote = "No controller to play it on."; return; }
+        if (!t.performed()) {
+            layoutSides();
+            float centers[2] = {60, 72};
+            for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
+                centers[j] = centerNote(*lib.instruments[size_t(j && partsOf(0) > 1 ? sound2Of(0) : sd.sound)].pkg);
+            mpe::take::Report rep;
+            bool ok = mpe::take::prepare(t, *lib.controllers[size_t(sd.controller)], sd.settings, sd.w, sd.h, centers, &rep);
+            if (!ok) { takeNote = rep.errors.empty() ? "It could not be played." : rep.errors[0]; return; }
+            takeNote = rep.errors.empty() ? "" : std::to_string(rep.errors.size()) + (rep.errors.size() == 1 ? " note is" : " notes are") +
+                       " not on the controller as it is set: " + rep.errors[0];
+        } else takeNote.clear();
+        player.load(std::move(t));
+        player.setSpeed(takeSpeed);
+        player.loopSection(takeLoop, nowMs(), takeSink());
+        player.play(mode, nowMs(), takeSink());
+    }
+
+    std::string freeTakeName() const {
+        for (int n = 1;; n++) {
+            std::string name = "Take " + std::to_string(n);
+            if (std::none_of(takes.begin(), takes.end(), [&](const TakeFile& f) { return f.name == name; })) return name;
+        }
+    }
+
+    // A take's file in the takes folder: its name, made free of the others' ("Take 2 2.odotake").
+    std::string freeTakePath(const mpe::take::Take& t) const {
+        std::string base = mpe::take::fileName(t);
+        base.resize(base.size() - std::strlen(mpe::take::kExtension));
+        std::string path = (fs::path(takesDir) / (base + mpe::take::kExtension)).string();
+        std::error_code ec;
+        for (int n = 2; fs::exists(path, ec); n++) path = (fs::path(takesDir) / (base + " " + std::to_string(n) + mpe::take::kExtension)).string();
+        return path;
+    }
+
+    // Record: from the first finger down, every side; again: stop, and keep it as a take of yours.
+    void toggleRecord() {
+        if (recorder.recording()) {
+            mpe::take::Take t = recorder.stop();
+            if (t.touches.empty()) { takeNote = "Nothing was played, so nothing was kept."; return; }
+            t.name = freeTakeName();
+            t.madeBy = std::string("odo ") + ODO_DESKTOP_VERSION + " (computer)";
+            std::error_code ec;
+            fs::create_directories(takesDir, ec);
+            std::string path = freeTakePath(t);
+            std::ofstream out(path, std::ios::binary);
+            out << mpe::take::write(t);
+            out.close();
+            if (!out) { takeNote = "Could not write " + path; return; }
+            scanTakes();
+            for (size_t i = 0; i < takes.size(); i++) if (takes[i].path == path) takeOn = int(i);
+            takeNote = "Kept as \xE2\x80\x9C" + t.name + "\xE2\x80\x9D.";
+            return;
+        }
+        stopTake();
+        recorder.start();
+        for (int k = 0; k < count(); k++) {
+            Side& sd = sides[k];
+            if (!sd.host) continue;
+            std::vector<std::string> sounds;
+            for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) sounds.push_back(lib.instruments[size_t(j ? sound2Of(k) : sd.sound)].pkg->id());
+            recorder.attach(*sd.host, k, sounds);
+        }
+        takeNote.clear();
+    }
+
+    void deleteTake() {
+        if (takeOn < 0 || takeOn >= int(takes.size())) return;
+        stopTake();
+        std::error_code ec;
+        fs::remove(takes[size_t(takeOn)].path, ec);
+        takeNote = "Deleted \xE2\x80\x9C" + takes[size_t(takeOn)].name + "\xE2\x80\x9D.";
+        takeOn = -1;
+        scanTakes();
+    }
+
+    // A take file (from a dialog, dropped on the window, or the command line) copied in as one of yours.
+    bool openTakeFile(const std::string& from) {
+        std::string text, err;
+        mpe::take::Take t;
+        if (!readText(from, text)) { takeNote = "Could not open " + from; return false; }
+        if (!mpe::take::parse(text, t, &err)) { takeNote = err; return false; }
+        if (t.name.empty()) t.name = fs::path(from).stem().string();
+        std::error_code ec;
+        fs::create_directories(takesDir, ec);
+        std::string path = freeTakePath(t);
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+        out.close();
+        if (!out) { takeNote = "Could not write " + path; return false; }
+        scanTakes();
+        for (size_t i = 0; i < takes.size(); i++) if (takes[i].path == path) takeOn = int(i);
+        takeNote = "Opened \xE2\x80\x9C" + t.name + "\xE2\x80\x9D.";
+        return true;
+    }
+    static constexpr SDL_DialogFileFilter kTakeFilter[] = {{"odo takes", "odotake"}};
+    void askToOpenTake() { openingTake = true; SDL_ShowOpenFileDialog(openAnswer, this, window, kTakeFilter, 1, home().c_str(), false); }
+    std::string sharingTake;                // the take a save dialog is for (its file)
+    void askToShareTake() {
+        if (takeOn < 0 || takeOn >= int(takes.size())) return;
+        sharingTake = takes[size_t(takeOn)].path;
+        std::string at = (fs::path(home()) / fs::path(sharingTake).filename()).string();
+        SDL_ShowSaveFileDialog(saveAnswer, this, window, kTakeFilter, 1, at.c_str());
+    }
+    void saveTakeFile(std::string path) {
+        if (path.size() < 8 || path.compare(path.size() - 8, 8, mpe::take::kExtension) != 0) path += mpe::take::kExtension;
+        std::error_code ec;
+        fs::copy_file(sharingTake, path, fs::copy_options::overwrite_existing, ec);
+        takeNote = ec ? "Could not write " + path : "Shared as " + fs::path(path).filename().string();
+        sharingTake.clear();
+    }
+
+    // The rail's line for takes: what is happening, or how many there are.
+    std::string takesSummary() const {
+        if (recorder.recording()) return recorder.elapsedMs() > 0 ? "Recording " + clockText(recorder.elapsedMs()) : "Recording: play something";
+        if (player.playing() && takeOn >= 0 && takeOn < int(takes.size()))
+            return std::string(player.mode() == mpe::take::Player::Listen ? "Listening: " : "Playing along: ") + takes[size_t(takeOn)].name;
+        if (takes.empty()) return "Record what you play";
+        return std::to_string(takes.size()) + (takes.size() == 1 ? " take" : " takes");
+    }
+
+    mpe::take::GhostStyle ghostStyle() const {
+        const tokens::ghost::Colours& c = eink ? tokens::ghost::eink : tokens::ghost::dark;
+        mpe::take::GhostStyle s;
+        s.finger = c.finger; s.trail = c.trail; s.next = c.next; s.text = c.text; s.back = c.back;
+        s.radius = tokens::ghost::radius; s.grow = tokens::ghost::grow; s.trailMs = tokens::ghost::trailMs;
+        s.previewMs = tokens::ghost::previewMs; s.textSize = tokens::ghost::textSize;
+        return s;
+    }
     // ---- the rail and its panels -----------------------------------------------------------------
 
     // Under its top row, four tiles: the preset, the split, the controller and the sound (two, for
@@ -1063,7 +1318,7 @@ struct App {
     static constexpr float kBottom = 84;           // the lines at the bottom: version and update, latency, load
     static constexpr float kPad = 16, kPanelHead = 58;
 
-    enum Key { kNone = -100, kPresetKey = -1, kSplitKey = -2, kControllerKey = -3, kSoundKey = -4, kSound2Key = -5, kAppKey = -6, kGroupKey = -7 };
+    enum Key { kNone = -100, kPresetKey = -1, kSplitKey = -2, kControllerKey = -3, kSoundKey = -4, kSound2Key = -5, kAppKey = -6, kGroupKey = -7, kTakesKey = -8 };
     int panelKey = kNone;
     std::string panelGroup;                        // kGroupKey: the group it shows
     float panelScroll = 0, settingsScroll = 0;
@@ -1075,7 +1330,7 @@ struct App {
     // ---- the rail's boxes: drawing and tapping use this one layout ----
 
     struct Box {
-        enum Kind { Tile, Part, Map, Cell, Eyebrow, Group, App } kind;
+        enum Kind { Tile, Part, Map, Cell, Eyebrow, Group, App, Takes } kind;
         int key;                                   // Tile: its panel; Part: 0 or 1; Cell: the side
         std::string text;                          // Eyebrow: its words; Group: its name
         float x, y, w, h;                          // y from the top of the scrolled part, unscrolled
@@ -1115,7 +1370,8 @@ struct App {
             for (const auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) { b.push_back({Box::Group, kGroupKey, g.name, x, y, w, 50}); y += 52; }
         }
         b.push_back({Box::Eyebrow, kNone, "APP", x, y, w, 26}); y += 26;
-        b.push_back({Box::App, kAppKey, "", x, y, w, 50});
+        b.push_back({Box::App, kAppKey, "", x, y, w, 50}); y += 52;
+        b.push_back({Box::Takes, kTakesKey, "", x, y, w, 50});
         return b;
     }
     static float boxesHeight(const std::vector<Box>& b) { return b.empty() ? 0 : b.back().y + b.back().h + 8; }
@@ -1149,7 +1405,8 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion };
+    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
+               aRecord, aTake, aListen, aAlong, aSpeed, aLoop, aTakeDelete, aTakeOpen, aTakeShare };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1322,6 +1579,47 @@ struct App {
             PItem pn{PItem::Row, "Panic: stop every note", "", x, y, in, 40};
             pn.act = aPanic; pn.rule = true;
             p.items.push_back(pn); y += 40;
+        } else if (panelKey == kTakesKey) {
+            // As odo on Android's Takes panel (TakesUi.kt): the same rows, words and order.
+            p.title = "Takes"; p.sub = "Record what you play; play a take back to learn it";
+            auto action = [&](const std::string& t, int act, bool on = false) {
+                PItem it{PItem::Row, t, "", x, y, in, 40}; it.act = act; it.rule = true; it.on = on; p.items.push_back(it); y += 40;
+            };
+            heading("RECORD");
+            if (recorder.recording())
+                action(recorder.elapsedMs() > 0 ? "Stop recording \xC2\xB7 " + clockText(recorder.elapsedMs()) : "Stop recording (play something first)", aRecord, true);
+            else action("Record", aRecord);
+            if (!takeNote.empty()) note(takeNote);
+            heading("YOURS");
+            for (size_t i = 0; i < takes.size(); i++) {
+                PItem it{PItem::Row, takes[i].name, takeSub(takes[i]), x, y, in, 50};
+                it.act = aTake; it.arg = int(i); it.on = int(i) == takeOn; it.rule = true;
+                p.items.push_back(it);
+                y += 50;
+            }
+            if (takes.empty()) note("None yet: record one, or open a take file.");
+            action("Open a take file\xE2\x80\xA6", aTakeOpen);
+            if (takeOn >= 0 && takeOn < int(takes.size())) {
+                const TakeFile& f = takes[size_t(takeOn)];
+                heading("THIS TAKE");
+                bool listening = player.playing() && player.mode() == mpe::take::Player::Listen;
+                bool along = player.playing() && player.mode() == mpe::take::Player::PlayAlong;
+                action(listening ? "Stop" : "Listen", aListen, listening);
+                action(along ? "Stop" : "Play along", aAlong, along);
+                int sp = 2;
+                for (int k = 0; k < 3; k++) if (std::fabs(kSpeeds[k] - takeSpeed) < 1e-6) sp = k;
+                p.items.push_back({PItem::Label, "Speed", std::to_string(int(std::lround(takeSpeed * 100))) + "%", x, y, in, 40}); y += 42;
+                chips({"50%", "75%", "100%"}, sp, aSpeed, 0);
+                if (!f.sections.empty()) {
+                    p.items.push_back({PItem::Label, "Loop", takeLoop < 0 || takeLoop >= int(f.sections.size()) ? "All of it" : f.sections[size_t(takeLoop)],
+                                       x, y, in, 40}); y += 42;
+                    std::vector<std::string> names{"All of it"};
+                    for (const auto& s : f.sections) names.push_back(s);
+                    chips(names, takeLoop + 1, aLoop, 0);
+                }
+                action("Share \xE2\x80\x9C" + f.name + "\xE2\x80\x9D as a file\xE2\x80\xA6", aTakeShare);
+                action(std::string(confirmTakeDelete ? "Tap again to delete \xE2\x80\x9C" : "Delete \xE2\x80\x9C") + f.name + "\xE2\x80\x9D", aTakeDelete);
+            }
         } else if (panelKey == kGroupKey) {
             if (!sd.host) { panelKey = kNone; return Panel(); }
             auto gs = mpe::rail::groups(sd.host->manifest(), sd.settings);
@@ -1389,6 +1687,7 @@ struct App {
         folded = -1;
         renaming = false;
         confirmDelete = false;
+        confirmTakeDelete = false;
         search.clear();
     }
 
@@ -1431,8 +1730,18 @@ struct App {
                 case aFlip: setSetting(size_t(it.arg), cur().settings[size_t(it.arg)] != 0 ? 0 : 1); break;
                 case aChip: setSetting(size_t(it.arg), mpe::rail::chipValue(settingOf(size_t(it.arg)), it.arg2)); break;
                 case aFold: folded = folded == it.arg ? -1 : it.arg; break;
+                case aRecord: toggleRecord(); break;
+                case aTake: chooseTake(it.arg); break;
+                case aListen: playTake(mpe::take::Player::Listen); break;
+                case aAlong: playTake(mpe::take::Player::PlayAlong); break;
+                case aSpeed: takeSpeed = kSpeeds[std::clamp(it.arg2, 0, 2)]; player.setSpeed(takeSpeed); break;
+                case aLoop: takeLoop = it.arg2 - 1; if (player.loaded()) player.loopSection(takeLoop, nowMs(), takeSink()); break;
+                case aTakeDelete: if (confirmTakeDelete) deleteTake(); else confirmTakeDelete = true; break;
+                case aTakeOpen: askToOpenTake(); break;
+                case aTakeShare: askToShareTake(); break;
                 default: break;
             }
+            if (it.act != aTakeDelete) confirmTakeDelete = false;
             if (it.act != aDelete) confirmDelete = false;
             return;
         }
@@ -1475,6 +1784,7 @@ struct App {
                 case Box::Tile: if (b.key != kSoundKey) openPanel(b.key); return;
                 case Box::Group: openGroup(b.text); return;
                 case Box::App: openPanel(kAppKey); return;
+                case Box::Takes: if (panelKey != kTakesKey) scanTakes(); openPanel(kTakesKey); return;
                 default: break;
             }
         }
@@ -1590,8 +1900,10 @@ struct App {
                 else if (mx < railW()) scrollRail(-e.wheel.y * 40, float(wh));
                 return;
             }
-            case SDL_EVENT_DROP_FILE:                // a preset file dropped on the window
-                if (e.drop.data) openPresetFile(e.drop.data);
+            case SDL_EVENT_DROP_FILE:                // a preset or take file dropped on the window
+                if (!e.drop.data) return;
+                if (fs::path(e.drop.data).extension() == mpe::take::kExtension) { if (openTakeFile(e.drop.data)) { panelKey = kTakesKey; panelScroll = 0; } }
+                else openPresetFile(e.drop.data);
                 return;
             case SDL_EVENT_TEXT_INPUT: {
                 // a preset's new name, or the sound panel's search
@@ -1803,6 +2115,16 @@ struct App {
                     chev(b.x + b.w - 12, y + b.h / 2, sc);
                     break;
                 }
+                case Box::Takes: {
+                    bool open = panelKey == kTakesKey;
+                    bool busy = recorder.recording() || player.playing();
+                    if (open) draw::fillRect(renderer, b.x, y, b.w, b.h, p.eink ? text : key, 10);
+                    draw::Color nc = open ? (p.eink ? bg : accent) : text, sc = open && p.eink ? bg : busy && !p.eink ? accent : dim;
+                    draw::text(renderer, b.x + 12, y + 21, 14, nc, "Takes", 0, true);
+                    draw::text(renderer, b.x + 12, y + 38, 12, sc, draw::fit(takesSummary(), 12, b.w - 40));
+                    chev(b.x + b.w - 12, y + b.h / 2, open && p.eink ? bg : dim);
+                    break;
+                }
             }
         }
         SDL_SetRenderClipRect(renderer, nullptr);
@@ -1954,6 +2276,7 @@ struct App {
             if (partsOf(k) != parts) reroute();
             if (changed) saveConfig();
         }
+        player.update(nowMs(), takeSink());              // a take playing: its notes due now
         SDL_SetRenderViewport(renderer, nullptr);
         draw::Color back = rgba(look().ink);        // between the sides: black, or e-ink's white
         SDL_SetRenderDrawColor(renderer, Uint8(back.r * 255), Uint8(back.g * 255), Uint8(back.b * 255), 255);
@@ -1967,6 +2290,7 @@ struct App {
             SDL_Rect area{int(sd.x), int(sd.y), int(sd.w), int(sd.h)};
             SDL_SetRenderViewport(renderer, &area);
             draw::list(renderer, sd.host->drawList(), sd.w, sd.h);
+            if (player.playing()) draw::list(renderer, player.drawGhosts(k, sd.w, sd.h, ghostStyle()), sd.w, sd.h);
         }
         SDL_SetRenderViewport(renderer, nullptr);
         // The lines between the sides; with the rail out, the side it changes is outlined.
@@ -2002,6 +2326,7 @@ struct Selftest {
     float moveX = 0, moveY = 0;
     int expect = -1;
     std::vector<std::pair<float, float>> taps;   // taps on the rail or its panel first, in window points
+    bool listen = false;                         // --take: it plays (Listen) before the touches, its ghosts in the screenshot
 };
 
 int selftest(App& app, const char* out, Selftest t) {
@@ -2029,6 +2354,23 @@ int selftest(App& app, const char* out, Selftest t) {
     int ww, wh;
     SDL_GetWindowSize(app.window, &ww, &wh);
     float aw = float(ww) - app.railW(), ah = float(wh);
+    if (t.listen) {
+        // A take (--take): it plays by itself, its ghost fingers over the controller.
+        app.playTake(mpe::take::Player::Listen);
+        if (!app.player.playing()) { std::fprintf(stderr, "selftest: the take does not play: %s\n", app.takeNote.c_str()); return 1; }
+        wait(2500);
+        if (t.touches.empty()) {
+            int voices = app.engine->activeVoices();
+            SDL_Surface* shot = SDL_RenderReadPixels(app.renderer, nullptr);
+            bool saved = shot && SDL_SaveBMP(shot, out);
+            if (shot) SDL_DestroySurface(shot);
+            std::printf("selftest: take \xE2\x80\x9C%s\xE2\x80\x9D at %.1f s of %.1f, %d voices sounding%s%s, screenshot %s\n",
+                        app.player.take().name.c_str(), app.player.position() / 1000, app.player.length() / 1000, voices,
+                        app.takeNote.empty() ? "" : ": ", app.takeNote.c_str(), saved ? out : "not saved");
+            app.stopTake();
+            return voices >= 1 && app.takeNote.empty() ? 0 : 1;
+        }
+    }
     if (t.touches.empty()) {
         // The Tonnetz at size 7: the C major triangle, and a node.
         float dx = 1.f / 7, dy = aw * dx / ah;
@@ -2084,6 +2426,7 @@ int main(int argc, char** argv) {
     struct Preset { int side, index; double value; };
     std::vector<Preset> presetSettings;                  // --setting [SIDE:]INDEX=VALUE
     std::vector<std::string> openPresets;                // --open-preset FILE, or a bare .odopreset path (the file manager's "Open with")
+    std::vector<std::string> openTakes;                  // --take FILE, or a bare .odotake path: one of your takes (a self-test plays it)
     const char* sharePreset = nullptr;                   // --share-preset FILE: the preset on view into FILE, then quit
     int width = 1280, height = 720, splitArg = -1;
     bool logMidi = false, checkUpdates = true, einkArg = false;
@@ -2102,6 +2445,8 @@ int main(int argc, char** argv) {
         else if (a == "--no-update") checkUpdates = false;
         else if (a == "--open-preset" && more) openPresets.push_back(argv[++i]);
         else if (a == "--share-preset" && more) sharePreset = argv[++i];
+        else if (a == "--take" && more) openTakes.push_back(argv[++i]);
+        else if (fs::path(a).extension() == mpe::take::kExtension) openTakes.push_back(a);
         else if (a.size() > 10 && a.compare(a.size() - 10, 10, mpe::preset::kExtension) == 0) openPresets.push_back(a);
         else if (a == "--version") { std::printf("odo %s\n", ODO_DESKTOP_VERSION); return 0; }
         else if (a == "--self-update") {
@@ -2126,7 +2471,7 @@ int main(int argc, char** argv) {
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
             std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--eink] [--config FILE] [--no-update] [--version]\n"
-                                 "           [--open-preset FILE]... [--share-preset FILE] [FILE.odopreset]...\n"
+                                 "           [--open-preset FILE]... [--share-preset FILE] [FILE.odopreset]... [--take FILE]... [FILE.odotake]...\n"
                                  "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--tap X,Y]... [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
@@ -2215,6 +2560,18 @@ int main(int argc, char** argv) {
     if (app.persist && app.blockGestures) app.gestureNote = gestures::set(true);   // and brings the extension up to date
     app.saveConfig();
     for (const auto& p : openPresets) { app.openPresetFile(p); std::printf("odo: %s\n", app.status.c_str()); }
+    // Takes: in a folder of the self-test's own when testing, so it leaves yours alone.
+    if (selftestOut) {
+        app.takesDir = (fs::temp_directory_path() / "odo-selftest-takes").string();
+        std::error_code ec;
+        fs::remove_all(app.takesDir, ec);             // each self-test starts with none
+    }
+    app.scanTakes();
+    for (const auto& f : openTakes) {
+        bool ok = app.openTakeFile(f);
+        std::printf("odo: %s\n", app.takeNote.c_str());
+        test.listen |= ok && selftestOut;
+    }
     if (sharePreset) {
         bool ok = app.savePresetFile(app.presetName, sharePreset);
         std::printf("odo: %s\n", app.status.c_str());

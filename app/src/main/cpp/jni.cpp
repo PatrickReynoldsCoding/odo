@@ -177,10 +177,17 @@ FN(jboolean, nativeCaptureSave)(JNIEnv* env, jobject, jstring path) {
 static std::unique_ptr<mpe::ControllerHost>& ctl() { static std::unique_ptr<mpe::ControllerHost> h; return h; }
 static std::string& ctlError() { static std::string e; return e; }
 
+// A take recording from it, or playing into it (the takes, at the end of this file).
+#include <chrono>
+#include "mpe/take.h"
+static mpe::take::Recorder& recorder() { static mpe::take::Recorder r; return r; }
+static mpe::take::Player& player() { static mpe::take::Player p; return p; }
+
 FN(jboolean, nativeCtlLoad)(JNIEnv* env, jobject, jbyteArray bytes) {
     jsize n = env->GetArrayLength(bytes);
     std::string data(size_t(n), '\0');
     env->GetByteArrayRegion(bytes, 0, n, reinterpret_cast<jbyte*>(&data[0]));
+    player().stop(nullptr);
     if (ctl()) ctl()->stop();
     ctl().reset();
     auto pkg = mpe::Package::fromBytes(data.data(), data.size(), &ctlError());
@@ -195,7 +202,7 @@ FN(jboolean, nativeCtlLoad)(JNIEnv* env, jobject, jbyteArray bytes) {
 FN(jstring, nativeCtlError)(JNIEnv* env, jobject) {
     return env->NewStringUTF((ctl() && !ctl()->lastError().empty() ? ctl()->lastError() : ctlError()).c_str());
 }
-FN(void, nativeCtlUnload)(JNIEnv*, jobject) { if (ctl()) ctl()->stop(); ctl().reset(); }
+FN(void, nativeCtlUnload)(JNIEnv*, jobject) { player().stop(nullptr); if (ctl()) ctl()->stop(); ctl().reset(); }
 FN(void, nativeCtlInit)(JNIEnv*, jobject, jfloat w, jfloat h, jint flags) { if (ctl()) ctl()->init(w, h, flags); }
 FN(void, nativeCtlInstrument)(JNIEnv*, jobject, jint part, jfloat center) { if (ctl()) ctl()->instrument(part, center); }
 FN(void, nativeCtlTouch)(JNIEnv*, jobject, jint id, jint phase, jfloat x, jfloat y, jfloat size, jfloat force) {
@@ -339,4 +346,143 @@ FN(jbyteArray, nativePresetFileName)(JNIEnv* env, jobject, jbyteArray name) {
     mpe::preset::Preset p;
     p.name = bytesIn(env, name);
     return bytesOut(env, mpe::preset::fileName(p));
+}
+
+// ---- takes (docs/formats/TAKE_FORMAT.md, mpe::take) ------------------------------------------------
+// Recorded from the controller package on screen, and played into it (its notes as its own notes
+// go, the ghost fingers drawn over it), as odo for computers does. UI thread only, as the controller.
+
+static double takeNowMs() {
+    return double(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()) / 1000.0;
+}
+static mpe::take::Player::Sink takeSink() {
+    return [](const mpe::take::Note& n) {
+        if (ctl()) ctl()->injectNote(n.kind, mpe::ControllerHost::kInjectedVoice + n.voice, n.part, n.pitch, n.pressure, n.slide, n.velocity);
+    };
+}
+static std::string takeQuote(const std::string& s) { mpe::Json j; j.type = mpe::Json::String; j.s = s; return mpe::preset::toJson(j); }
+
+// Start recording what the controller on screen plays. sounds: its parts' sounds (the app's ids), one a line.
+FN(jboolean, nativeTakeRecord)(JNIEnv* env, jobject, jbyteArray sounds) {
+    if (!ctl()) return false;
+    if (player().playing()) player().stop(takeSink());
+    std::vector<std::string> ids;
+    std::string s = bytesIn(env, sounds);
+    for (size_t a = 0; a < s.size();) {
+        size_t b = s.find('\n', a);
+        if (b == std::string::npos) b = s.size();
+        std::string id = s.substr(a, b - a);
+        if (!id.empty()) ids.push_back(soundForFile(id));   // the package's id, as a preset file has it
+        a = b + 1;
+    }
+    recorder().start();
+    recorder().attach(*ctl(), 0, ids);
+    return true;
+}
+// ms since the first finger while recording; 0 before it; -1 when not recording.
+FN(jdouble, nativeTakeRecording)(JNIEnv*, jobject) { return recorder().recording() ? recorder().elapsedMs() : -1; }
+// Stop recording: the take's file text, named so; "" if nothing was played.
+FN(jbyteArray, nativeTakeStopRecording)(JNIEnv* env, jobject, jbyteArray name, jbyteArray madeBy) {
+    mpe::take::Take t = recorder().stop();
+    if (t.touches.empty()) return bytesOut(env, "");
+    t.name = bytesIn(env, name);
+    t.madeBy = bytesIn(env, madeBy);
+    return bytesOut(env, mpe::take::write(t));
+}
+FN(jbyteArray, nativeTakeFileName)(JNIEnv* env, jobject, jbyteArray name) {
+    mpe::take::Take t;
+    t.name = bytesIn(env, name);
+    return bytesOut(env, mpe::take::fileName(t));
+}
+// What a take file is, as JSON: {"name", "controller" ("pkg:" and its id, or ""), "written",
+// "length" (ms), "sections": [...], "settings": {id: value}, "sounds": [the app's ids]}; or {"error": why}.
+FN(jbyteArray, nativeTakeInfo)(JNIEnv* env, jobject, jbyteArray text) {
+    mpe::take::Take t;
+    std::string err;
+    if (!mpe::take::parse(bytesIn(env, text), t, &err)) return bytesOut(env, "{\"error\":" + takeQuote(err) + "}");
+    double length = t.length();
+    std::vector<std::string> sections;
+    bool written = !t.performed();
+    if (written) {
+        mpe::take::Score sc;
+        if (mpe::take::parseScore(t.score, sc, nullptr, nullptr, 1, t.tempo, t.meterBeats, t.meterUnit, t.key)) {
+            length = sc.ms(sc.end);
+            for (const auto& s : sc.sections) sections.push_back(s.second);
+        }
+    } else for (const auto& s : t.sections) sections.push_back(s.name);
+    std::string ctlId = t.sides.empty() || t.sides[0].controller.empty() ? "" : "pkg:" + t.sides[0].controller;
+    std::string o = "{\"name\":" + takeQuote(t.name) + ",\"controller\":" + takeQuote(ctlId) +
+                    ",\"written\":" + (written ? "true" : "false") + ",\"length\":" + std::to_string(length) + ",\"sections\":[";
+    for (size_t i = 0; i < sections.size(); i++) o += (i ? "," : "") + takeQuote(sections[i]);
+    o += "],\"settings\":{";
+    if (!t.sides.empty())
+        for (size_t i = 0; i < t.sides[0].settings.size(); i++) {
+            mpe::Json v; v.type = mpe::Json::Number; v.n = t.sides[0].settings[i].second;
+            o += (i ? "," : "") + takeQuote(t.sides[0].settings[i].first) + ":" + mpe::preset::toJson(v);
+        }
+    o += "},\"sounds\":[";
+    if (!t.sides.empty())
+        for (size_t i = 0; i < t.sides[0].sounds.size(); i++) o += (i ? "," : "") + takeQuote(soundForApp(t.sides[0].sounds[i]));
+    return bytesOut(env, o + "]}");
+}
+// Play a take on the controller on screen (its settings already put on it): mode 0 listen, 1 play
+// along. A take written by hand is expanded first on the controller as set (values), at this size
+// (dp), for these instruments' middles. "" if it plays with every note; else what went wrong ("!"
+// first if it does not play at all).
+FN(jbyteArray, nativeTakePlay)(JNIEnv* env, jobject, jbyteArray text, jint mode, jdoubleArray values, jfloat w, jfloat h,
+                               jfloat center0, jfloat center1, jdouble speed, jint loop) {
+    if (!ctl()) return bytesOut(env, "!No controller to play it on.");
+    if (recorder().recording()) recorder().stop();
+    player().stop(takeSink());
+    mpe::take::Take t;
+    std::string err;
+    if (!mpe::take::parse(bytesIn(env, text), t, &err)) return bytesOut(env, "!" + err);
+    std::string note;
+    if (!t.performed()) {
+        std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
+        if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
+        float centers[2] = {center0, center1};
+        mpe::take::Report rep;
+        if (!mpe::take::prepare(t, ctl()->package(), v, w, h, centers, &rep))
+            return bytesOut(env, "!" + (rep.errors.empty() ? std::string("It could not be played.") : rep.errors[0]));
+        if (!rep.errors.empty())
+            note = std::to_string(rep.errors.size()) + (rep.errors.size() == 1 ? " note is" : " notes are") +
+                   " not on the controller as it is set: " + rep.errors[0];
+    }
+    player().load(std::move(t));
+    player().setSpeed(speed);
+    player().loopSection(loop, takeNowMs(), takeSink());
+    player().play(mode == 1 ? mpe::take::Player::PlayAlong : mpe::take::Player::Listen, takeNowMs(), takeSink());
+    return bytesOut(env, note);
+}
+FN(void, nativeTakeStop)(JNIEnv*, jobject) { player().stop(takeSink()); }
+FN(void, nativeTakeSpeed)(JNIEnv*, jobject, jdouble speed) { player().setSpeed(speed); }
+FN(void, nativeTakeLoop)(JNIEnv*, jobject, jint section) { if (player().loaded()) player().loopSection(section, takeNowMs(), takeSink()); }
+// playing (0/1), mode (0 listen, 1 play along), position ms, length ms.
+FN(jdoubleArray, nativeTakeState)(JNIEnv* env, jobject) {
+    double v[4] = {player().playing() ? 1.0 : 0.0, double(player().mode()), player().position(), player().length()};
+    jdoubleArray a = env->NewDoubleArray(4);
+    env->SetDoubleArrayRegion(a, 0, 4, v);
+    return a;
+}
+// A frame: time moves on for a take playing; its ghost fingers over a w x h dp surface as a draw
+// list (CONTROLLER_FORMAT.md's), or null when none is playing. colours: finger, trail, next, text,
+// back (0xRRGGBBAA); sizes: radius, grow, trailMs, previewMs, textSize (ui/tokens.json's ghost).
+FN(jbyteArray, nativeTakeTick)(JNIEnv* env, jobject, jfloat w, jfloat h, jintArray colours, jfloatArray sizes) {
+    if (!player().playing()) return nullptr;
+    player().update(takeNowMs(), takeSink());
+    if (!player().playing()) return nullptr;
+    mpe::take::GhostStyle st;
+    if (env->GetArrayLength(colours) >= 5 && env->GetArrayLength(sizes) >= 5) {
+        jint c[5];
+        jfloat s[5];
+        env->GetIntArrayRegion(colours, 0, 5, c);
+        env->GetFloatArrayRegion(sizes, 0, 5, s);
+        st.finger = uint32_t(c[0]); st.trail = uint32_t(c[1]); st.next = uint32_t(c[2]); st.text = uint32_t(c[3]); st.back = uint32_t(c[4]);
+        st.radius = s[0]; st.grow = s[1]; st.trailMs = s[2]; st.previewMs = s[3]; st.textSize = s[4];
+    }
+    std::vector<uint8_t> d = player().drawGhosts(0, w, h, st);
+    jbyteArray out = env->NewByteArray(jsize(d.size()));
+    env->SetByteArrayRegion(out, 0, jsize(d.size()), reinterpret_cast<const jbyte*>(d.data()));
+    return out;
 }

@@ -12,6 +12,10 @@ Both apps (Android and computers) follow these, so a file made by one works in t
 - [CONTROLLER_FORMAT.md](formats/CONTROLLER_FORMAT.md): controller packages (`.odoc`) and how
   their settings show on the rail.
 - [PRESET_FORMAT.md](formats/PRESET_FORMAT.md): preset files (`.odopreset`).
+- [TAKE_FORMAT.md](formats/TAKE_FORMAT.md): take files (`.odotake`): a performance kept as its
+  touches and notes, played back with ghost fingers; the Takes panel in both apps.
+- [TAKE_AUTHORING.md](formats/TAKE_AUTHORING.md): writing a take by hand (a `score`), and a brief
+  for transcribing a tune into one; checked with `tools/take`. Examples in `takes/`.
 
 ## vision/: where odo is going
 

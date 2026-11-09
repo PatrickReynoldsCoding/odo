@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- What odo hands other apps: the preset file Share writes (PresetFiles.share), and nothing else. -->
+<!-- What odo hands other apps: the preset file Share writes (PresetFiles.share) and the take file
+     Share writes (Takes.share), and nothing else. -->
 <paths>
     <cache-path name="presets" path="presets/" />
+    <cache-path name="takes" path="takes/" />
 </paths>
