@@ -179,3 +179,6 @@ run the same everywhere.
 2. ~~The Tonnetz as the first `.odoc`~~: done, 17 KB of WebAssembly.
 3. ~~odo plays it beside its Kotlin controllers~~: done, as "Tonnetz (package)".
 4. The touch pad and Grid follow; `save()`; controllers downloaded rather than built in.
+5. ~~The Hex keyboard~~ (`controllers/hex/`): the Grid's code with hexagonal keys, isomorphic
+   layouts and other tunings ([HEX_CONTROLLER.md](../plans/HEX_CONTROLLER.md)). It uses a touch's
+   `size` or `force` as pressure.

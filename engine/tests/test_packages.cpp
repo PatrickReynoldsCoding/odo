@@ -6,6 +6,7 @@
 #include "check.h"
 #include "mpe/controller.h"
 #include "mpe/package.h"
+#include "../../controllers/hex/tuning.h"
 #ifdef MPE_LIBFAUST
 #include "mpe/faust_loader.h"
 #endif
@@ -121,8 +122,127 @@ static void controllerPackage() {
     CHECK(host.lastError().empty(), "no errors from the WebAssembly (%s)", host.lastError().c_str());
 }
 
+// The Hex keyboard (controllers/hex): every key plays its layout's note in its tuning, through the
+// MESH, as MIDI: a note-on and a bend over 48 semitones.
+struct Voice { int note = -1, bend = 8192; float pitch() const { return float(note) + float(bend - 8192) / 8192 * 48; } };
+
+static void hexPackage() {
+    std::string err;
+    auto pkg = Package::read(MPE_TEST_CONTROLLERS "/hex.odoc", &err);
+    CHECK(pkg != nullptr, "hex.odoc reads (%s)", err.c_str());
+    if (!pkg) return;
+    const Json& ss = pkg->manifest["settings"];
+    auto at = [&](const char* id) { for (size_t i = 0; i < ss.size(); i++) if (ss[i]["id"].str() == id) return int(i); return -1; };
+    Voice ch[16];
+    int ons = 0, offs = 0, lastCh = 0, vel = 0;
+    std::vector<int> pressures;
+    ControllerHost host([&](const uint8_t* m, int n) {
+        int c = m[0] & 0x0F;
+        if (n == 3 && (m[0] & 0xF0) == 0x90 && m[2] > 0) { ons++; ch[c] = Voice(); ch[c].note = m[1]; lastCh = c; vel = m[2]; }
+        if (n == 3 && (m[0] & 0xF0) == 0x80) offs++;
+        if (n == 3 && (m[0] & 0xF0) == 0xE0) ch[c].bend = m[1] | (m[2] << 7);
+        if (n == 2 && (m[0] & 0xF0) == 0xD0) pressures.push_back(m[1]);
+    });
+    CHECK(host.load(*pkg, &err), "wasm3 runs the Hex keyboard (%s)", err.c_str());
+    // 452 x 400, upright (Flip 90°), not mirrored, nothing beside the keys, 4 to a row, the least
+    // spacing: a key every 100 across (gap 2), rows 86.6 apart, the bottom row's middles at y 356.7.
+    // The middle key (row 2, place 2) plays C4.
+    host.init(452, 400, 0);
+    host.instrument(0, 60);
+    for (size_t i = 0; i < ss.size(); i++) host.setting(int(i), ss[i]["default"].num());
+    const std::pair<const char*, double> plain[] = {{"flip90", 1}, {"flipAcross", 1}, {"cols", 4}, {"spacing", 2}, {"scrollBar", 0},
+                                                    {"sideLatch", 0}, {"sideDyn", 0}, {"vibrato", 0}, {"press", 0}};
+    for (auto& p : plain) host.setting(at(p.first), p.second);
+    host.tick();
+    CHECK(host.takeDirty() && host.drawList().size() > 2000, "it draws (%zu bytes)", host.drawList().size());
+
+    struct Case { int tuning, layout, e, ne; };
+    const Case cases[] = {{HT_12, HL_WICKI, 2, 7}, {HT_12, HL_HARMONIC, 1, 4}, {HT_12, HL_BOSANQUET, 2, 1},
+                          {HT_31, HL_WICKI, 5, 18}, {HT_31, HL_BOSANQUET, 5, 2}, {HT_53, HL_HARMONIC, 3, 17},
+                          {HT_19, HL_WICKI, 3, 11}, {HT_JUST, HL_WICKI, 2, 7}, {HT_MEANTONE, HL_BOSANQUET, 2, 1}};
+    int id = 1;
+    for (const Case& k : cases) {
+        host.setting(at("tuning"), k.tuning);
+        host.setting(at("hexLayout"), k.layout);
+        const HexTuning* t = ht_tuning(k.tuning);
+        int bad = 0;
+        std::string worst;
+        for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) {
+            float x = 51 + 100 * c + 50 * (r % 2), y = 400 - (r + 0.5f) * 86.60254f;
+            int before = ons;
+            host.touch(id, ControllerHost::Down, x, y, 0, 0);
+            int q = c - r / 2;
+            double want = ht_pitch(t, 0, 0, ht_note_at(k.e, k.ne, ht_root_near(t, 0, 0, 60), q - 1, r - 2));
+            float got = ons > before ? ch[lastCh].pitch() : -1;
+            if (std::fabs(got - want) > 0.01) { bad++; worst = "row " + std::to_string(r) + " place " + std::to_string(c) + ": " + std::to_string(got) + " not " + std::to_string(want); }
+            host.touch(id, ControllerHost::Up, x, y, 0, 0);
+            id++;
+        }
+        CHECK(bad == 0, "%s in %s: all 16 keys play their pitches %s", HT_LAYOUTS[k.layout].name, t->name, worst.c_str());
+    }
+
+    // Your own steps: 3 to the right, 1 up to the right, in 12.
+    host.setting(at("tuning"), HT_12);
+    host.setting(at("hexLayout"), HL_OWN);
+    host.setting(at("stepRight"), 3);
+    host.setting(at("stepUpRight"), 1);
+    host.touch(id, ControllerHost::Down, 251 + 100, 400 - 2.5f * 86.60254f, 0, 0);   // row 2, place 3: one right of the middle
+    CHECK(std::fabs(ch[lastCh].pitch() - 63) < 0.01, "Your own steps: the key right of C4 is 3 steps up (%.2f)", ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, 351, 400 - 2.5f * 86.60254f, 0, 0);
+
+    // Mirrored (the Grid's way round): the notes climb right to left.
+    host.setting(at("hexLayout"), HL_WICKI);
+    host.setting(at("flipAcross"), 0);
+    host.touch(id, ControllerHost::Down, 351, 400 - 2.5f * 86.60254f, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 58) < 0.01, "mirrored: the key right of C4 is a whole tone down (%.2f)", ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, 351, 400 - 2.5f * 86.60254f, 0, 0);
+    host.setting(at("flipAcross"), 1);
+
+    // Pressing harder: the touch's force grows, and so does its pressure, as aftertouch. (Struck in
+    // the middle of the key, the dynamics there leave room for more.)
+    host.setting(at("press"), 1);
+    pressures.clear();
+    host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0.3f);
+    int first = pressures.empty() ? -1 : pressures.back();
+    host.touch(id, ControllerHost::Move, 251, 400 - 2.5f * 86.60254f, 0, 0.5f);
+    int harder = pressures.empty() ? -1 : pressures.back();
+    CHECK(first >= 0 && harder > first + 30, "Press harder: pressure %d, then %d as the force grows", first, harder);
+    host.touch(id++, ControllerHost::Up, 251, 400 - 2.5f * 86.60254f, 0, 0);
+    host.setting(at("press"), 0);
+    pressures.clear();
+    host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0.3f);
+    host.touch(id, ControllerHost::Move, 251, 400 - 2.5f * 86.60254f, 0, 0.5f);
+    CHECK(pressures.size() <= 1, "Press harder off: the force changes nothing (%zu pressures)", pressures.size());
+    host.touch(id++, ControllerHost::Up, 251, 400 - 2.5f * 86.60254f, 0, 0);
+
+    // The Grid's ways of playing are there: slide between notes, from C4 to the key on its right (D4).
+    host.setting(at("slide"), 1);
+    int before = ons;
+    host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0);
+    host.touch(id, ControllerHost::Move, 351, 400 - 2.5f * 86.60254f, 0, 0);
+    CHECK(ons == before + 2 && std::fabs(ch[lastCh].pitch() - 62) < 0.01, "Slide between notes: onto the next key, its note (%.2f)", ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, 351, 400 - 2.5f * 86.60254f, 0, 0);
+    host.setting(at("slide"), 0);
+    // Sliding out across, past the key's edge (upright, across is left and right): a bend toward the
+    // next key's note (Bend, Next note: the defaults). The finger's slow position follows in time.
+    host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0);
+    host.touch(id, ControllerHost::Move, 380, 400 - 2.5f * 86.60254f, 0, 0);
+    for (int k = 0; k < 60; k++) {
+        host.tick();
+        struct timespec ts{0, 10000000};
+        nanosleep(&ts, nullptr);
+    }
+    float bent = ch[lastCh].pitch();
+    CHECK(bent > 60.5f && bent <= 62.01f, "sliding out to the right bends toward the next key's D (%.2f)", bent);
+    host.touch(id++, ControllerHost::Up, 351, 400 - 2.5f * 86.60254f, 0, 0);
+    host.stop();
+    CHECK(host.lastError().empty(), "no errors from the WebAssembly (%s)", host.lastError().c_str());
+    (void)offs; (void)vel;
+}
+
 int main() {
     instrumentPackage();
     controllerPackage();
+    hexPackage();
     return finish();
 }

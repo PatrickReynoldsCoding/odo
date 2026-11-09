@@ -36,8 +36,24 @@
  * no vibrato; every note as loud as the Dynamics fader says.
  *
  * A port of odo's built-in Grid (GridUi.kt, KeyGrid.kt), one section (no split).
+ *
+ * The Hex keyboard (controllers/hex/hex.c) is this file with hexagons for keys: it defines KEYS_HEX
+ * (and its own settings, after these, and words), includes this file, and then gives the functions
+ * under "the keys' shape" below. Everything else, every way a finger plays, is the same code.
  */
 #include "mesh.h"
+
+/* What a key is called in the Touch panel's words. */
+#ifndef CELL
+#define CELL "square"
+#define CELL_UPPER "SQUARE"
+#endif
+/* The most keys across a row (here: the squares Your own notes can hold). */
+#ifndef KEYS_MAX_COLS
+#define KEYS_MAX_COLS 8
+#endif
+/* For what one shape of key uses and the other does not. */
+#define SHARED __attribute__((unused))
 
 #define MAX_FINGERS 10
 #define MAX_VOICES 15          /* the MIDI channels MPE has for notes */
@@ -85,12 +101,21 @@ enum {
     S_MOVE_CTL,
     /* Inside a square (its dynamics and tone) and sliding out past it, each on or off as a whole
        (their own settings kept); the buttons' places; the two new controls' moved places */
-    S_INSIDE_ON, S_OUT_ON, S_SIDE_INSIDE, S_SIDE_OUT, S_PLACE7, S_PLACE8, S_COUNT
+    S_INSIDE_ON, S_OUT_ON, S_SIDE_INSIDE, S_SIDE_OUT, S_PLACE7, S_PLACE8,
+    /* The Hex keyboard's own, after these (hex.c) */
+#ifdef KEYS_EXTRA_SETTINGS
+    KEYS_EXTRA_SETTINGS
+#endif
+    S_COUNT
 };
 static double set_[S_COUNT] = {3, 0, 1, 0, 50, 0, 0, 0, 0, 0, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 30, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 100,
                                1,
                                100, 100, 0, 100, 100, 0, 0, 0,
-                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1, [S_MOVE_CTL] = 1, [S_INSIDE_ON] = 1, [S_OUT_ON] = 1};
+                               [S_NOTES0 ... S_NOTES0 + CUST_WORDS - 1] = NOTES_EVEN, [S_DYN_HIGH] = 100, [S_INTERVAL] = 2, [S_IN_TONE] = 1, [S_GLIDE_LR] = 1, [S_GLIDE_UD] = 1, [S_MOVE_CTL] = 1, [S_INSIDE_ON] = 1, [S_OUT_ON] = 1
+#ifdef KEYS_EXTRA_DEFAULTS
+                               , KEYS_EXTRA_DEFAULTS
+#endif
+                               };
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
@@ -138,11 +163,11 @@ static const unsigned WHITE = 0xFFFFFFFFu, BLACK = 0x000000FFu;
 
 /* Colours for the notes of the key, by their interval above it: 1 red, 2 orange, 3 yellow,
    4 blue, 5 green, 6 indigo, 7 pink; the flattened 5th a slate between 4 and 5. */
-static const unsigned DEGREE[12] = {
+static const unsigned DEGREE[12] SHARED = {
     0xFF5C5CFFu, 0xFF9F43FFu, 0xFF9F43FFu, 0xFFD43BFFu, 0xFFD43BFFu, 0x4DABF7FFu,
     0x8CA0B8FFu, 0x51CF66FFu, 0x9775FAFFu, 0x9775FAFFu, 0xF06595FFu, 0xF06595FFu};
 /* By note name, whatever the key: round the circle of fifths, C red. */
-static const unsigned NAMED[12] = {
+static const unsigned NAMED[12] SHARED = {
     0xFF5C5CFFu, 0x9775FAFFu, 0xFFA94DFFu, 0xF06595FFu, 0xFFE066FFu, 0xE599F7FFu,
     0x69DB7CFFu, 0xFF8787FFu, 0x38D9A9FFu, 0xFFC078FFu, 0x4DABF7FFu, 0xC0EB75FFu};
 static const Theme* theme(void) { int k = (int)set_[S_THEME]; return &THEMES[k < 0 || k > 5 ? 0 : k]; }
@@ -170,7 +195,8 @@ static float side_bend, side_tone;
 
 /* Where things are: worked out again whenever something changes. */
 static int cols = 3;
-static float cell = 50, gap = 4, left = 0;               /* cell: a row's pitch */
+static float cell = 50, gap = 4, left = 0;               /* cell: a key's pitch across */
+static float row_h = 50;                                   /* a row's pitch: cell, for squares */
 /* Split: a second grid across the top, its own part (sound). Each half is its own grid: where it
    is (top..bot, upright), which way its rows climb, its notes and its scroll. Unsplit, only the
    bottom one, the whole height. Everything below works on the current half, hv. */
@@ -190,7 +216,7 @@ typedef struct { int control; float x, y, w, h; int free; float cx, cy, s, a; } 
 static SideRect sides[MAX_SIDE];
 static int nsides;
 
-static int chromatic(void) { return hv->chrom; }
+static int SHARED chromatic(void) { return hv->chrom; }
 static int key(void) { return hv->key; }
 /* Unflipped, the notes climb right to left along each row (for the right hand) and rows climb up. */
 static int mirrored(void) { return set_[S_FLIP_X] == 0; }
@@ -202,7 +228,7 @@ static int columns(void) { return (int)set_[S_LAYOUT] == 1; }
 static int custom(void) { return (int)set_[S_LAYOUT] == 2; }
 /* Intervals: along each row the scale climbs a note at a time (on screen: left to right); each
    row is the interval above the one below it (on screen: the next row up). */
-static int intervals(void) { return (int)set_[S_LAYOUT] == 3; }
+static int SHARED intervals(void) { return (int)set_[S_LAYOUT] == 3; }
 static const int INTERVAL_SEMIS[5] = {4, 5, 7, 9, 12};      /* 3rds, 4ths, 5ths, 6ths, octaves */
 static int locked(void) { return set_[S_LOCK] != 0; }
 /* The Lock button only means something with the columns. */
@@ -271,10 +297,31 @@ static int index_of(int note);
 static int interval_step(void);
 static void keep(int index, double v);
 
+/* ---- the keys' shape: squares here, hexagons in hex.c (KEYS_HEX) ------------------------------- */
+/* The keys' size and place across the room gx..gx+gw: cell, gap, left and row_h. */
+static void fit(float gx, float gw);
+/* The current half's shift (kshift) that puts target (a MIDI note) in its middle, unscrolled. */
+static int shift_for(int target);
+static int in_scale(int note);
+static int note_at(int k);
+static int note_of(int k);
+static void clamp_pos(void);
+static float scroll_of(int c);
+static int column_at(float x);
+static int square_at(float x, float y);
+static float square_x(int k);
+static float square_y(int k);
+/* A note as it sounds, a MIDI note with fractions (a tuning's notes are its own steps). */
+static float pitch_of(int note);
+/* The note the Touch panel's square plays: the one nearest the middle of the instrument. */
+static int demo_note(void);
+static unsigned note_colour(int note);
+static void note_name(char* out, int note, int octave);
+
 static void layout(void) {
     cols = (int)set_[S_COLS];
     if (cols < 2) cols = 2;
-    if (cols > 8) cols = 8;
+    if (cols > KEYS_MAX_COLS) cols = KEYS_MAX_COLS;
     /* From the outside in, on each side: the scroll bar, then the strip of controls. */
     /* Up each column there is no scroll bar: each column is dragged on its own instead. */
     int nl = 0, nr = 0, bar = columns() ? SIDE_OFF : (int)set_[S_BAR];
@@ -293,13 +340,7 @@ static void layout(void) {
     }
     float gx = lw, gw = W - lw - rw;
     if (gw < 40) gw = 40;
-    /* Full size: the squares reach both edges, with the spacing for a margin: a row's pitch p,
-       its gap g*p, cols*p + g*p across. */
-    float g = clampf((float)set_[S_SPACING] / 100.0f, 0.02f, 0.3f);
-    float size = clampf((float)set_[S_SIZE] / 100.0f, 0.5f, 1);
-    cell = size * gw / ((float)cols + g);
-    gap = cell * g;
-    left = gx + (gw - (cell * (float)cols + gap)) / 2 + gap;
+    fit(gx, gw);
     /* Split: the line across at the top's share of the height, a little gap either side of it. */
     nhalves = split_on() ? 2 : 1;
     float line = H * clampf((float)set_[S_SPLIT_SIZE] / 100.0f, 0.2f, 0.8f), half_gap = gap > 6 ? gap : 6;
@@ -314,7 +355,7 @@ static void layout(void) {
         a->flip = bottom ? set_[S_FLIP_Y] != 0 : set_[S_TOP_WAY] == 0 ? set_[S_FLIP_Y] == 0 : set_[S_FLIP_Y] != 0;
         a->top = bottom ? (nhalves > 1 ? line + half_gap / 2 : 0) : 0;
         a->bot = bottom ? H : line - half_gap / 2;
-        a->shown = (a->bot - a->top) / cell;
+        a->shown = (a->bot - a->top) / row_h;
         a->mask = MASKS[sc < 0 || sc > 8 ? 0 : sc];
         a->ndeg = 0;
         for (int d = 0; d < 12; d++) if ((a->mask >> d) & 1) a->degs[a->ndeg++] = d;
@@ -322,11 +363,7 @@ static void layout(void) {
         /* At no scroll, the middle of the half holds the note nearest its instrument's middle. */
         float c = bottom || !have_top ? center[0] : center[1];
         int oct = (int)set_[S_OCTAVE] + (bottom ? 0 : (int)set_[S_TOP_OCTAVE]);
-        int target = roundi(c + 12.0f * (float)oct);
-        int mid = columns() ? (int)floorf_(a->shown / 2)
-                : intervals() ? (int)floorf_(a->shown / 2) + (cols / 2) * interval_step()
-                : (int)floorf_(a->shown / 2) * cols + cols / 2;
-        a->kshift = index_of(target) - mid;
+        a->kshift = shift_for(roundi(c + 12.0f * (float)oct));
     }
     hv = &halves[0];
     dirty = 1;
@@ -338,22 +375,6 @@ static int half_at(float y) {
     return y >= halves[0].top ? 0 : y <= halves[1].bot ? 1 : -1;
 }
 
-static int in_scale(int note) { return (hv->mask >> floormod(note - key(), 12)) & 1; }
-
-/* The notes in order: index k is the k-th note of the scale (or semitone) above the key's C-1. */
-static int note_at(int k) {
-    return chromatic() ? key() + k : key() + 12 * floordiv(k, hv->ndeg) + hv->degs[floormod(k, hv->ndeg)];
-}
-/* The index of a note, or of the nearest note of the scale at or below it. */
-static int index_of(int note) {
-    int rel = note - key();
-    if (chromatic()) return rel;
-    int oct = floordiv(rel, 12), d = floormod(rel, 12), i = 0;
-    for (int j = 0; j < hv->ndeg; j++) if (hv->degs[j] <= d) i = j;
-    return oct * hv->ndeg + i;
-}
-/* The note of square k (k counts along the rows from row 0, which is at the bottom unscrolled).
-   Up each column, the note is the row's alone: every column holds the same notes, scrolled its own way. */
 static void keep(int index, double v);
 /* Your own notes: square i's stored note (or CUST_ANY), and setting it. */
 static int cust_get(int i) {
@@ -375,14 +396,51 @@ static int cust_index(int k) {
 static int top_shift(void) { return half_index() == 1 ? 12 * (int)set_[S_TOP_OCTAVE] : 0; }
 
 /* Intervals: how many notes of the scale (or semitones) apart the rows are. */
-static int interval_step(void) {
+static int SHARED interval_step(void) {
     int i = (int)set_[S_INTERVAL];
     int semis = INTERVAL_SEMIS[i < 0 || i > 4 ? 2 : i];
     int s = index_of(key() + semis) - index_of(key());
     return s < 1 ? 1 : s;
 }
 
-/* The note of square k, or -1 for none (Custom, outside its 16 rows). */
+#ifndef KEYS_HEX
+/* Full size: the squares reach both edges, with the spacing for a margin: a row's pitch p, its gap
+   g*p, cols*p + g*p across. */
+static void fit(float gx, float gw) {
+    float g = clampf((float)set_[S_SPACING] / 100.0f, 0.02f, 0.3f);
+    float size = clampf((float)set_[S_SIZE] / 100.0f, 0.5f, 1);
+    cell = size * gw / ((float)cols + g);
+    gap = cell * g;
+    left = gx + (gw - (cell * (float)cols + gap)) / 2 + gap;
+    row_h = cell;
+}
+
+static int shift_for(int target) {
+    int mid = columns() ? (int)floorf_(hv->shown / 2)
+            : intervals() ? (int)floorf_(hv->shown / 2) + (cols / 2) * interval_step()
+            : (int)floorf_(hv->shown / 2) * cols + cols / 2;
+    return index_of(target) - mid;
+}
+
+static int in_scale(int note) { return (hv->mask >> floormod(note - key(), 12)) & 1; }
+
+/* The notes in order: index k is the k-th note of the scale (or semitone) above the key's C-1. */
+static int note_at(int k) {
+    return chromatic() ? key() + k : key() + 12 * floordiv(k, hv->ndeg) + hv->degs[floormod(k, hv->ndeg)];
+}
+/* The index of a note, or of the nearest note of the scale at or below it. */
+static int index_of(int note) {
+    int rel = note - key();
+    if (chromatic()) return rel;
+    int oct = floordiv(rel, 12), d = floormod(rel, 12), i = 0;
+    for (int j = 0; j < hv->ndeg; j++) if (hv->degs[j] <= d) i = j;
+    return oct * hv->ndeg + i;
+}
+static float pitch_of(int note) { return (float)note; }
+
+/* The note of square k (k counts along the rows from row 0, which is at the bottom unscrolled), or
+   -1 for none (Custom, outside its 16 rows). Up each column, the note is the row's alone: every
+   column holds the same notes, scrolled its own way. */
 static int note_of(int k) {
     if (intervals()) {
         /* k counts along the upright rows (the screen's columns): its upright row is the place along
@@ -454,6 +512,7 @@ static int beside(int k, int dir) {
     if (sc < 0 || sc >= cols) return k + along * cols;
     return square_at(left + (float)sc * cell + (cell - gap) / 2, square_y(k) + (cell - gap) / 2);
 }
+#endif
 
 /* ---- fingers and their notes ------------------------------------------------------------------ */
 typedef struct {
@@ -463,8 +522,54 @@ typedef struct {
     float ux, uy;                 /* the way it wiggles, learnt as it goes (a unit vector, either sign) */
     float glide;                  /* sliding with a glide: semitones toward the squares beside it */
     float strike;                 /* how loud it started */
+    float press0, press;          /* how big or hard the touch was when it came down, and is now */
 } Finger;
 #define DEMO_N (-99999)           /* the square in the Touch panel, not one of the grid's */
+/* The touch now being handled: its size, or its force when the MESH has that (0: neither). */
+static float touch_press;
+
+/* The keys' shape, again: the note a bend aims at, sliding out of finger f's key across (1) or up
+   and down (0), toward dir (1: right or up, upright); and with Slide between notes' glide, how far
+   toward the keys around it the finger at (x, y) on key n has moved the note, in semitones. */
+static int bend_to(const Finger* f, int across, int dir);
+static float glide_semis(const Finger* f, int n, float x, float y, float g);
+
+/* Sliding with a glide: none of the way in the middle of the square, half at the border, all of it
+   at the next square's middle. Glide 1: evenly; less: held on the note longer, the move squeezed
+   toward the border. */
+static float glide_curve(float t, float g) { return g >= 0.995f ? t : clampf((t - (1 - g) / 2) / g, 0, 1); }
+
+#ifndef KEYS_HEX
+static int bend_to(const Finger* f, int across, int dir) {
+    /* The panel's square: the next note of the scale, the way the grid's own squares would go
+       (across: as beside() runs, mirrored or not; up and down: as the rows climb). */
+    if (f->n == DEMO_N) return note_at(index_of(f->note) + (across ? (mirrored() ? -dir : dir) : (flipped_y() ? -dir : dir)));
+    /* Toward the note you drag to: across, the next square or the one before (unflipped the next
+       is to the left); up and down, the row above or below. */
+    return across ? note_of(beside(f->n, dir)) : note_of(f->n + dir * (flipped_y() ? -cols : cols));
+}
+
+static float glide_semis(const Finger* f, int n, float x, float y, float g) {
+    float half_ = (cell - gap) / 2;
+    float du = (x - (f->rx + half_)) / cell, dv = (y - (f->ry + half_)) / cell;
+    float semis = 0;
+    /* across the upright grid (on screen: up and down): the square beside it */
+    int across = beside(n, du >= 0 ? 1 : -1);
+    if (set_[S_GLIDE_UD] != 0 && note_of(across) >= 0) semis += glide_curve(absf(du), g) * (float)(note_of(across) - f->note);
+    /* up and down the upright grid (on screen: left and right): the next row */
+    int row = n + ((dv >= 0) != (flipped_y() != 0) ? -cols : cols);
+    if (set_[S_GLIDE_LR] != 0 && note_of(row) >= 0) semis += glide_curve(absf(dv), g) * (float)(note_of(row) - f->note);
+    return semis;
+}
+
+static int demo_note(void) {
+    Half* was = hv;
+    hv = &halves[0];
+    int note = note_at(index_of(roundi(center[0] + 12.0f * (float)set_[S_OCTAVE])));
+    hv = was;
+    return note < 0 ? 0 : note > 127 ? 127 : note;
+}
+#endif
 static Finger fingers[MAX_FINGERS];
 /* Notes left sounding after their fingers lifted (latch, or hold), oldest first. */
 static Finger latched[MAX_VOICES];
@@ -520,6 +625,15 @@ static float tone_at(const Finger* f, float y) {
 
 typedef struct { float pitch, pressure, slide, volume; } Expr;
 
+/* What a key's shape adds to how a finger plays: the Hex keyboard takes a touch's size or force as
+   pressure, and as how hard it struck. Squares: nothing. */
+static void press_shape(const Finger* f, Expr* e);
+static void press_strike(Finger* f);
+#ifndef KEYS_HEX
+static void press_shape(const Finger* f, Expr* e) { (void)f; (void)e; }
+static void press_strike(Finger* f) { (void)f; }
+#endif
+
 /* The two ways out of a square, from how far the finger (slowly) is past the line round it;
    vibrato from the rest. Loudness, tone and volume reach their full change half a square past it
    (or as sensitive as set); bend aims at the neighbouring note, a whole square past. */
@@ -551,13 +665,9 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
         if (range > 0) { *semis += (v >= 0 ? range : -range) * amount; break; }
         /* Toward the note you drag to: across, the next square or the one before (unflipped the
            next is to the left); up and down, the row above or below. */
-        int dir = v >= 0 ? 1 : -1;
-        /* The panel's square: the next note of the scale, the way the grid's own squares would go
-           (across: as beside() runs, mirrored or not; up and down: as the rows climb). */
-        int to = f->n == DEMO_N ? note_at(index_of(f->note) + (across ? (mirrored() ? -dir : dir) : (flipped_y() ? -dir : dir)))
-               : across ? note_of(beside(f->n, dir)) : note_of(f->n + dir * (flipped_y() ? -cols : cols));
+        int to = bend_to(f, across, v >= 0 ? 1 : -1);
         if (to < 0) to = f->note;
-        *semis += (float)(to - f->note) * amount;
+        *semis += (pitch_of(to) - pitch_of(f->note)) * amount;
         break;
     }
     case T_VOLUME: e->volume = clampf(0.7f + (w >= 0 ? 0.3f : 0.7f) * w, 0, 1); break;   /* both ways, from 0.7 */
@@ -601,6 +711,7 @@ static Expr expression_in(const Finger* f) {
         float base = floorf_(semis), t = semis - base;
         semis = base + (g < 0.005f ? (t < 0.5f ? 0 : 1) : clampf((t - (1 - g) / 2) / g, 0, 1));
     }
+    press_shape(f, &e);
     /* The Dynamics fader: an expression pedal over every note. */
     float dyn = clampf((float)set_[S_DYN], 0, 1);
     e.volume *= dyn;
@@ -616,7 +727,7 @@ static Expr expression_in(const Finger* f) {
         float h = along > th ? along - th : along < -th ? along + th : 0;
         semis += clampf(h * 0.08f * depth / 0.5f * sens, -depth, depth);
     }
-    e.pitch = (float)f->note + semis + f->glide;
+    e.pitch = pitch_of(f->note) + semis + f->glide;
     return e;
 }
 
@@ -686,7 +797,9 @@ static void down_in(int id, float x, float y, int h) {
     f->x0 = f->x = f->sx = x; f->y0 = f->y = f->sy = y;
     f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
     f->ux = 1; f->uy = 0; f->glide = 0;
+    f->press0 = f->press = touch_press;
     f->strike = level_at(f, x, y);
+    press_strike(f);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
@@ -700,9 +813,7 @@ static void down_in(int id, float x, float y, int h) {
 /* Sliding with a glide (as the touch pad's): one note follows the finger. Its square is the one
    under it (its note, and its dynamics); toward the square beside it, each way, the pitch moves
    toward that square's note: none of the way in the middle of the square, half at the border, all
-   of it at the next square's middle. Glide 1: evenly; less: held on the note longer, the move
-   squeezed toward the border. */
-static float glide_curve(float t, float g) { return g >= 0.995f ? t : clampf((t - (1 - g) / 2) / g, 0, 1); }
+   of it at the next square's middle (glide_curve, glide_semis). */
 static void glide_to(Finger* f, float x, float y) {
     float g = clampf((float)set_[S_GLIDE], 0.05f, 1);
     Half* was = hv;
@@ -713,16 +824,7 @@ static void glide_to(Finger* f, float x, float y) {
             f->n = n; f->note = note_of(n);
             f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
         }
-        float half_ = (cell - gap) / 2;
-        float du = (x - (f->rx + half_)) / cell, dv = (y - (f->ry + half_)) / cell;
-        float semis = 0;
-        /* across the upright grid (on screen: up and down): the square beside it */
-        int across = beside(n, du >= 0 ? 1 : -1);
-        if (set_[S_GLIDE_UD] != 0 && note_of(across) >= 0) semis += glide_curve(absf(du), g) * (float)(note_of(across) - f->note);
-        /* up and down the upright grid (on screen: left and right): the next row */
-        int row = n + ((dv >= 0) != (flipped_y() != 0) ? -cols : cols);
-        if (set_[S_GLIDE_LR] != 0 && note_of(row) >= 0) semis += glide_curve(absf(dv), g) * (float)(note_of(row) - f->note);
-        f->glide = semis;
+        f->glide = glide_semis(f, n, x, y, g);
     }
     hv = was;
     dirty = 1;
@@ -748,7 +850,9 @@ static void slide_to(Finger* f, float x, float y) {
     f->x0 = f->sx = x; f->y0 = f->sy = y;
     f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
     f->glide = 0;
+    f->press0 = f->press = touch_press;
     f->strike = level_at(f, x, y);
+    press_strike(f);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     hv = was;
     Expr e = expression(f);
@@ -901,7 +1005,7 @@ static void side_drag(SideTouch* s, float at) {
 /* The scroll bar: the rows follow the finger, as a list does. */
 /* Split, each half's part of the bar scrolls that half. */
 static void bar_drag(SideTouch* s, float y) {
-    float rows = (y - s->y) / cell;
+    float rows = (y - s->y) / row_h;
     hv = &halves[s->half];
     hv->pos = s->start + (flipped_y() ? -rows : rows);
     hv = &halves[0];
@@ -912,7 +1016,7 @@ static void bar_drag(SideTouch* s, float y) {
 /* Up each column, unlocked: the column follows the finger, and settles on a whole row when let go
    (so the rows line up across). */
 static void col_drag(SideTouch* s, float y) {
-    float rows = (y - s->y) / cell;
+    float rows = (y - s->y) / row_h;
     hv = &halves[s->half];
     hv->colpos[s->col] = s->start + (flipped_y() ? -rows : rows);
     hv = &halves[0];
@@ -1299,7 +1403,7 @@ static float range_slider(float x, float y, float w, const Theme* th) {
     unsigned ink = eink ? BLACK : th->light;
     float lo = dyn_low(), hi = dyn_high();
     char a[40], b[40];
-    put(put_int(put(a, "Bottom of a square "), roundi(lo * 100), 0), "%");
+    put(put_int(put(a, "Bottom of a " CELL " "), roundi(lo * 100), 0), "%");
     put(put_int(put(b, "Top "), roundi(hi * 100), 0), "%");
     mesh_text(x, y + 13, 11, ink, MESH_TEXT_BOLD, a);
     mesh_text(x + w, y + 13, 11, ink, MESH_TEXT_RIGHT | MESH_TEXT_BOLD, b);
@@ -1334,7 +1438,7 @@ static float section(float x, float y, const char* title, const Theme* th) {
 /* What sliding out of a square one way does: axis 0 left/right (positive: right), 1 up/down
    (positive: down). */
 static const char* arrow_word(int axis, int positive) {
-    if (sliding()) return "the next square";
+    if (sliding()) return "the next " CELL;
     int t = (int)set_[axis ? S_ACROSS : S_UPDOWN];
     int more = positive != (set_[axis ? S_AX_FLIP : S_UD_FLIP] != 0);
     switch (t) {
@@ -1408,11 +1512,11 @@ static float demo_part(float x, float y, float cw, const Theme* th) {
         p = put(p, "%   Tone ");
         p = put(p, e.slide > 0.52f ? "brighter" : e.slide < 0.48f ? "darker" : "middle");
         p = put(p, "   Pitch ");
-        int c = roundi((e.pitch - (float)f->note) * 100);
+        int c = roundi((e.pitch - pitch_of(f->note)) * 100);
         p = put_int(p, c, 1);
         put(p, " cents");
         mesh_text(x + cw / 2, y2 + 12, 12, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, line);
-    } else mesh_text(x + cw / 2, y2 + 12, 11, mesh_alpha(ink, 0.7f), MESH_TEXT_CENTER, "Play the square: press, move, wiggle, slide out");
+    } else mesh_text(x + cw / 2, y2 + 12, 11, mesh_alpha(ink, 0.7f), MESH_TEXT_CENTER, "Play the " CELL ": press, move, wiggle, slide out");
     return y2 + 26;
 }
 
@@ -1434,13 +1538,13 @@ static void ed_draw(const Theme* th) {
     {
         float hw = (cw - 6) / 2;
         int in = set_[S_INSIDE_ON] != 0, out = set_[S_OUT_ON] != 0;
-        chip(x, y, hw, 30, in ? "Inside a square: on" : "Inside a square: off", in, th, K_INSIDE_ON, 0);
+        chip(x, y, hw, 30, in ? "Inside a " CELL ": on" : "Inside a " CELL ": off", in, th, K_INSIDE_ON, 0);
         chip(x + hw + 6, y, hw, 30, out ? "Sliding out: on" : "Sliding out: off", out, th, K_OUT_ON, 0);
         y += 38;
     }
     {
         y = demo_part(x, y, cw, th);
-        y = section(x, y, "INSIDE A SQUARE", th);
+        y = section(x, y, "INSIDE A " CELL_UPPER, th);
         int dyn = set_[S_IN_DYN] != 0, tone = set_[S_IN_TONE] != 0;
         float hw = (cw - 6) / 2;
         chip(x, y, hw, 30, dyn ? "Up/down: dynamics" : "Up/down: off", dyn, th, K_INSIDE, 0);
@@ -1458,7 +1562,7 @@ static void ed_draw(const Theme* th) {
         if (sliding_) {
             y = section(x, y, "SLIDING OUT", th);
             mesh_text(x, y + 10, 11, mesh_alpha(ink, 0.8f), 0, set_[S_GLIDE] > 0.001 ? "Sliding between notes: one note glides to the next square's."
-                                                                                   : "Sliding between notes: out of a square, the next one plays.");
+                                                                                   : "Sliding between notes: out of a " CELL ", the next one plays.");
             y += 22;
             y = slider(x, y, cw, SL_GLIDE, th);
             if (set_[S_GLIDE] > 0.001) {
@@ -1497,7 +1601,7 @@ static void ed_draw(const Theme* th) {
     mesh_rect(px, py + ph, pw, SH - py - ph, 0, eink ? WHITE : 0x000000FFu, 0, 0);
     mesh_rect(px, py, pw, ph, 16, 0, mesh_alpha(ink, 0.6f), 1.5f);
     mesh_text(px + 18, py + 30, 17, ink, MESH_TEXT_BOLD, "Touch");
-    mesh_text(px + 18, py + 47, 10, mesh_alpha(ink, 0.7f), 0, ed_content > ed_room ? "How a square answers your finger. Drag to scroll" : "How a square answers your finger");
+    mesh_text(px + 18, py + 47, 10, mesh_alpha(ink, 0.7f), 0, ed_content > ed_room ? "How a " CELL " answers your finger. Drag to scroll" : "How a " CELL " answers your finger");
     /* Hits under the header or foot can't be touched; Done always can. */
     int k = 0;
     for (int j = 0; j < nhits; j++) if (hits[j].y + hits[j].h > top && hits[j].y < bottom) hits[k++] = hits[j];
@@ -1512,7 +1616,7 @@ static void ed_touch(int id, int phase, float x, float y) {
     Finger* df = find(id);
     if (df && df->n == DEMO_N) {
         /* the square being played: as a finger on the grid, kept upright */
-        if (phase == MESH_MOVE) { df->x = y; df->y = H - x; send(df); }
+        if (phase == MESH_MOVE) { df->x = y; df->y = H - x; df->press = touch_press; send(df); }
         else if (phase != MESH_DOWN) up(id);
         dirty = 1;
         return;
@@ -1563,16 +1667,14 @@ static void demo_down(int id, float x, float y) {
     Finger* f = 0;
     for (int j = 0; j < MAX_FINGERS; j++) if (!fingers[j].used) { f = &fingers[j]; break; }
     if (!f || nfingers() + nlatched >= MAX_VOICES) return;
-    Half* was = hv;
-    hv = &halves[0];
-    int note = note_at(index_of(roundi(center[0] + 12.0f * (float)set_[S_OCTAVE])));
-    hv = was;
     f->used = 1; f->id = id; f->voice = next_voice++; f->n = DEMO_N; f->half = 0;
-    f->note = note < 0 ? 0 : note > 127 ? 127 : note;
+    f->note = demo_note();
     f->x0 = f->x = f->sx = y; f->y0 = f->y = f->sy = H - x;     /* upright, as every finger */
     f->rx = te_y; f->ry = H - te_x - te_s; f->rs = te_s;
     f->ux = 1; f->uy = 0; f->glide = 0;
+    f->press0 = f->press = touch_press;
     f->strike = level_at(f, f->x, f->y);
+    press_strike(f);
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);
     mesh_note_on(f->voice, 0, e.pitch, e.pressure, e.slide, f->strike, now);
@@ -1703,6 +1805,7 @@ static int ne_touch(int id, int phase, float x, float y) {
     return 1;
 }
 
+#ifndef KEYS_HEX
 /* The colour a note is marked with, or 0 to use the theme's. */
 static unsigned note_colour(int note) {
     int scheme = (int)set_[S_COLOURS], iv = floormod(note - key(), 12);
@@ -1715,6 +1818,7 @@ static unsigned note_colour(int note) {
     default: return 0;
     }
 }
+#endif
 
 /* Square n of the current half: held, latched, its fading light. */
 static int is_held(int n) {
@@ -1729,7 +1833,7 @@ static float glow_of(int n) {
 }
 
 /* A rectangle cut to the current half, so a square never reaches across the split line. */
-static void c_rect(float x, float y, float w, float h, float r, unsigned fill, unsigned stroke, float sw) {
+static void SHARED c_rect(float x, float y, float w, float h, float r, unsigned fill, unsigned stroke, float sw) {
     if (nhalves > 1) {
         float t = hv->top, b = hv->bot;
         if (y < t) { h -= t - y; y = t; }
@@ -1739,8 +1843,13 @@ static void c_rect(float x, float y, float w, float h, float r, unsigned fill, u
     }
     g_rect(x, y, w, h, r, fill, stroke, sw);
 }
-static int in_half(float y) { return y >= hv->top && y <= hv->bot; }
+static int SHARED in_half(float y) { return y >= hv->top && y <= hv->bot; }
 
+/* The keys' shape, again: drawing them and the scroll bar beside them. */
+static void draw_keys(const Theme* th);
+static void draw_bar(const Theme* th);
+
+#ifndef KEYS_HEX
 static void note_name(char* out, int note, int octave) {
     char* p = put(out, NAMES[note % 12]);
     if (octave) put_int(p, note / 12 - 1, 0);
@@ -1775,13 +1884,8 @@ static void draw_bar(const Theme* th) {
 }
 
 /* Lit outlines on squares a shade apart from the background; a sounding square full of light. */
-static void draw(void) {
-    layout();
-    clamp_pos();
-    const Theme* th = theme();
+static void draw_keys(const Theme* th) {
     int flat = eink;
-    mesh_begin();
-    g_clear(flat ? WHITE : th->background);
     float radius = cell * 0.08f, side = cell - gap;
     unsigned light = flat ? BLACK : th->light;
     /* The pitches sounding now (held or latched), for marking the same notes elsewhere. */
@@ -1867,6 +1971,17 @@ static void draw(void) {
         float y = (halves[1].bot + halves[0].top) / 2;
         g_line(left - gap / 2, y, left + cell * (float)cols - gap / 2, y, mesh_alpha(flat ? BLACK : th->hot, 0.6f), 2);
     }
+}
+#endif
+
+static void draw(void) {
+    layout();
+    clamp_pos();
+    const Theme* th = theme();
+    int flat = eink;
+    mesh_begin();
+    g_clear(flat ? WHITE : th->background);
+    draw_keys(th);
     /* A halo that follows each finger. */
     if (!flat && !th->bright)
         for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used)
@@ -1918,7 +2033,7 @@ MESH_EXPORT(setting) void setting(int index, double value) {
 }
 
 MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, float force, double t) {
-    (void)size; (void)force;
+    touch_press = force > 0 ? force : size > 0 ? size : 0;
     now = t;
     /* The Touch panel takes every touch while it is open, on the surface as it is. */
     if (editing()) { ed_touch(id + 1, phase, x, y); dirty = 1; return; }
@@ -1955,7 +2070,7 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
         }
         Finger* f = find(id);
         if (!f) return;
-        f->x = x; f->y = y;
+        f->x = x; f->y = y; f->press = touch_press;
         if (sliding() && !note_editing()) { if (set_[S_GLIDE] > 0.001) glide_to(f, x, y); else slide_to(f, x, y); }
         send(f);
     } else {

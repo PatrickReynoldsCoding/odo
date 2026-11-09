@@ -1,0 +1,1186 @@
+{
+  "format": 1,
+  "id": "patrickreynolds/hex",
+  "version": "1.0.0",
+  "name": "Hex",
+  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to bend, wiggle for vibrato; press harder for pressure",
+  "author": "Patrick Reynolds",
+  "licence": "MIT",
+  "needs": {
+    "fingers": 10,
+    "touchSize": false
+  },
+  "orientation": "landscape",
+  "parts": [
+    "Left",
+    "Right"
+  ],
+  "partsFrom": "split",
+  "arp": "app",
+  "settings": [
+    {
+      "id": "cols",
+      "name": "Keys top to bottom",
+      "type": "number",
+      "min": 3,
+      "max": 16,
+      "step": 1,
+      "default": 5,
+      "group": "Layout"
+    },
+    {
+      "id": "layout",
+      "name": "Mode",
+      "type": "choice",
+      "options": [
+        "Wrap",
+        "Sliding rows",
+        "Custom",
+        "Intervals"
+      ],
+      "default": 0,
+      "group": "Layout",
+      "hidden": true
+    },
+    {
+      "id": "scrollLock",
+      "name": "Lock row scrolling",
+      "type": "switch",
+      "default": true,
+      "group": "Layout",
+      "showIf": {
+        "layout": 1
+      },
+      "hidden": true
+    },
+    {
+      "id": "split",
+      "name": "Second keyboard on the right",
+      "type": "switch",
+      "default": false,
+      "group": "Second keyboard"
+    },
+    {
+      "id": "splitSize",
+      "name": "Right keyboard's share (%)",
+      "type": "number",
+      "min": 20,
+      "max": 80,
+      "step": 5,
+      "default": 50,
+      "group": "Second keyboard",
+      "showIf": {
+        "split": true
+      }
+    },
+    {
+      "id": "topWay",
+      "name": "Right keyboard: rows",
+      "type": "choice",
+      "options": [
+        "Mirrored",
+        "Same way round"
+      ],
+      "default": 0,
+      "group": "Second keyboard",
+      "showIf": {
+        "split": true
+      }
+    },
+    {
+      "id": "topNotes",
+      "name": "Right grid: notes",
+      "type": "choice",
+      "options": [
+        "Same as left",
+        "The scale's notes",
+        "Chromatic"
+      ],
+      "default": 0,
+      "group": "Second keyboard",
+      "showIf": {
+        "split": true
+      },
+      "hidden": true
+    },
+    {
+      "id": "topScale",
+      "name": "Right keyboard: scale",
+      "type": "choice",
+      "options": [
+        "Same as left",
+        "Major",
+        "Minor",
+        "Dorian",
+        "Mixolydian",
+        "Harmonic minor",
+        "Pentatonic major",
+        "Pentatonic minor",
+        "Blues",
+        "Chromatic"
+      ],
+      "default": 0,
+      "group": "Second keyboard",
+      "showIf": {
+        "split": true
+      }
+    },
+    {
+      "id": "topKey",
+      "name": "Right keyboard: key",
+      "type": "choice",
+      "options": [
+        "Same as left",
+        "C",
+        "C♯",
+        "D",
+        "E♭",
+        "E",
+        "F",
+        "F♯",
+        "G",
+        "A♭",
+        "A",
+        "B♭",
+        "B"
+      ],
+      "default": 0,
+      "group": "Second keyboard",
+      "showIf": {
+        "split": true
+      }
+    },
+    {
+      "id": "topOctave",
+      "name": "Right keyboard: octave (from left's)",
+      "type": "number",
+      "min": -3,
+      "max": 3,
+      "step": 1,
+      "default": 0,
+      "group": "Second keyboard",
+      "showIf": {
+        "split": true
+      }
+    },
+    {
+      "id": "squareSize",
+      "name": "Key size (%)",
+      "type": "number",
+      "min": 50,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "group": "Layout"
+    },
+    {
+      "id": "spacing",
+      "name": "Spacing (%)",
+      "type": "number",
+      "min": 2,
+      "max": 30,
+      "step": 1,
+      "default": 9,
+      "group": "Layout"
+    },
+    {
+      "id": "flipAcross",
+      "name": "Flip up/down",
+      "type": "switch",
+      "default": false,
+      "group": "Layout"
+    },
+    {
+      "id": "flipUpDown",
+      "name": "Flip left/right",
+      "type": "switch",
+      "default": false,
+      "group": "Layout"
+    },
+    {
+      "id": "chromatic",
+      "name": "Notes",
+      "type": "choice",
+      "options": [
+        "The scale's notes",
+        "Chromatic"
+      ],
+      "default": 1,
+      "group": "Notes",
+      "hidden": true
+    },
+    {
+      "id": "scale",
+      "name": "Scale",
+      "type": "choice",
+      "options": [
+        "Major",
+        "Minor",
+        "Dorian",
+        "Mixolydian",
+        "Harmonic minor",
+        "Pentatonic major",
+        "Pentatonic minor",
+        "Blues",
+        "Chromatic"
+      ],
+      "default": 0,
+      "group": "Notes"
+    },
+    {
+      "id": "key",
+      "name": "Key",
+      "type": "choice",
+      "options": [
+        "C",
+        "C♯",
+        "D",
+        "E♭",
+        "E",
+        "F",
+        "F♯",
+        "G",
+        "A♭",
+        "A",
+        "B♭",
+        "B"
+      ],
+      "default": 0,
+      "group": "Notes"
+    },
+    {
+      "id": "octave",
+      "name": "Octave",
+      "type": "number",
+      "min": -3,
+      "max": 3,
+      "step": 1,
+      "default": 0,
+      "group": "Notes"
+    },
+    {
+      "id": "xTarget",
+      "name": "Slide out up/down",
+      "type": "choice",
+      "options": [
+        "Nothing",
+        "Loudness",
+        "Tone",
+        "Bend",
+        "Volume"
+      ],
+      "default": 3,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "yTarget",
+      "name": "Slide out left/right",
+      "type": "choice",
+      "options": [
+        "Nothing",
+        "Loudness",
+        "Tone",
+        "Bend",
+        "Volume"
+      ],
+      "default": 2,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "bendRange",
+      "name": "Bend range",
+      "type": "choice",
+      "options": [
+        "Next note",
+        "±1",
+        "±2",
+        "±3",
+        "±5",
+        "±7",
+        "±12"
+      ],
+      "default": 0,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "bendSnap",
+      "name": "Bend snap (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 0,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "touchEdit",
+      "name": "Touch: dynamics, slides, vibrato",
+      "type": "switch",
+      "default": false,
+      "group": "Touch",
+      "panel": true
+    },
+    {
+      "id": "insideDyn",
+      "name": "Up/down in a key: dynamics",
+      "type": "switch",
+      "default": true,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "dynLow",
+      "name": "Loudness at the bottom of a key (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 30,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "vibrato",
+      "name": "Vibrato",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Light",
+        "Normal",
+        "Wide"
+      ],
+      "default": 2,
+      "group": "Touch"
+    },
+    {
+      "id": "labels",
+      "name": "Note names",
+      "type": "switch",
+      "default": true,
+      "group": "Look"
+    },
+    {
+      "id": "theme",
+      "name": "Look",
+      "type": "choice",
+      "options": [
+        "Neon",
+        "Ember",
+        "Ice",
+        "Violet",
+        "Sunset",
+        "Paper"
+      ],
+      "default": 0,
+      "group": "Look"
+    },
+    {
+      "id": "colours",
+      "name": "Colours",
+      "type": "choice",
+      "options": [
+        "Plain",
+        "Every degree",
+        "Chord tones",
+        "Root, 4th, 5th",
+        "By note name",
+        "White keys",
+        "Sharps and flats",
+        "Rainbow",
+        "Distance from the key"
+      ],
+      "default": 6,
+      "group": "Look"
+    },
+    {
+      "id": "sameNotes",
+      "name": "Same notes elsewhere",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Ring",
+        "Glow"
+      ],
+      "default": 1,
+      "group": "Look"
+    },
+    {
+      "id": "latch",
+      "name": "Latch",
+      "type": "switch",
+      "default": false,
+      "group": "Playing"
+    },
+    {
+      "id": "latchMode",
+      "name": "Latch: the next touch",
+      "type": "choice",
+      "options": [
+        "New hand replaces",
+        "Tap on, tap off"
+      ],
+      "default": 0,
+      "group": "Playing",
+      "showIf": {
+        "latch": true
+      }
+    },
+    {
+      "id": "scrollBar",
+      "name": "Scroll bar",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 2,
+      "group": "Controls",
+      "showIf": {
+        "layout": [
+          0,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "sideLatch",
+      "name": "Latch button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 1,
+      "group": "Controls"
+    },
+    {
+      "id": "sideHold",
+      "name": "Hold button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "sideBend",
+      "name": "Bend slider",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "sideTone",
+      "name": "Tone slider",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "sideDyn",
+      "name": "Dynamics fader",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 1,
+      "group": "Controls"
+    },
+    {
+      "id": "sideLock",
+      "name": "Lock button (rows)",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 2,
+      "group": "Controls",
+      "showIf": {
+        "layout": 1
+      },
+      "hidden": true
+    },
+    {
+      "id": "vibSense",
+      "name": "Wiggle sensitivity (%)",
+      "type": "number",
+      "min": 25,
+      "max": 400,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "dynamics",
+      "name": "Dynamics",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0,
+      "default": 1,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "acrossAmount",
+      "name": "Up/down strength (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "acrossSensitivity",
+      "name": "Up/down sensitivity (%)",
+      "type": "number",
+      "min": 25,
+      "max": 400,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "acrossFlip",
+      "name": "Up/down: up is more",
+      "type": "switch",
+      "default": false,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "upDownAmount",
+      "name": "Left/right strength (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "upDownSensitivity",
+      "name": "Left/right sensitivity (%)",
+      "type": "number",
+      "min": 25,
+      "max": 400,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "upDownFlip",
+      "name": "Left/right: left is more",
+      "type": "switch",
+      "default": false,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "slide",
+      "name": "Slide between notes",
+      "type": "switch",
+      "default": false,
+      "group": "Touch"
+    },
+    {
+      "id": "noteEdit",
+      "name": "Edit custom notes",
+      "type": "switch",
+      "default": false,
+      "group": "Layout",
+      "showIf": {
+        "layout": 2
+      },
+      "hidden": true
+    },
+    {
+      "id": "notes0",
+      "name": "Your own notes 1",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes1",
+      "name": "Your own notes 2",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes2",
+      "name": "Your own notes 3",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes3",
+      "name": "Your own notes 4",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes4",
+      "name": "Your own notes 5",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes5",
+      "name": "Your own notes 6",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes6",
+      "name": "Your own notes 7",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes7",
+      "name": "Your own notes 8",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes8",
+      "name": "Your own notes 9",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes9",
+      "name": "Your own notes 10",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes10",
+      "name": "Your own notes 11",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes11",
+      "name": "Your own notes 12",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes12",
+      "name": "Your own notes 13",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes13",
+      "name": "Your own notes 14",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes14",
+      "name": "Your own notes 15",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes15",
+      "name": "Your own notes 16",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes16",
+      "name": "Your own notes 17",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes17",
+      "name": "Your own notes 18",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes18",
+      "name": "Your own notes 19",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes19",
+      "name": "Your own notes 20",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes20",
+      "name": "Your own notes 21",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "notes21",
+      "name": "Your own notes 22",
+      "type": "number",
+      "min": 0,
+      "max": 281474976710655,
+      "step": 1,
+      "default": 281474976710655,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "dynHigh",
+      "name": "Loudness at the top of a key (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "interval",
+      "name": "Interval",
+      "type": "choice",
+      "options": [
+        "3rds",
+        "4ths",
+        "5ths",
+        "6ths",
+        "Octaves"
+      ],
+      "default": 2,
+      "group": "Layout",
+      "showIf": {
+        "layout": 3
+      },
+      "hidden": true
+    },
+    {
+      "id": "insideTone",
+      "name": "Left/right in a key: tone",
+      "type": "switch",
+      "default": true,
+      "hidden": true,
+      "group": "Touch"
+    },
+    {
+      "id": "slideGlide",
+      "name": "Glide",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0,
+      "group": "Touch",
+      "showIf": {
+        "slide": true
+      }
+    },
+    {
+      "id": "glideLR",
+      "name": "Glide left/right",
+      "type": "switch",
+      "default": true,
+      "group": "Touch",
+      "showIf": {
+        "slide": true
+      }
+    },
+    {
+      "id": "glideUD",
+      "name": "Glide up/down",
+      "type": "switch",
+      "default": true,
+      "group": "Touch",
+      "showIf": {
+        "slide": true
+      }
+    },
+    {
+      "id": "flip90",
+      "name": "Flip 90°",
+      "type": "switch",
+      "default": false,
+      "group": "Layout"
+    },
+    {
+      "id": "slideOnly",
+      "name": "Only slide between notes",
+      "type": "switch",
+      "default": false,
+      "group": "Touch"
+    },
+    {
+      "id": "sideSlide",
+      "name": "Slide only button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "place0",
+      "name": "Moved control 1",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place1",
+      "name": "Moved control 2",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place2",
+      "name": "Moved control 3",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place3",
+      "name": "Moved control 4",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place4",
+      "name": "Moved control 5",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place5",
+      "name": "Moved control 6",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place6",
+      "name": "Moved control 7",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "placeReset",
+      "name": "Put moved controls back",
+      "type": "switch",
+      "default": false,
+      "group": "Controls"
+    },
+    {
+      "id": "moveControls",
+      "name": "Move controls with two fingers",
+      "type": "switch",
+      "default": true,
+      "group": "Controls"
+    },
+    {
+      "id": "insideOn",
+      "name": "Inside a key (dynamics, tone)",
+      "type": "switch",
+      "default": true,
+      "group": "Touch"
+    },
+    {
+      "id": "outOn",
+      "name": "Sliding out past a key",
+      "type": "switch",
+      "default": true,
+      "group": "Touch"
+    },
+    {
+      "id": "sideInside",
+      "name": "Inside button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "sideOut",
+      "name": "Slide out button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 0,
+      "group": "Controls"
+    },
+    {
+      "id": "place7",
+      "name": "Moved control 8",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "place8",
+      "name": "Moved control 9",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
+    },
+    {
+      "id": "hexLayout",
+      "name": "Note layout",
+      "type": "choice",
+      "options": [
+        "Wicki-Hayden",
+        "Harmonic table",
+        "Bosanquet",
+        "Your own steps"
+      ],
+      "default": 0,
+      "group": "Layout"
+    },
+    {
+      "id": "tuning",
+      "name": "Tuning",
+      "type": "choice",
+      "options": [
+        "12 equal",
+        "19 equal",
+        "22 equal",
+        "31 equal",
+        "41 equal",
+        "53 equal",
+        "Just (5-limit)",
+        "Pythagorean",
+        "Meantone (1/4 comma)"
+      ],
+      "default": 0,
+      "group": "Notes"
+    },
+    {
+      "id": "stepRight",
+      "name": "Steps to the next key in a row",
+      "type": "number",
+      "min": -30,
+      "max": 30,
+      "step": 1,
+      "default": 2,
+      "group": "Layout",
+      "showIf": {
+        "hexLayout": 3
+      }
+    },
+    {
+      "id": "stepUpRight",
+      "name": "Steps up to the right",
+      "type": "number",
+      "min": -30,
+      "max": 30,
+      "step": 1,
+      "default": 7,
+      "group": "Layout",
+      "showIf": {
+        "hexLayout": 3
+      }
+    },
+    {
+      "id": "press",
+      "name": "Press harder",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Pressure",
+        "Pressure and velocity"
+      ],
+      "default": 1,
+      "group": "Touch"
+    }
+  ]
+}

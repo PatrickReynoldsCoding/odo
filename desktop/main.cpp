@@ -1665,6 +1665,14 @@ struct App {
             draw::line(renderer, X(4), Y(24), X(36), Y(24), c, 1.6f);
             draw::line(renderer, X(8), Y(15), X(32), Y(15), c, 1.2f);
             for (int k : {1, 2, 3}) draw::circle(renderer, X(px[k]), Y(py[k]), 2.4f * s, c, c, 0);
+        } else if (id == "patrickreynolds/hex") {
+            // Five hexagons, two rows nested, a dot in the middle one of the lower row.
+            const float cx[5] = {9, 20, 31, 14.5f, 25.5f}, cy[5] = {18.5f, 18.5f, 18.5f, 9, 9}, r = 5.77f;
+            const float hx[6] = {0, 5, 5, 0, -5, -5}, hy[6] = {-r, -r / 2, r / 2, r, r / 2, -r / 2};
+            for (int k = 0; k < 5; k++)
+                for (int i = 0; i < 6; i++)
+                    draw::line(renderer, X(cx[k] + hx[i]), Y(cy[k] + hy[i]), X(cx[k] + hx[(i + 1) % 6]), Y(cy[k] + hy[(i + 1) % 6]), c, 1.4f);
+            draw::circle(renderer, X(20), Y(18.5f), 2.4f * s, c, c, 0);
         } else {
             draw::strokeRect(renderer, X(6), Y(3), 28 * s, 22 * s, c, 1.6f, 4 * s);
             draw::text(renderer, X(20), Y(19), 12 * s, c, lib.controllers[size_t(n)]->name().substr(0, 1), 1, true);

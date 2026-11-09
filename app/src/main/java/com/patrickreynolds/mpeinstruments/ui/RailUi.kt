@@ -494,7 +494,7 @@ fun DrawScope.chevron(cx: Float, cy: Float, size: Float, dir: Int, c: Color) {
     drawLine(c, Offset(cx + hw, cy), Offset(cx - hw, cy + hh), w, StrokeCap.Round)
 }
 
-/** A controller, drawn small: the Grid, the touch pad, the Tonnetz; one odo does not know, its first letter in a box. */
+/** A controller, drawn small: the Grid, the touch pad, the Tonnetz, the Hex keyboard; one odo does not know, its first letter in a box. */
 @Composable
 fun ControllerPic(id: String, name: String, c: Color, modifier: Modifier) {
     val known = id.removePrefix("pkg:")
@@ -521,10 +521,18 @@ fun ControllerPic(id: String, name: String, c: Color, modifier: Modifier) {
                     drawLine(c, p(8f, 15f), p(32f, 15f), 1.2.dp.toPx())
                     for (k in 1..3) drawCircle(c, 2.4f * s, p(px[k], py[k]))
                 }
+                "patrickreynolds/hex" -> {
+                    // Five hexagons, two rows nested, a dot in the middle one of the lower row.
+                    val cx = floatArrayOf(9f, 20f, 31f, 14.5f, 25.5f); val cy = floatArrayOf(18.5f, 18.5f, 18.5f, 9f, 9f); val r = 5.77f
+                    val hx = floatArrayOf(0f, 5f, 5f, 0f, -5f, -5f); val hy = floatArrayOf(-r, -r / 2, r / 2, r, r / 2, -r / 2)
+                    for (k in 0 until 5) for (i in 0 until 6)
+                        drawLine(c, p(cx[k] + hx[i], cy[k] + hy[i]), p(cx[k] + hx[(i + 1) % 6], cy[k] + hy[(i + 1) % 6]), 1.4.dp.toPx())
+                    drawCircle(c, 2.4f * s, p(20f, 18.5f))
+                }
                 else -> box(6f, 3f, 28f, 22f, 4f, false)
             }
         }
-        if (known != "patrickreynolds/grid" && known != "patrickreynolds/touchpad" && known != "patrickreynolds/tonnetz")
+        if (known != "patrickreynolds/grid" && known != "patrickreynolds/touchpad" && known != "patrickreynolds/tonnetz" && known != "patrickreynolds/hex")
             Text(name.take(1), color = c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }

@@ -242,6 +242,53 @@ static void grid() {
     CHECK(rail::display(ss[idx(m, "dynLow")], 30) == "30%" && rail::label(ss[idx(m, "dynHigh")]) == "Loudness at the top of a square", "the loudness range: 30%%, its top's label");
 }
 
+// The Hex keyboard is the Grid's code (controllers/hex/hex.c includes grid.c), which reads its settings
+// by place: its manifest must have the Grid's, in the Grid's order, before its own.
+static void hex() {
+    Json g = load("grid"), m = load("hex");
+    const Json& gs = g["settings"];
+    const Json& hs = m["settings"];
+    bool same = hs.size() == gs.size() + 5;
+    for (size_t i = 0; i < gs.size() && same; i++)
+        if (hs[i]["id"].str() != gs[i]["id"].str() || hs[i]["type"].str() != gs[i]["type"].str()) {
+            same = false;
+            CHECK(false, "hex setting %zu is %s, the Grid's %s", i, hs[i]["id"].str().c_str(), gs[i]["id"].str().c_str());
+        }
+    CHECK(same, "the Hex keyboard has the Grid's %zu settings in its order, then its own 5", gs.size());
+    auto v = defaults(m);
+    auto groups = rail::groups(m, v);
+    std::string names;
+    for (auto& gr : groups) names += (names.empty() ? "" : ", ") + gr.name;
+    CHECK(names == "Layout, Second keyboard, Notes, Touch, Look, Playing, Controls", "the Hex keyboard's groups, the Grid's: %s", names.c_str());
+    auto rs = rail::rows(m, v);
+    CHECK(!find(rs, "layout") && !find(rs, "chromatic") && !find(rs, "noteEdit") && !find(rs, "interval") && !find(rs, "sideLock") && !find(rs, "topNotes"),
+          "none of the Grid's note modes: every key is a note of the tuning");
+    auto hl = find(rs, "hexLayout");
+    CHECK(hl && hl->group == "Layout" && hl->choices.size() == 4 && hl->display == "Wicki-Hayden", "Note layout: 4 chips, Wicki-Hayden");
+    auto tu = find(rs, "tuning");
+    CHECK(tu && tu->group == "Notes" && tu->choices.size() == 9 && tu->display == "12 equal", "Tuning: 9, 12 equal");
+    CHECK(!find(rs, "stepRight"), "Your own steps: not until chosen");
+    auto vo = v;
+    vo[idx(m, "hexLayout")] = 3;
+    auto ro = rail::rows(m, vo);
+    auto sr = find(ro, "stepRight");
+    CHECK(sr && sr->widget == Widget::Slider && find(ro, "stepUpRight"), "Your own steps: two sliders");
+    auto pr = find(rs, "press");
+    CHECK(pr && pr->group == "Touch" && pr->display == "Pressure", "Press harder: Pressure");
+    auto cols = find(rs, "cols");
+    CHECK(cols && cols->label == "Keys top to bottom" && cols->widget == Widget::Chips && cols->choices.size() == 14 && cols->display == "5",
+          "Keys top to bottom: 3 to 16, 5");
+    auto col = find(rs, "colours");
+    CHECK(col && col->choices.size() == 9 && col->display == "Sharps and flats", "Colours: the Grid's and four more, Sharps and flats");
+    // The settings both have read the same, but for the word for a key.
+    auto grs = rail::rows(g, defaults(g));
+    for (const char* id : {"slide", "slideOnly", "touchEdit", "latch", "sideLatch", "sideSlide", "sideInside", "sideOut", "flip90", "moveControls", "vibrato"}) {
+        auto a = find(grs, id), b = find(rs, id);
+        CHECK(a && b && a->label == b->label && a->group == b->group && a->choices == b->choices, "%s: the same on both", id);
+    }
+    CHECK(find(rs, "insideOn") && find(rs, "insideOn")->label == "Inside a key (dynamics, tone)", "Inside a key, as the Grid's Inside a square");
+}
+
 static void tonnetzAndTouchpad() {
     Json t = load("tonnetz");
     auto gs = rail::groups(t, defaults(t));
@@ -289,6 +336,7 @@ int main() {
     formatting();
     grouping();
     grid();
+    hex();
     tonnetzAndTouchpad();
     return finish();
 }

@@ -31,6 +31,11 @@ What it does:
   voice, so the arp, split and effects apply. A Seaboard played at the same time shows there too.
   Drag the note strip along the bottom sideways to move the notes (Lock on the rail stops that);
   six colour themes and soft, clear or bold lines.
+- **The Hex keyboard**: hexagonal keys in an isomorphic layout, as on a Lumatone (Wicki-Hayden,
+  Harmonic table, Bosanquet or your own steps), in 12, 19, 22, 31, 41 or 53 equal steps, just
+  intonation, Pythagorean or meantone; coloured by note name, sharps and flats, or pitch. Each key
+  plays as the Grid's squares do, and pressing harder adds pressure
+  ([HEX_CONTROLLER.md](docs/plans/HEX_CONTROLLER.md)).
 - **An e-ink look** (Setup): black on white, thick borders, no colour or motion, and the pad only
   redraws when something changes.
 - **The phone as a controller** (experimental: Setup → Experimental), on every instrument, from

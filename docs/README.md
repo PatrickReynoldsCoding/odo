@@ -26,6 +26,8 @@ Both apps (Android and computers) follow these, so a file made by one works in t
 - [DECOUPLE_CONTROLLER_PLAN.md](plans/DECOUPLE_CONTROLLER_PLAN.md): taking the touch pad out of
   the app as a controller.
 - [STUDY.md](plans/STUDY.md): other music libraries to look at.
+- [HEX_CONTROLLER.md](plans/HEX_CONTROLLER.md): the Hex keyboard, an isomorphic controller: what
+  the Lumatone and Hexatone do (layouts, tunings, colours, touch), and what we built.
 
 ## android/: the phone
 
