@@ -1,0 +1,18 @@
+#!/bin/sh
+# Takes (.odotake): check one, or expand a score written by hand into the touches odo plays.
+# Builds engine/tools/take.cpp (odo-take) the first time, and the controllers if they aren't built.
+#   tools/take check takes/*.odotake         every note as written? (exit 1 if not)
+#   tools/take expand FILE -o OUT            a take written by hand, expanded into touches and notes
+#   tools/take notes FILE                    the notes it plays, one a line
+#   tools/take touches FILE                  its touches
+# Options: --controller FILE.odoc  --size WxH  --center N[,M]  --setting ID=VALUE
+# The format: docs/formats/TAKE_FORMAT.md; writing a piece: docs/formats/TAKE_AUTHORING.md.
+set -e
+root=$(cd "$(dirname "$0")/.." && pwd)
+out="$root/build/take"
+[ -f "$root/controllers/build/grid.odoc" ] || "$root/controllers/build.sh" >&2
+if [ ! -f "$out/CMakeCache.txt" ]; then
+    cmake -S "$root/engine" -B "$out" -DMPE_BUILTIN_INSTRUMENTS=OFF -DCMAKE_BUILD_TYPE=Release >&2
+fi
+cmake --build "$out" --target odo-take -j 8 >/dev/null 2>&1 || cmake --build "$out" --target odo-take >&2
+exec "$out/tools/odo-take" "$@"

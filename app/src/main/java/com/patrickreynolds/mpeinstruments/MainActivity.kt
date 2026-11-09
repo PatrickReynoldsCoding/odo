@@ -109,10 +109,13 @@ class MainActivity : ComponentActivity() {
     }
 
     // A preset file another app opened with odo or shared to it (PresetFiles): one of yours, on view.
+    // A take file (Takes): one of your takes.
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openPresetIn(intent) }
     private fun openPresetIn(intent: Intent?) {
         val uri = PresetFiles.uriIn(intent) ?: return
-        android.widget.Toast.makeText(this, PresetFiles.open(this, uri), android.widget.Toast.LENGTH_LONG).show()
+        val take = intent?.type == Takes.MIME || uri.lastPathSegment?.endsWith(".odotake") == true
+        val said = if (take) Takes.open(this, uri) else PresetFiles.open(this, uri)
+        android.widget.Toast.makeText(this, said, android.widget.Toast.LENGTH_LONG).show()
         intent?.action = null                     // not again when the activity is made again
     }
 

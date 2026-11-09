@@ -29,3 +29,20 @@ if(MPE_BUILTIN_INSTRUMENTS AND NOT MPE_BUILTIN_INSTRUMENTS STREQUAL "SOURCES" AN
                              MPE_TEST_CONTROLLERS="${ctl}/build" MPE_TEST_CACHE="${CMAKE_CURRENT_BINARY_DIR}/cache")
   add_test(NAME test_packages COMMAND test_packages WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
+
+# Takes (mpe/take.h): recorded and written by hand, on the controllers (so it needs them built,
+# with clang, as test_packages does); and the example takes in takes/.
+if(CLANG)
+  set(ctl "${CMAKE_CURRENT_SOURCE_DIR}/../../controllers")
+  if(NOT TARGET controllers)
+    file(GLOB ctl_sources "${ctl}/*/*.c" "${ctl}/*/controller.json" "${ctl}/include/*.h")
+    add_custom_command(OUTPUT "${ctl}/build/tonnetz.odoc" COMMAND "${ctl}/build.sh" DEPENDS ${ctl_sources} "${ctl}/build.sh"
+                       COMMENT "controllers")
+    add_custom_target(controllers DEPENDS "${ctl}/build/tonnetz.odoc")
+  endif()
+  add_executable(test_take test_take.cpp)
+  add_dependencies(test_take controllers)
+  target_link_libraries(test_take mpe_engine Threads::Threads)
+  target_compile_definitions(test_take PRIVATE MPE_TEST_CONTROLLERS="${ctl}/build" MPE_TEST_TAKES="${CMAKE_CURRENT_SOURCE_DIR}/../../takes")
+  add_test(NAME test_take COMMAND test_take WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

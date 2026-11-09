@@ -1,0 +1,59 @@
+odo-take/1
+name: Ode to Joy
+by: Ludwig van Beethoven (1824), the tune alone; written for odo by Claude
+about: The first tune to learn: five notes, one finger at a time, all in C major. Then
+about: a held note to swell into, and a last note with a slow vibrato.
+tempo: 100
+meter: 4/4
+key: C major
+controller: patrickreynolds/grid
+
+score
+key C4 major
+press 0.6
+
+section First line
+say One finger, one square at a time: lift between the notes
+bar 1
+E4:1 E4:1 F4:1 G4:1
+bar 2
+G4:1 F4:1 E4:1 D4:1
+bar 3
+C4:1 C4:1 D4:1 E4:1
+bar 4
+E4:3/2 D4:1/2 D4:2(swell 0.5 0.8)
+
+section Second line
+say The same again, ending on the home note
+bar 5
+E4:1 E4:1 F4:1 G4:1
+bar 6
+G4:1 F4:1 E4:1 D4:1
+bar 7
+C4:1 C4:1 D4:1 E4:1
+bar 8
+D4:3/2 C4:1/2 C4:2(swell 0.5 0.8)
+
+section Middle
+say Quick pairs: the half notes are two quick taps
+bar 9
+D4:1 D4:1 E4:1 C4:1
+bar 10
+D4:1 E4:1/2 F4:1/2 E4:1 C4:1
+bar 11
+D4:1 E4:1/2 F4:1/2 E4:1 D4:1
+bar 12
+C4:1 D4:1 G3:2(press 0.4)
+
+section Last line
+say Hold the last note and wiggle your finger slowly for vibrato
+bar 13
+E4:1 E4:1 F4:1 G4:1
+bar 14
+G4:1 F4:1 E4:1 D4:1
+bar 15
+C4:1 C4:1 D4:1 E4:1
+bar 16
+D4:3/2 C4:1/2 C4:2(vib 0.3 4.5 0.3, swell 0.6 0.9 0.4)
+bar 17
+end

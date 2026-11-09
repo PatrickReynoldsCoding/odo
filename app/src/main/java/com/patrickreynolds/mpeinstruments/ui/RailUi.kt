@@ -116,6 +116,7 @@ fun RailPanel(p: Pane, start: Dp, width: Dp, go: (Pane?) -> Unit, close: () -> U
                     TempoControls(accent)
                 }
                 "Loop" -> PanelFrame(start, width, p.name, "For all of odo, not kept in presets", close) { LoopControls(accent) }
+                "Takes" -> PanelFrame(start, width, p.name, "Record what you play; play a take back to learn it", close) { TakesPanel() }
                 "Gyro" -> PanelFrame(start, width, p.name, "The phone as a controller, not kept in presets", close) {
                     GyroPanel(liveModReading(), scroll = false)
                 }
@@ -526,5 +527,48 @@ fun ControllerPic(id: String, name: String, c: Color, modifier: Modifier) {
         }
         if (known != "patrickreynolds/grid" && known != "patrickreynolds/touchpad" && known != "patrickreynolds/tonnetz")
             Text(name.take(1), color = c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+// ---- takes ------------------------------------------------------------------------------------------
+
+/**
+ * Takes (Takes.kt): record what you play; your takes; the one chosen played back. The same rows,
+ * words and order as odo for computers' Takes panel (desktop/main.cpp panelLayout).
+ */
+@Composable
+private fun TakesPanel() {
+    val t = com.patrickreynolds.mpeinstruments.Takes
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var confirmDelete by remember(t.chosen) { mutableStateOf(false) }
+    val openFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) t.open(context, uri)
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { t.scan() }
+    PHeading("RECORD")
+    if (t.recording >= 0) PRow(if (t.recording > 0) "Stop recording · ${t.clock(t.recording)}" else "Stop recording (play something first)", on = true) { t.toggleRecord() }
+    else PRow("Record") { t.toggleRecord() }
+    if (t.note.isNotEmpty()) PNote(t.note)
+    PHeading("YOURS")
+    for (take in t.list) PRow(take.name, t.sub(take), on = take.file.name == t.chosen) { t.choose(take); confirmDelete = false }
+    if (t.list.isEmpty()) PNote("None yet: record one, or open a take file.")
+    PRow("Open a take file…") { openFile.launch(arrayOf("*/*")); confirmDelete = false }
+    val on = t.current() ?: return
+    PHeading("THIS TAKE")
+    PRow(if (t.playing == 1) "Stop" else "Listen", on = t.playing == 1) { t.play(0); confirmDelete = false }
+    PRow(if (t.playing == 2) "Stop" else "Play along", on = t.playing == 2) { t.play(1); confirmDelete = false }
+    val speeds = listOf(0.5, 0.75, 1.0)
+    PLabel("Speed", "${Math.round(t.speed * 100)}%", rule = true)
+    PChips(listOf("50%", "75%", "100%"), speeds.indexOfFirst { Math.abs(it - t.speed) < 1e-6 }.let { if (it < 0) 2 else it }) {
+        t.changeSpeed(speeds[it]); confirmDelete = false
+    }
+    if (on.sections.isNotEmpty()) {
+        PLabel("Loop", if (t.loop < 0 || t.loop >= on.sections.size) "All of it" else on.sections[t.loop], rule = true)
+        PChips(listOf("All of it") + on.sections, t.loop + 1) { t.changeLoop(it - 1); confirmDelete = false }
+    }
+    PRow("Share “${on.name}” as a file…") { t.share(context, on); confirmDelete = false }
+    PRow((if (confirmDelete) "Tap again to delete “" else "Delete “") + on.name + "”", danger = confirmDelete) {
+        if (confirmDelete) { t.delete(on); confirmDelete = false } else confirmDelete = true
     }
 }

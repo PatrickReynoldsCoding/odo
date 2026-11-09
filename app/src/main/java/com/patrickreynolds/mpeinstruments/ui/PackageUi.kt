@@ -41,10 +41,11 @@ import java.nio.ByteOrder
 @Composable
 fun PackageSurface(c: PackageController) {
     var list by remember { mutableStateOf<ByteArray?>(null) }
+    var ghosts by remember { mutableStateOf<ByteArray?>(null) }     // a take playing: its fingers (Takes)
     var failed by remember { mutableStateOf<String?>(null) }
     DisposableEffect(c) {
         if (!c.start()) failed = Native.nativeCtlError()
-        onDispose { Native.nativeCtlStop() }
+        onDispose { com.patrickreynolds.mpeinstruments.Takes.stop(); Native.nativeCtlStop() }
     }
     val center = AppState.instrument(0)?.centerNote ?: 60f
     // A split (the Grid's): the second part's instrument too, so its half centres on its own sound.
@@ -58,6 +59,8 @@ fun PackageSurface(c: PackageController) {
         while (true) {
             withFrameNanos { }
             Native.nativeCtlTick()?.let { list = it }
+            ghosts = com.patrickreynolds.mpeinstruments.Takes.tick(com.patrickreynolds.mpeinstruments.Takes.surfaceW,
+                                                                    com.patrickreynolds.mpeinstruments.Takes.surfaceH)
             Native.nativeCtlTakeSettings()?.let { a -> for (i in 0 until a.size / 2) c.changedByIt(a[2 * i].toInt(), a[2 * i + 1]) }
         }
     }
@@ -86,6 +89,8 @@ fun PackageSurface(c: PackageController) {
         }) {
         if (size != sized) {
             sized = size
+            com.patrickreynolds.mpeinstruments.Takes.surfaceW = size.width / density
+            com.patrickreynolds.mpeinstruments.Takes.surfaceH = size.height / density
             Native.nativeCtlInit(size.width / density, size.height / density, if (Eink) 1 else 0)
             Native.nativeCtlInstrument(0, center)
             center1?.let { Native.nativeCtlInstrument(1, it) }
@@ -93,6 +98,7 @@ fun PackageSurface(c: PackageController) {
         }
         val d = density
         list?.let { bytes -> withTransform({ scale(d, d, Offset.Zero) }) { drawList(bytes, size.width / d, size.height / d, faces) } }
+        ghosts?.let { bytes -> withTransform({ scale(d, d, Offset.Zero) }) { drawList(bytes, size.width / d, size.height / d, faces) } }
     }
 }
 

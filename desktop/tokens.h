@@ -23,6 +23,18 @@ inline constexpr uint32_t packOther = 0x9AA2B4FFu;
 // The same colour at alpha a (0..255).
 constexpr uint32_t alpha(uint32_t c, uint32_t a) { return (c & 0xFFFFFF00u) | (a & 0xFFu); }
 
+// A take's ghost fingers (the engine's take::GhostStyle): per look, then their sizes.
+namespace ghost {
+struct Colours { uint32_t finger, trail, next, text, back; };
+inline constexpr Colours dark{0xFFFFFFFFu, 0x4DD0E1C0u, 0xFFC857FFu, 0xFFFFFFFFu, 0x0E1014B8u};
+inline constexpr Colours eink{0x000000FFu, 0x000000A0u, 0x000000FFu, 0x000000FFu, 0xFFFFFFE0u};
+inline constexpr float radius = 22;
+inline constexpr float grow = 16;
+inline constexpr float trailMs = 450;
+inline constexpr float previewMs = 700;
+inline constexpr float textSize = 15;
+}  // namespace ghost
+
 namespace type {
 inline constexpr float caption = 10;
 inline constexpr float label = 11;
