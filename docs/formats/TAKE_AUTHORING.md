@@ -36,7 +36,9 @@ Rules:
 
 - **Only music that is free to use**: traditional tunes, and music whose composer died long ago
   (Beethoven, Bach, folk songs). Not a recording's arrangement, not a song still in copyright.
-  Write the tune alone, from what it is, not from someone's sheet music.
+  Write the tune alone, from what it is, not from someone's sheet music. The one exception: a
+  short excerpt (about ten seconds) of a piece still in copyright, to learn from, with its
+  composer and where it comes from in `about` (`resurrections-v1.odotake`).
 - **Keep it in the middle**: the Grid shows about an octave and a half around the middle of the
   instrument playing (middle C for most). Move a tune down or up an octave (or two) so that it sits
   from about F3 to G4, and say so in `about`. Choose a `sound` whose middle is near C4 (the
@@ -239,7 +241,10 @@ twinkle.odotake: Twinkle, Twinkle, 4/4 at 96, 0:29.975 long
 
 Longer examples, in `takes/`: `ode-to-joy.odotake` (C major, a held swell and a last note with
 vibrato) and `greensleeves.odotake` (A minor in 3/4 with a pick-up, chromatic, slides into the
-tonic, vibrato on the long notes, a sound chosen for its middle).
+tonic, vibrato on the long notes, a sound chosen for its middle). `resurrections-v1.odotake` and
+`-v2.odotake` are ten seconds of a piano piece on the Hex: several voices (a held bass, a figure
+of four notes held as the pedal holds them, the tune), a slowing at the end with `tempo` lines in a
+voice of rests, and, in v2, the piano's effects in a `preset` line.
 
 ## What `check` says, and what to do
 

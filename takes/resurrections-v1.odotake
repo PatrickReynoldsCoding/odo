@@ -1,0 +1,74 @@
+odo-take/1.1
+name: Resurrections (bars from the end), v1
+by: Lena Raine (Celeste, 2018); as played on piano by Katherine Cordova; written for odo by Claude
+about: Ten seconds of a piano cover of "Resurrections" from the game Celeste (music by Lena Raine,
+about: 2018, under copyright: only this short excerpt, to learn from). Katherine Cordova's piano
+about: cover on YouTube (QDNhe1Vy0No), 5:38.4 to 5:49: the A-B-C-E figure goes round, E comes in
+about: low, and the tune climbs C D E, leaps to A and falls to G#, then it slows and fades.
+about: Written from the recording by ear and by its spectrum, not from her sheet music.
+about: On the Hex, Wicki-Hayden, as a piano: no bends, no vibrato, no slides. Held notes stand
+about: for the pedal. Version 1: the notes alone, no effects.
+tempo: 84
+meter: 4/4
+key: A minor
+controller: patrickreynolds/hex
+settings: {"hexLayout": 0, "tuning": 0, "chromatic": 1, "scale": 1, "key": 9, "octave": 0, "cols": 6, "colours": 3, "vibrato": 0, "slide": 0, "slideOnly": 0, "outOn": 0, "xTarget": 0, "yTarget": 0, "insideDyn": 1, "insideTone": 0, "press": 2, "latch": 0}
+sound: patrickreynolds/piano
+
+score
+key A3 minor
+
+# The tune: right hand, on top.
+voice tune
+press 0.6
+section Pick-up and E
+say Two notes up into the E: C, D
+bar 0 4
+C5:1/2(press 0.62) D5:1/2(press 0.66)
+bar 1
+say Hold the E: the low E and B come in with it
+E5:4(press 0.62)
+section Up to A, down to G#
+bar 2
+say Leap up to A, then lean down onto G#
+A5:2(press 0.85) G#5:2+4(press 0.75)
+
+# The time: steady, then slowing down at the end.
+voice time
+bar 3
+section Slowing to the end
+say Let it slow down and fade
+tempo 70
+r:2
+tempo 62
+r:2
+tempo 54
+
+# The low E and B: left hand, held all through, as the pedal would.
+voice low
+bar 1
+press 0.7
+E2+B2:12+2
+
+# The figure: E A B C round and round, an eighth each. Each note is held for two beats,
+# as the pedal holds it: one finger for each of the four notes.
+voice e
+bar 1
+press 0.5
+E4:2 E4:2 E4:2 E4:2(press 0.45) E4:2(press 0.42) E4:2(press 0.38) E4:2(press 0.25)
+
+voice a
+bar 1
+press 0.52
+r:1/2 A3:2 A3:2 A3:2 A3:2(press 0.48) A3:2(press 0.42) A3:2(press 0.3)
+
+voice b
+bar 0 4
+press 0.5
+B3:2 B3:2 B3:2 B3:2 B3:2(press 0.45) B3:2(press 0.4) B3:2(press 0.3)
+
+voice c
+bar 0 4+1/2
+press 0.48
+C4:2 C4:2 C4:2 C4:2 C4:2(press 0.42) C4:2(press 0.38) C4:2(press 0.28)
+end
