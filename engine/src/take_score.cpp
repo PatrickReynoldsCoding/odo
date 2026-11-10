@@ -486,6 +486,7 @@ bool Layout::scan(const Package& pkg, const std::vector<double>& values, float w
     s.host->setTaps(taps);
     s.values = settingsFor(Take(), 0, pkg.manifest, values);
     for (size_t i = 0; i < s.values.size(); i++) s.host->setting(int(i), s.values[i]);
+    twoFingerBend_ = pkg.manifest["bend"].str() == "two fingers out";
     s.clock = 1000;
     s.host->init(width, height, 0);
     s.host->instrument(0, centers[0]);
@@ -846,6 +847,84 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
             };
             bool moving = vib || swell || tone || curve || vel || (press && press->pts.size() > 1) || !bends.empty() || (slides && k == 0);
             double lift = stacc ? t0 + dur * 0.5 : t1 - std::min(25.0, dur * 0.25);
+            // A controller that bends with two fingers (the Hex): as a player does it. Two fingers in
+            // the key, both slid straight out of it (no bend yet: only the place along its row
+            // bends), the spare one lifted; then the one left moves along the row with the pitch.
+            if (layout.bendsWithTwoFingers() && (curve || vib || !bends.empty()) && !(k == 0 && slides) &&
+                !(k == 0 && carried.count(i))) {
+                // Its row: the nearest key beside it, or above or below it, whichever touches it (a
+                // turned keyboard's rows run down the screen); and how many semitones away it is.
+                const Layout::Cell* across = nullptr;
+                const Layout::Cell* down = nullptr;
+                for (const Layout::Cell& o : layout.cells()) {
+                    if (o.part != c.part || &o == &c) continue;
+                    if (std::fabs(o.y - c.y) < (c.y1 - c.y0) * 0.2f && (!across || std::fabs(o.x - c.x) < std::fabs(across->x - c.x))) across = &o;
+                    if (std::fabs(o.x - c.x) < (c.x1 - c.x0) * 0.2f && (!down || std::fabs(o.y - c.y) < std::fabs(down->y - c.y))) down = &o;
+                }
+                const bool rowDown = down && (!across || std::fabs(down->y - c.y) < std::fabs(across->x - c.x));
+                const Layout::Cell* row = rowDown ? down : across;
+                if (row && row->note != c.note) {
+                    // Along the row per semitone; out of the key, across the row.
+                    const float perSemi = (rowDown ? row->y - c.y : row->x - c.x) / float(row->note - c.note);
+                    const float alongX = rowDown ? 0.f : 1.f, alongY = rowDown ? 1.f : 0.f;
+                    const float out = (rowDown ? c.x1 - c.x0 : c.y1 - c.y0) * 0.75f;
+                    const float outX = alongY, outY = alongX;   // across the row
+                    auto semis = [&](double t) {
+                        float u = dur > 0 ? float((t - t0) / dur) : 0, d = 0;
+                        if (curve) d += along(curve->pts, u, 0);
+                        float b = 0;
+                        for (const Gesture* g : bends) {
+                            float to = g->absolute ? g->a - n.pitches[k] : g->a;
+                            b += (to - b) * smooth((u - g->b) / (g->c - g->b));
+                        }
+                        d += b;
+                        if (vib && u >= vib->c) {
+                            double since = (t - (t0 + vib->c * dur)) / 1000.0;
+                            d += vib->a * smooth(float(since / 0.25)) * float(std::sin(2 * M_PI * vib->b * since));
+                        }
+                        return d;
+                    };
+                    // The pressure: the note's lowest from where it lands in the key (held as it
+                    // slides), the rest by pressing harder than it landed (the Hex's Press harder).
+                    auto pressure = [&](double t) {
+                        float x, y, f;
+                        at(t, &x, &y, &f);
+                        return std::clamp(f, 0.f, 1.f);
+                    };
+                    float lowest = 1;
+                    for (double t = t0; t <= t1; t += step) lowest = std::min(lowest, pressure(t));
+                    float ldx, ldy;
+                    offsetFor(r, lowest, toneAt(0), hw, hh, &ldx, &ldy);
+                    const float lx = c.x + ldx * alongX, ly = c.y + ldy * alongY;   // its place along the row only
+                    const float f0 = 0.3f;                                          // how hard it lands
+                    auto force = [&](double t) {
+                        float more = lowest < 0.999f ? (pressure(t) - lowest) / (1 - lowest) : 0;
+                        return f0 + std::clamp(more, 0.f, 1.f) * (f0 * 0.5f + 0.02f);
+                    };
+                    const int fa = nextFinger++, fb = nextFinger++;
+                    const double arm = std::min(15.0, dur * 0.2);
+                    emit(t0, fa, Down, lx, ly, f0);
+                    emit(t0 + 1, fb, Down, lx, ly, f0);
+                    // Out of the key across its row, and back to its middle along it (the bend is from
+                    // there): quickly, so the dynamics (which follow the finger slowly) stay as it landed.
+                    for (double t = t0 + 5; t <= t0 + arm; t += 5) {
+                        float s = smooth(float((t - t0) / arm));
+                        float ax = lx + (c.x - lx) * s, ay = ly + (c.y - ly) * s;
+                        emit(t, fa, Move, ax - outX * out * s, ay - outY * out * s, f0);
+                        emit(t, fb, Move, ax + outX * out * 0.8f * s, ay + outY * out * 0.8f * s, f0);
+                    }
+                    emit(t0 + arm + 2, fb, Up, c.x + outX * out * 0.8f, c.y + outY * out * 0.8f, 0);
+                    float x = c.x - outX * out, y = c.y - outY * out;
+                    for (double t = t0 + arm + 5; t < lift; t += step) {
+                        const float d = semis(t) * perSemi;
+                        x = c.x - outX * out + alongX * d;
+                        y = c.y - outY * out + alongY * d;
+                        emit(t, fa, Move, x, y, force(t));
+                    }
+                    emit(lift, fa, Up, x, y, 0);
+                    continue;
+                }
+            }
             int finger;
             auto carry = carried.find(i);
             bool continuing = k == 0 && carry != carried.end();

@@ -212,6 +212,10 @@ public:
     Response response(const Cell& c);    // probed the first time it is asked for
     // What a touch at (x, y) starts: false if no note.
     bool probe(float x, float y, float force, Note* out);
+    // The controller bends a note with two fingers in its key slid out of it, then by how far along
+    // its row the finger is (the Hex: its manifest's "bend": "two fingers out"); a lone finger keeps
+    // its note.
+    bool bendsWithTwoFingers() const { return twoFingerBend_; }
 
 private:
     struct Sim;
@@ -219,6 +223,7 @@ private:
     std::vector<Cell> cells_;
     std::vector<Response> responses_;
     float w_ = 0, h_ = 0;
+    bool twoFingerBend_ = false;
 };
 
 struct Report {

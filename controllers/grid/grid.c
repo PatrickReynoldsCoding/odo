@@ -704,6 +704,9 @@ static Expr expression_in(const Finger* f) {
     /* In the square: the dynamics and tone where the finger is (slowly), held at the square's edge
        once it is out; full volume (or Volume's 0.7). */
     Expr e = {0, level_at(f, f->rx + clampf(down_of(f, f->sx), 0, 1) * f->rs, 0), tone_at(f, f->sy), 1};
+#ifdef KEYS_HEX
+    if (f->slide == 2) e.pressure = f->held;   /* sliding: the dynamics it had in its key (hex.c) */
+#endif
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
     /* The level also sets the note's own volume, so the dynamics work on every instrument, even
        one that ignores how hard it is played (an organ). */

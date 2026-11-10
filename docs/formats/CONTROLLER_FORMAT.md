@@ -127,6 +127,7 @@ the rest.
 | `orientation` | `landscape`, `portrait`, `upright` (stays put as the device turns) or `any` |
 | `parts` | the sounds it plays, by name: one, or the sections of a split |
 | `partsFrom` | optional: the id of a setting that says how many of `parts` it plays now, its value + 1 (a switch: the first part off, the first two on). The MESH gives it that many sounds, and calls `instrument` for each. Without it, every part always |
+| `bend` | optional: `"two fingers out"` if it bends a note only with two fingers in its key slid out of it, then by how far along its row the finger is (the Hex). A take written by hand (`pitch`, `bend`, `vib`) is then played so; without it, by one finger moving toward the notes. |
 | `drumsFrom` | optional: for each of `parts`, the id of a `switch` the MESH sets on while that part's sound is a drum kit (an instrument in the `drums` group) and off otherwise, when the sound changes and when the controller opens. The touch pad lays out drums on it. Usually `hidden` |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
 | `settings` | its options: `choice`, `number`, `switch`, `scala` ([Scala tunings](#scala-tunings)), shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"group"` (optional): a short heading it is shown under |

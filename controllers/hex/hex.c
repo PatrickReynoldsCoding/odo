@@ -30,7 +30,7 @@
                             S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1, S_SNAP, S_SNAP_POINTS,
 /* Two fingers to slide: a finger's second (its id, 0: none, and where it is), and its slide: 0 none,
    1 two fingers in its key, 2 sliding (the two have left the key; one finger plays it on). */
-#define KEYS_FINGER_EXTRA int mate, slide; float mx, my;
+#define KEYS_FINGER_EXTRA int mate, slide; float mx, my, held;
 /* A Scala file's tuning is built again when its settings (or the tuning) change. */
 static int scala_dirty = 1;
 #define KEYS_ON_SETTING(i) do { if ((i) == S_TUNING || (i) >= S_SCALA) scala_dirty = 1; } while (0)
@@ -426,7 +426,7 @@ static int in_key(const Finger* f, float x, float y) {
     return dx <= w / 2 && dy <= R - dx / 1.7320508f;
 }
 
-static void pair_init(Finger* f) { f->mate = 0; f->slide = 0; f->mx = f->x; f->my = f->y; }
+static void pair_init(Finger* f) { f->mate = 0; f->slide = 0; f->mx = f->x; f->my = f->y; f->held = 0; }
 
 /* A finger down on a key another finger holds, alone: the two are one, ready to slide. */
 static int pair_down(int id, int h, int n, float x, float y) {
@@ -450,6 +450,9 @@ static void slide_check(Finger* f) {
     if (b > a) { other = f->id; f->id = f->mate; f->x = f->mx; f->y = f->my; }
     if (nspent < MAX_FINGERS) spent[nspent++] = other;
     f->mate = 0;
+    /* Sliding, it keeps the dynamics it had in the key: the slide bends, it does not change how
+       loud (pressing harder still does). */
+    f->held = level_at(f, f->rx + clampf(down_of(f, f->sx), 0, 1) * f->rs, 0);
     f->slide = 2;
 }
 
