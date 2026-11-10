@@ -523,6 +523,9 @@ typedef struct {
     float glide;                  /* sliding with a glide: semitones toward the squares beside it */
     float strike;                 /* how loud it started */
     float press0, press;          /* how big or hard the touch was when it came down, and is now */
+#ifdef KEYS_FINGER_EXTRA
+    KEYS_FINGER_EXTRA             /* what the Hex keyboard keeps of a finger besides */
+#endif
 } Finger;
 #define DEMO_N (-99999)           /* the square in the Touch panel, not one of the grid's */
 /* The touch now being handled: its size, or its force when the MESH has that (0: neither). */
@@ -638,7 +641,7 @@ static void press_strike(Finger* f) { (void)f; }
    vibrato from the rest. Loudness, tone and volume reach their full change half a square past it
    (or as sensitive as set); bend aims at the neighbouring note, a whole square past. */
 #define REACH 0.5f
-static void apply(Expr* e, int target, float d, int across, const Finger* f, float* semis) {
+static void SHARED apply(Expr* e, int target, float d, int across, const Finger* f, float* semis) {
     /* The axis's own shaping: flipped, more or less sensitive (how short a slide is the full
        change), and how much of the change it makes. */
     int a = across ? S_AX_AMOUNT : S_UD_AMOUNT;
@@ -676,6 +679,15 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
 }
 
 static Expr expression_in(const Finger* f);
+#ifdef KEYS_HEX
+/* The Hex keyboard's own touch (hex.c): a second finger on a held key pairs with the first, the
+   two slid out of it bend the note; a new finger starts with nothing of that; and its panel. */
+static float slide_semis(const Finger* f);
+static int pair_down(int id, int h, int n, float x, float y);
+static int pair_move(int id, float x, float y);
+static int pair_up(int id);
+static void pair_init(Finger* f);
+#endif
 /* A finger's notes are its own half's. */
 static Expr expression(const Finger* f) {
     Half* was = hv;
@@ -696,12 +708,17 @@ static Expr expression_in(const Finger* f) {
        one that ignores how hard it is played (an organ). */
     e.volume *= strike_gain(e.pressure);
     float semis = 0;
+#ifdef KEYS_HEX
+    /* The Hex keyboard bends its own way: two fingers slid out of a key (hex.c, slide_semis). */
+    semis += slide_semis(f);
+#else
     /* Out past the line: what each way is set to do; sliding between notes, nothing (the next
        square plays instead). */
     if (!sliding() && out_on()) {
         apply(&e, (int)set_[S_ACROSS], past(down_of(f, f->sx)), 1, f, &semis);
         apply(&e, (int)set_[S_UPDOWN], past(across_of(f, f->sy)), 0, f, &semis);
     }
+#endif
     semis += side_bend;
     /* Snap the bend onto semitones, as the gyro's does: the middle of each semitone holds the note
        and the move to the next is squeezed toward the edges (all of it, at full snap). Not the
@@ -718,7 +735,12 @@ static Expr expression_in(const Finger* f) {
     e.pressure *= 0.4f + 0.6f * dyn;
     e.slide = clampf(e.slide + side_tone, 0, 1);
     int vi = (int)set_[S_VIBRATO];
+#ifdef KEYS_HEX
+    float depth = 0;                  /* no wiggle: a Hex key's pitch moves only by its slide */
+    (void)vi;
+#else
     float depth = slide_only() ? 0 : VIBRATO_DEPTH[vi < 0 || vi > 3 ? 0 : vi];
+#endif
     if (depth > 0) {
         /* A wiggle: what the slow position misses, along the way the finger rocks, once it is more
            than the wiggle sensitivity lets by (so a slow move never wobbles the pitch). */
@@ -780,6 +802,9 @@ static void down(int id, float x, float y) {
 static void down_in(int id, float x, float y, int h) {
     int n = square_at(x, y);
     if (n == -100000 || note_of(n) < 0) return;
+#ifdef KEYS_HEX
+    if (pair_down(id, h, n, x, y)) return;      /* a second finger on a held key: no note of its own */
+#endif
     if (latch_on && set_[S_LATCHMODE] == LATCH_TAP) {
         /* Tap a held square to let it go. */
         int k = find_latched(h, n);
@@ -800,6 +825,9 @@ static void down_in(int id, float x, float y, int h) {
     f->press0 = f->press = touch_press;
     f->strike = level_at(f, x, y);
     press_strike(f);
+#ifdef KEYS_HEX
+    pair_init(f);
+#endif
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
@@ -1358,13 +1386,13 @@ static void chip(float x, float y, float w, float h, const char* label, int on, 
 }
 
 /* A row of chips across the width. */
-static float chips(float x, float y, float cw, const char** names, int n, int chosen, const Theme* th, int kind, int arg0) {
+static float SHARED chips(float x, float y, float cw, const char** names, int n, int chosen, const Theme* th, int kind, int arg0) {
     float g = 6, w = (cw - g * (float)(n - 1)) / (float)n;
     for (int k = 0; k < n; k++) chip(x + (float)k * (w + g), y, w, 30, names[k], k == chosen, th, kind, arg0 + k);
     return y + 38;
 }
 
-static float slider(float x, float y, float w, int id, const Theme* th) {
+static float SHARED slider(float x, float y, float w, int id, const Theme* th) {
     const Slider* sl = &SLIDERS[id];
     unsigned ink = eink ? BLACK : th->light;
     float v = (float)set_[sl->index], t = clampf((v - sl->min) / (sl->max - sl->min), 0, 1);
@@ -1387,7 +1415,7 @@ static float slider(float x, float y, float w, int id, const Theme* th) {
     return y + 46;
 }
 
-static void slider_to(int id, float x) {
+static void SHARED slider_to(int id, float x) {
     for (int k = 0; k < nhits; k++) if (hits[k].kind == K_SLIDER && hits[k].arg == id) {
         const Slider* sl = &SLIDERS[id];
         float t = clampf((x - (hits[k].x + 6)) / (hits[k].w - 12), 0, 1);
@@ -1465,7 +1493,7 @@ static Finger* demo_finger(void) {
 }
 
 /* The square to play, its arrows and the slide line round it; then what it does now, in a line. */
-static float demo_part(float x, float y, float cw, const Theme* th) {
+static float SHARED demo_part(float x, float y, float cw, const Theme* th) {
     unsigned ink = eink ? BLACK : th->light;
     float aw = 76, gap_ = 14, m = 0;
     float s = clampf(cw - 2 * (aw + gap_) - 20, 90, 170);
@@ -1520,6 +1548,11 @@ static float demo_part(float x, float y, float cw, const Theme* th) {
     return y2 + 26;
 }
 
+#ifdef KEYS_HEX
+/* The Hex keyboard's Touch panel is its own (hex.c): its keys, inside them, and the two-finger slide. */
+static void ed_draw(const Theme* th);
+static void ed_touch(int id, int phase, float x, float y);
+#else
 static void ed_draw(const Theme* th) {
     nhits = 0;
     te_x = -1;
@@ -1680,6 +1713,7 @@ static void demo_down(int id, float x, float y) {
     mesh_note_on(f->voice, 0, e.pitch, e.pressure, e.slide, f->strike, now);
     dirty = 1;
 }
+#endif  /* KEYS_HEX: the Grid's own panel */
 
 /* ---- Your own notes: the editor ------------------------------------------------------------- */
 /* A panel across the top of the surface (or the bottom, when the square being changed is under the
@@ -2071,6 +2105,9 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
             }
             return;
         }
+#ifdef KEYS_HEX
+        if (pair_move(id, x, y)) { dirty = 1; return; }
+#endif
         Finger* f = find(id);
         if (!f) return;
         f->x = x; f->y = y; f->press = touch_press;
@@ -2079,7 +2116,11 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
     } else {
         SideTouch* s = side_find(id);
         if (s) side_up(s);
+#ifdef KEYS_HEX
+        else if (!pair_up(id)) up(id);
+#else
         else up(id);
+#endif
     }
     dirty = 1;
 }

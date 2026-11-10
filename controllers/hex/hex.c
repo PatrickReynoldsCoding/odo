@@ -4,12 +4,14 @@
  * from a layout (Wicki-Hayden, Harmonic table, Bosanquet, or your own two steps) and a tuning (12,
  * 19, 22, 31, 41 or 53 equal, 5-limit just, Pythagorean, quarter-comma meantone): tuning.h.
  *
- * It is the Grid (../grid/grid.c) with hexagons for squares: every way a finger plays a key is the
- * Grid's own code, so it has all of it: dynamics and tone inside a key, sliding out past it to bend
- * or change the tone, vibrato, Slide between notes (with its glide), Latch, Hold and the other
- * controls beside it (moved, sized and turned with two fingers), Inside and Slide out as toggles,
- * the split, Flip 90°. This file gives only what a hexagon changes: where the keys are, which note
- * each plays and how it sounds, how they look, and a touch's size or force as pressure.
+ * It is the Grid (../grid/grid.c) with hexagons for squares: inside a key, the Grid's dynamics and
+ * tone; Latch, Hold and the other controls beside it (moved, sized and turned with two fingers), the
+ * split, Flip 90°. Its touch past that is its own (below, "two fingers to slide"): one finger plays a
+ * key and stays on its note wherever it goes. Two fingers in the same key, slid out of it, bend the
+ * note: by how near the finger is to the keys before and after it along its row (on the turned
+ * keyboard, above and below), exactly that key's note at its middle and half way on the line between
+ * (C to D: C♯ on their line), snapped to so many points between keys if Snap is on. Once sliding, one
+ * finger plays it, and the other is free for another key. No vibrato, no Slide between notes.
  *
  * Laid out as the Grid is: upright, rows of keys across, each row half a key to the right of the one
  * below (on an even row: rows are counted from 0, the bottom one unscrolled), drawn a quarter turned
@@ -25,14 +27,19 @@
 /* Its own settings, after the Grid's (the manifest lists them in this order, at the end). */
 #define SCALA_MAX 128           /* tuning.h's HT_MAX_N; the manifest's "scala" max */
 #define KEYS_EXTRA_SETTINGS S_HEX_LAYOUT, S_TUNING, S_STEP_E, S_STEP_NE, S_PRESS, S_SCALA, S_SCALA1, \
-                            S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1,
+                            S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1, S_SNAP, S_SNAP_POINTS,
+/* Two fingers to slide: a finger's second (its id, 0: none, and where it is), and its slide: 0 none,
+   1 two fingers in its key, 2 sliding (the two have left the key; one finger plays it on). */
+#define KEYS_FINGER_EXTRA int mate, slide; float mx, my;
 /* A Scala file's tuning is built again when its settings (or the tuning) change. */
 static int scala_dirty = 1;
 #define KEYS_ON_SETTING(i) do { if ((i) == S_TUNING || (i) >= S_SCALA) scala_dirty = 1; } while (0)
-#define KEYS_EXTRA_DEFAULTS [S_STEP_E] = 2, [S_STEP_NE] = 7, [S_PRESS] = 1
+#define KEYS_EXTRA_DEFAULTS [S_STEP_E] = 2, [S_STEP_NE] = 7, [S_PRESS] = 1, [S_SNAP_POINTS] = 4
 
 #include "../grid/grid.c"
 #include "tuning.h"
+
+static void draw_slides(const Theme* th);
 
 /* The colours past the Grid's own (Plain, Every degree, Chord tones, Root 4th 5th, By note name). */
 enum { COL_WHITE = 5, COL_ACCIDENTALS, COL_RAINBOW, COL_DISTANCE };
@@ -373,6 +380,7 @@ static void draw_keys(const Theme* th) {
             }
         }
     }
+    draw_slides(th);
     hv = &halves[0];
     if (nhalves > 1) {
         float y = (halves[1].bot + halves[0].top) / 2;
@@ -407,4 +415,308 @@ static void draw_bar(const Theme* th) {
         }
     }
     hv = &halves[0];
+}
+
+/* ---- two fingers to slide ------------------------------------------------------------------------ */
+/* A key's middle and whether (x, y) is inside it: upright hexagons, pointed up and down. */
+static float key_mx(const Finger* f) { return f->rx + f->rs / 2; }
+static float key_my(const Finger* f) { return f->ry + f->rs / 2; }
+static int in_key(const Finger* f, float x, float y) {
+    float dx = absf(x - key_mx(f)), dy = absf(y - key_my(f)), w = f->rs, R = w / 1.7320508f;
+    return dx <= w / 2 && dy <= R - dx / 1.7320508f;
+}
+
+static void pair_init(Finger* f) { f->mate = 0; f->slide = 0; f->mx = f->x; f->my = f->y; }
+
+/* A finger down on a key another finger holds, alone: the two are one, ready to slide. */
+static int pair_down(int id, int h, int n, float x, float y) {
+    for (int k = 0; k < MAX_FINGERS; k++) {
+        Finger* f = &fingers[k];
+        if (!f->used || f->half != h || f->n != n || f->mate || f->slide) continue;
+        f->mate = id; f->slide = 1; f->mx = x; f->my = y;
+        dirty = 1;
+        return 1;
+    }
+    return 0;
+}
+
+/* Both fingers out of the key: it slides. The one further out plays it on; the other is let go of
+   (it plays nothing more until it lifts and comes down again). */
+static void slide_check(Finger* f) {
+    if (f->slide != 1 || in_key(f, f->x, f->y) || in_key(f, f->mx, f->my)) return;
+    float a = (f->x - key_mx(f)) * (f->x - key_mx(f)) + (f->y - key_my(f)) * (f->y - key_my(f));
+    float b = (f->mx - key_mx(f)) * (f->mx - key_mx(f)) + (f->my - key_my(f)) * (f->my - key_my(f));
+    int other = f->mate;
+    if (b > a) { other = f->id; f->id = f->mate; f->x = f->mx; f->y = f->my; }
+    if (nspent < MAX_FINGERS) spent[nspent++] = other;
+    f->mate = 0;
+    f->slide = 2;
+}
+
+/* Every finger on a key moves here: its second too. Nothing slides between notes; a lone finger
+   keeps its note wherever it goes. */
+static int pair_move(int id, float x, float y) {
+    for (int k = 0; k < MAX_FINGERS; k++) {
+        Finger* f = &fingers[k];
+        if (!f->used || f->n == DEMO_N) continue;
+        if (f->mate == id) { f->mx = x; f->my = y; slide_check(f); send(f); return 1; }
+        if (f->id == id) { f->x = x; f->y = y; f->press = touch_press; slide_check(f); send(f); return 1; }
+    }
+    return 0;
+}
+
+/* The second lifted before they slid: back to one finger. The first lifted: the second plays on. */
+static int pair_up(int id) {
+    for (int k = 0; k < MAX_FINGERS; k++) {
+        Finger* f = &fingers[k];
+        if (!f->used || !f->mate) continue;
+        if (f->mate == id) { f->mate = 0; f->slide = 0; dirty = 1; return 1; }
+        if (f->id == id) { f->id = f->mate; f->x = f->mx; f->y = f->my; f->mate = 0; f->slide = 0; dirty = 1; return 1; }
+    }
+    return 0;
+}
+
+/* Snap: the points between one key's note and the next's a slide stops at (1: only the notes). */
+static int snap_points(void) {
+    if (set_[S_SNAP] == 0) return 0;
+    int n = (int)set_[S_SNAP_POINTS];
+    return n < 1 ? 1 : n > 48 ? 48 : n;
+}
+
+/* How far along its row the finger is from its key's middle, in keys (upright: across; on the
+   turned keyboard, down the screen), snapped if Snap is on. */
+static float slide_keys(const Finger* f) {
+    float t = (f->x - key_mx(f)) / cell;
+    int n = snap_points();
+    if (n > 0) t = (float)roundi(t * (float)n) / (float)n;
+    return t;
+}
+
+/* The bend, sliding: between the notes of the keys either side along the row, by how near it is
+   to each (their own notes at their middles, so a just or unequal tuning bends to its own notes). */
+static float slide_semis(const Finger* f) {
+    if (f->slide != 2) return 0;
+    int e, d;
+    steps(&e, &d);
+    float t = slide_keys(f), k = floorf_(t), fr = t - k;
+    float p0 = pitch_of(f->note + (int)k * e), p1 = pitch_of(f->note + ((int)k + 1) * e);
+    return clampf(p0 + (p1 - p0) * fr - pitch_of(f->note), -47, 47);
+}
+
+/* On the keys: two fingers in a key, a ring round it; sliding, the row it slides along with its
+   snap points, and where it is. */
+static void draw_slides(const Theme* th) {
+    unsigned hot = eink ? BLACK : th->hot, ink = eink ? BLACK : th->light;
+    for (int k = 0; k < MAX_FINGERS; k++) {
+        Finger* f = &fingers[k];
+        if (!f->used || f->n == DEMO_N || !f->slide) continue;
+        hv = &halves[f->half < nhalves ? f->half : 0];
+        float cx = key_mx(f), cy = key_my(f), w = key_w();
+        if (f->slide == 1) {
+            hexagon(cx, cy, w + 10, 0, hot, 3);
+            g_circle(f->mx, f->my, w * 0.12f, 0, mesh_alpha(hot, 0.8f), 2);
+            continue;
+        }
+        float t = slide_keys(f), span = absf(t) + 1.2f;
+        g_line(cx - span * cell, cy, cx + span * cell, cy, mesh_alpha(ink, 0.5f), 2);
+        int n = snap_points();
+        if (n > 0) {
+            int a = (int)floorf_(-span * (float)n), b = (int)floorf_(span * (float)n);
+            for (int j = a; j <= b && b - a < 400; j++) {
+                float px = cx + (float)j / (float)n * cell, r = j % n == 0 ? 4.0f : 2.0f;
+                g_circle(px, cy, r, mesh_alpha(ink, j % n == 0 ? 0.9f : 0.55f), 0, 0);
+            }
+        }
+        g_circle(cx + t * cell, cy, w * 0.14f, mesh_alpha(hot, 0.85f), eink ? WHITE : th->background, 2);
+    }
+    hv = &halves[0];
+}
+
+/* ---- the Touch panel: its keys, inside them, the slide ------------------------------------------ */
+enum { K_SNAP = 60, K_POINTS };
+static int ed_points;          /* dragging the snap points' slider */
+
+/* The snap points' slider: 1 to 24. */
+static float points_slider(float x, float y, float w, const Theme* th) {
+    unsigned ink = eink ? BLACK : th->light;
+    int n = (int)set_[S_SNAP_POINTS];
+    if (n < 1) n = 1;
+    if (n > 24) n = 24;
+    char val[24];
+    put_int(val, n, 0);
+    mesh_text(x, y + 13, 11, mesh_alpha(ink, 0.85f), 0, n == 1 ? "Points between keys: only the notes" : "Points between keys");
+    mesh_text(x + w, y + 13, 11, ink, MESH_TEXT_RIGHT | MESH_TEXT_BOLD, val);
+    float ty = y + 28, t = (float)(n - 1) / 23.0f;
+    mesh_rect(x, ty - 3, w, 6, 3, mesh_alpha(ink, 0.25f), 0, 0);
+    mesh_rect(x, ty - 3, w * t, 6, 3, eink ? BLACK : mesh_alpha(ink, 0.8f), 0, 0);
+    mesh_circle(x + w * t, ty, 9, eink ? BLACK : th->hot, eink ? WHITE : th->background, 2);
+    hit(x - 6, y, w + 12, 40, K_POINTS, 0);
+    return y + 46;
+}
+static void points_to(float x) {
+    for (int k = 0; k < nhits; k++) if (hits[k].kind == K_POINTS) {
+        float t = clampf((x - (hits[k].x + 6)) / (hits[k].w - 12), 0, 1);
+        double v = (double)(1 + roundi(t * 23));
+        if (v != set_[S_SNAP_POINTS]) keep(S_SNAP_POINTS, v);
+        return;
+    }
+}
+
+/* A key drawn on the panel (surface coordinates): its middle, width, name, and lit or not. */
+static void panel_key(float x, float y, float w, int note, int lit, const Theme* th) {
+    static const float CS[6] = {0, 0.8660254f, 0.8660254f, 0, -0.8660254f, -0.8660254f};
+    static const float SN[6] = {-1, -0.5f, 0.5f, 1, 0.5f, -0.5f};
+    unsigned ink = eink ? BLACK : th->light, c = eink ? 0 : note_colour(note);
+    float r = w / 1.7320508f, pts[12];
+    for (int i = 0; i < 6; i++) {
+        /* turned, as the keyboard is: its points left and right */
+        pts[2 * i] = turned ? x + SN[i] * r : x + CS[i] * r;
+        pts[2 * i + 1] = turned ? y + CS[i] * r : y + SN[i] * r;
+    }
+    mesh_poly(6, pts, eink ? WHITE : lit ? mesh_alpha(c ? c : th->light, 0.35f) : th->square, c && !eink ? c : mesh_alpha(ink, 0.8f), lit ? 2.5f : 1.5f);
+    char name[24];
+    note_name(name, note, 1);
+    mesh_text(x, y + 5, 13, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, name);
+}
+
+/* Three keys along a row (on the turned keyboard, one above the other, as they are there), with
+   the slide's line through them, its snap points and the note half way. */
+static float slide_picture(float x, float y, float cw, const Theme* th) {
+    unsigned ink = eink ? BLACK : th->light, hot = eink ? BLACK : th->hot;
+    int e, d;
+    steps(&e, &d);
+    int mid = demo_note();
+    /* Turned, the screen's down is the row's way on (+e); upright, its right is. */
+    float w = turned ? 62 : clampf((cw - 40) / 3.4f, 50, 80), step = turned ? w * 1.02f : w * 1.08f;
+    float cx = x + cw / 2, cy = turned ? y + step + w * 0.6f : y + w * 0.7f;
+    for (int j = -1; j <= 1; j++) {
+        float kx = turned ? cx : cx + (float)j * step, ky = turned ? cy + (float)j * step : cy;
+        panel_key(kx, ky, w, mid + j * e, j == 0, th);
+    }
+    /* The line it slides along and its points: at the notes big, between them small. */
+    float ax = turned ? cx + w * 0.75f : cx - step * 1.3f, ay = turned ? cy - step * 1.3f : cy + w * 0.75f;
+    float bx = turned ? ax : cx + step * 1.3f, by = turned ? cy + step * 1.3f : ay;
+    mesh_line(ax, ay, bx, by, mesh_alpha(ink, 0.5f), 2);
+    int n = snap_points();
+    for (int j = -1; j <= 1; j++) {
+        float px = turned ? ax : cx + (float)j * step, py = turned ? cy + (float)j * step : ay;
+        mesh_circle(px, py, 4.5f, ink, 0, 0);
+        if (j < 1 && n > 1) for (int s = 1; s < n; s++) {
+            float f = (float)s / (float)n;
+            mesh_circle(turned ? px : px + f * step, turned ? py + f * step : py, 2.2f, mesh_alpha(ink, 0.6f), 0, 0);
+        }
+    }
+    {
+        /* On the line between the middle key and the one above (upright: before), half way between
+           their notes: C to D, C♯. */
+        float hx = turned ? ax : cx - step / 2, hy = turned ? cy - step / 2 : ay;
+        mesh_circle(hx, hy, 5, hot, 0, 0);
+        if (turned) mesh_text(hx + 9, hy + 4, 10, hot, MESH_TEXT_LEFT | MESH_TEXT_BOLD, "half way");
+        else mesh_text(hx, hy + 18, 10, hot, MESH_TEXT_CENTER | MESH_TEXT_BOLD, "half way");
+    }
+    /* Two fingers in the middle key, below its name. */
+    float fy = turned ? cy + w * 0.24f : cy + w * 0.24f;
+    mesh_circle(cx - w * 0.17f, fy, 8, eink ? 0 : mesh_alpha(hot, 0.35f), hot, 2);
+    mesh_circle(cx + w * 0.17f, fy, 8, eink ? 0 : mesh_alpha(hot, 0.35f), hot, 2);
+    char a[48], b[48], *p;
+    p = put(a, turned ? "Up: toward " : "Left: toward ");
+    note_name(p, mid - e, 1);
+    p = put(b, turned ? "Down: toward " : "Right: toward ");
+    note_name(p, mid + e, 1);
+    float ty = turned ? cy + step * 1.75f : cy + w * 1.4f;
+    mesh_text(x + cw / 2, ty, 11, mesh_alpha(ink, 0.85f), MESH_TEXT_CENTER, a);
+    mesh_text(x + cw / 2, ty + 16, 11, mesh_alpha(ink, 0.85f), MESH_TEXT_CENTER, b);
+    return ty + 30;
+}
+
+static void ed_draw(const Theme* th) {
+    nhits = 0;
+    te_x = -1;
+    unsigned ink = eink ? BLACK : th->light, panel = eink ? WHITE : th->background;
+    float pw = SW - 16 < 520 ? SW - 16 : 520, ph = SH - 16, px = 8, py = 8;
+    float top = py + 56, bottom = py + ph - 8;
+    ed_room = bottom - top;
+    mesh_rect(0, 0, SW, SH, 0, eink ? 0xFFFFFFCCu : 0x000000B0u, 0, 0);
+    mesh_rect(px, py, pw, ph, 16, panel, mesh_alpha(ink, 0.6f), 1.5f);
+    float in = 18, x = px + in, cw = pw - 2 * in, y = top - ed_scroll;
+    unsigned dim = mesh_alpha(ink, 0.8f);
+
+    y = section(x, y, "INSIDE A KEY", th);
+    {
+        int on = set_[S_INSIDE_ON] != 0, dyn = set_[S_IN_DYN] != 0, tone = set_[S_IN_TONE] != 0;
+        chip(x, y, cw, 30, on ? "Inside a key (dynamics, tone): on" : "Inside a key (dynamics, tone): off", on, th, K_INSIDE_ON, 0);
+        y += 38;
+        if (on) {
+            float hw = (cw - 6) / 2;
+            chip(x, y, hw, 30, dyn ? "Up/down: dynamics" : "Up/down: off", dyn, th, K_INSIDE, 0);
+            chip(x + hw + 6, y, hw, 30, tone ? "Left/right: tone" : "Left/right: off", tone, th, K_INSIDE, 1);
+            y += 38;
+            if (dyn) y = range_slider(x, y, cw, th);
+        }
+        if (set_[S_DYN] < 0.99) {
+            char dd[64];
+            put(put_int(put(dd, "The Dynamics fader is at "), roundi((float)set_[S_DYN] * 100), 0), "%: set it to 100%");
+            chip(x, y, cw, 30, dd, 0, th, K_DYN_FULL, 0);
+            y += 38;
+        }
+    }
+    y = section(x, y, "SLIDING: TWO FINGERS", th);
+    mesh_text(x, y + 10, 11, dim, 0, "Put two fingers in a key, then slide both out of it:");
+    mesh_text(x, y + 26, 11, dim, 0, "the note bends toward the keys either way, as near");
+    mesh_text(x, y + 42, 11, dim, 0, "as you are to them. Then one finger plays it on, and");
+    mesh_text(x, y + 58, 11, dim, 0, "the other can play another key. One finger: no bend.");
+    y += 72;
+    y = slide_picture(x, y, cw, th);
+    {
+        int snap = set_[S_SNAP] != 0;
+        chip(x, y, cw, 30, snap ? "Snap to points: on" : "Snap to points: off", snap, th, K_SNAP, 0);
+        y += 38;
+        if (snap) y = points_slider(x, y, cw, th);
+        else { mesh_text(x, y + 10, 11, dim, 0, "Free: any pitch between the keys' notes."); y += 24; }
+    }
+    ed_content = y + ed_scroll - top;
+    mesh_rect(px + 1, py + 1, pw - 2, top - py - 1, 15, panel, 0, 0);
+    mesh_rect(px + 1, bottom, pw - 2, py + ph - bottom - 1, 15, panel, 0, 0);
+    mesh_rect(px, 0, pw, py, 0, eink ? WHITE : 0x000000FFu, 0, 0);
+    mesh_rect(px, py + ph, pw, SH - py - ph, 0, eink ? WHITE : 0x000000FFu, 0, 0);
+    mesh_rect(px, py, pw, ph, 16, 0, mesh_alpha(ink, 0.6f), 1.5f);
+    mesh_text(px + 18, py + 30, 17, ink, MESH_TEXT_BOLD, "Touch");
+    mesh_text(px + 18, py + 47, 10, mesh_alpha(ink, 0.7f), 0, ed_content > ed_room ? "How a key answers your fingers. Drag to scroll" : "How a key answers your fingers");
+    int k = 0;
+    for (int j = 0; j < nhits; j++) if (hits[j].y + hits[j].h > top && hits[j].y < bottom) hits[k++] = hits[j];
+    nhits = k;
+    chip(px + pw - 94, py + 12, 80, 32, "Done", 1, th, K_DONE, 0);
+}
+
+static void ed_touch(int id, int phase, float x, float y) {
+    if (phase != MESH_DOWN && id != ed_finger) return;
+    if (phase == MESH_UP || phase == MESH_CANCEL) { ed_finger = -1; ed_points = 0; ed_thumb = -1; ed_dragging = 0; return; }
+    if (phase == MESH_MOVE) {
+        if (ed_points) { points_to(x); return; }
+        if (ed_thumb >= 0) { range_to(x); return; }
+        if (ed_dragging) {
+            float most = ed_content - ed_room;
+            ed_scroll = clampf(ed_scroll0 + (ed_from - y), 0, most > 0 ? most : 0);
+            dirty = 1;
+        }
+        return;
+    }
+    ed_finger = id; ed_points = 0; ed_dragging = 0;
+    for (int k = 0; k < nhits; k++) {
+        Hit* h = &hits[k];
+        if (x < h->x || x > h->x + h->w || y < h->y || y > h->y + h->h) continue;
+        switch (h->kind) {
+        case K_DONE: keep(S_TOUCH_EDIT, 0); break;
+        case K_INSIDE_ON: keep(S_INSIDE_ON, set_[S_INSIDE_ON] != 0 ? 0 : 1); break;
+        case K_INSIDE: { int s = h->arg ? S_IN_TONE : S_IN_DYN; keep(s, set_[s] != 0 ? 0 : 1); break; }
+        case K_RANGE: ed_thumb = -1; range_to(x); break;
+        case K_DYN_FULL: keep(S_DYN, 1); resend_all(); break;
+        case K_SNAP: keep(S_SNAP, set_[S_SNAP] != 0 ? 0 : 1); break;
+        case K_POINTS: ed_points = 1; points_to(x); break;
+        default: break;
+        }
+        dirty = 1;
+        return;
+    }
+    ed_dragging = 1; ed_from = y; ed_scroll0 = ed_scroll;
 }

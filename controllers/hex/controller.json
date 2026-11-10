@@ -1,9 +1,9 @@
 {
   "format": 1,
   "id": "patrickreynolds/hex",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "name": "Hex",
-  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to bend, wiggle for vibrato; press harder for pressure",
+  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, bend the note toward the keys either way (snapped to points if you like); press harder for pressure",
   "author": "Patrick Reynolds",
   "licence": "MIT",
   "needs": {
@@ -353,8 +353,9 @@
         "Normal",
         "Wide"
       ],
-      "default": 2,
-      "group": "Touch"
+      "default": 0,
+      "group": "Touch",
+      "hidden": true
     },
     {
       "id": "labels",
@@ -611,7 +612,8 @@
       "name": "Slide between notes",
       "type": "switch",
       "default": false,
-      "group": "Touch"
+      "group": "Touch",
+      "hidden": true
     },
     {
       "id": "noteEdit",
@@ -914,7 +916,8 @@
       "group": "Touch",
       "showIf": {
         "slide": true
-      }
+      },
+      "hidden": true
     },
     {
       "id": "glideLR",
@@ -924,7 +927,8 @@
       "group": "Touch",
       "showIf": {
         "slide": true
-      }
+      },
+      "hidden": true
     },
     {
       "id": "glideUD",
@@ -934,7 +938,8 @@
       "group": "Touch",
       "showIf": {
         "slide": true
-      }
+      },
+      "hidden": true
     },
     {
       "id": "flip90",
@@ -948,7 +953,8 @@
       "name": "Only slide between notes",
       "type": "switch",
       "default": false,
-      "group": "Touch"
+      "group": "Touch",
+      "hidden": true
     },
     {
       "id": "sideSlide",
@@ -960,7 +966,8 @@
         "Bottom"
       ],
       "default": 0,
-      "group": "Controls"
+      "group": "Controls",
+      "hidden": true
     },
     {
       "id": "place0",
@@ -1062,10 +1069,11 @@
     },
     {
       "id": "outOn",
-      "name": "Sliding out past a key",
+      "name": "Sliding out past a square",
       "type": "switch",
       "default": true,
-      "group": "Touch"
+      "group": "Touch",
+      "hidden": true
     },
     {
       "id": "sideInside",
@@ -1089,7 +1097,8 @@
         "Bottom"
       ],
       "default": 0,
-      "group": "Controls"
+      "group": "Controls",
+      "hidden": true
     },
     {
       "id": "place7",
@@ -2345,6 +2354,26 @@
       "step": 0,
       "default": 0,
       "hidden": true
+    },
+    {
+      "id": "slideSnap",
+      "name": "Snap the slide to points",
+      "type": "switch",
+      "default": false,
+      "group": "Touch"
+    },
+    {
+      "id": "snapPoints",
+      "name": "Points between keys",
+      "type": "number",
+      "min": 1,
+      "max": 24,
+      "step": 1,
+      "default": 4,
+      "group": "Touch",
+      "showIf": {
+        "slideSnap": true
+      }
     }
   ]
 }

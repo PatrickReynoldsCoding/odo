@@ -9,12 +9,12 @@ g = json.load(open(root + '/controllers/grid/controller.json'), object_pairs_hoo
 m = collections.OrderedDict()
 m['format'] = 1
 m['id'] = 'patrickreynolds/hex'
-m['version'] = '1.1.0'
+m['version'] = '2.0.0'
 m['name'] = 'Hex'
 m['description'] = ("Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape "
                     "in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or "
-                    "just intonation, or a Scala file's tuning. Each key plays as the Grid's squares do: dynamics and tone inside it, slide out to "
-                    "bend, wiggle for vibrato; press harder for pressure")
+                    "just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, "
+                    "bend the note toward the keys either way (snapped to points if you like); press harder for pressure")
 for k in ('author', 'licence'):
     m[k] = g[k]
 m['needs'] = collections.OrderedDict([('fingers', 10), ('touchSize', False)])
@@ -46,6 +46,13 @@ words = {
     'sideLock': dict(hidden=True),
     'noteEdit': dict(hidden=True),
     'interval': dict(hidden=True),
+    # Its touch past the inside of a key is its own (two fingers to slide): the Grid's ways out of a
+    # square, vibrato and Slide between notes are not used.
+    'xTarget': dict(hidden=True), 'yTarget': dict(hidden=True), 'bendRange': dict(hidden=True),
+    'vibrato': dict(hidden=True, default=0), 'slide': dict(hidden=True, default=False),
+    'slideGlide': dict(hidden=True), 'glideLR': dict(hidden=True), 'glideUD': dict(hidden=True),
+    'slideOnly': dict(hidden=True, default=False), 'sideSlide': dict(hidden=True, default=0),
+    'outOn': dict(hidden=True), 'sideOut': dict(hidden=True, default=0),
 }
 settings = []
 for s in g['settings']:
@@ -81,6 +88,12 @@ settings += [
 ]
 settings += [S(id='scala%d' % k, type='number', min=-1000000, max=1000000, step=0, default=0, hidden=True)
              for k in range(1, 129)]
+# Two fingers to slide: snapped to so many points between one key's note and the next's (hex.c S_SNAP).
+settings += [
+    S(id='slideSnap', name='Snap the slide to points', type='switch', default=False, group='Touch'),
+    S(id='snapPoints', name='Points between keys', type='number', min=1, max=24, step=1, default=4, group='Touch',
+      showIf={'slideSnap': True}),
+]
 m['settings'] = settings
 out = json.dumps(m, ensure_ascii=False, indent=2)
 open(root + '/controllers/hex/controller.json', 'w').write(out + '\n')
