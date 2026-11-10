@@ -600,6 +600,8 @@ private fun TakesPanel() {
     PChips(listOf("50%", "75%", "100%"), speeds.indexOfFirst { Math.abs(it - t.speed) < 1e-6 }.let { if (it < 0) 2 else it }) {
         t.changeSpeed(speeds[it]); confirmDelete = false
     }
+    PLabel("Fingers", t.looks[t.look], rule = true)
+    PChips(t.looks, t.look) { t.changeLook(it); confirmDelete = false }
     if (on.sections.isNotEmpty()) {
         PLabel("Loop", if (t.loop < 0 || t.loop >= on.sections.size) "All of it" else on.sections[t.loop], rule = true)
         PChips(listOf("All of it") + on.sections, t.loop + 1) { t.changeLoop(it - 1); confirmDelete = false }

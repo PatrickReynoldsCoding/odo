@@ -535,6 +535,11 @@ FN(jbyteArray, nativeTakeTick)(JNIEnv* env, jobject, jfloat w, jfloat h, jintArr
         st.finger = uint32_t(c[0]); st.trail = uint32_t(c[1]); st.next = uint32_t(c[2]); st.text = uint32_t(c[3]); st.back = uint32_t(c[4]);
         st.radius = s[0]; st.grow = s[1]; st.trailMs = s[2]; st.previewMs = s[3]; st.textSize = s[4];
     }
+    if (env->GetArrayLength(sizes) >= 6) {                 // the Fingers choice (GhostStyle::Look)
+        jfloat look;
+        env->GetFloatArrayRegion(sizes, 5, 1, &look);
+        st.look = std::clamp(int(look), 0, 3);
+    }
     std::vector<uint8_t> d = player().drawGhosts(0, w, h, st);
     jbyteArray out = env->NewByteArray(jsize(d.size()));
     env->SetByteArrayRegion(out, 0, jsize(d.size()), reinterpret_cast<const jbyte*>(d.data()));

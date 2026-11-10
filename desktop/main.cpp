@@ -278,6 +278,7 @@ struct App {
         railHidden = j["railHidden"].boolean();
         savedFullscreen = j["fullscreen"].boolean();
         eink = j["eink"].boolean();
+        ghostLook = std::clamp(int(j["ghostLook"].num(0)), 0, 3);
         blockGestures = j["blockGestures"].boolean();
         masterVolume = std::clamp(float(j["volume"].num(1)), 0.f, 2.f);
         presetName = j["preset"].str();
@@ -345,6 +346,7 @@ struct App {
         if (hasEffects) f << ",\n  \"effects\": " << mpe::preset::toJson(mpe::preset::effectsJson(effects));
         f << ",\n  \"railHidden\": " << (railHidden ? "true" : "false")
           << ",\n  \"eink\": " << (eink ? "true" : "false")
+          << ",\n  \"ghostLook\": " << ghostLook
           << ",\n  \"blockGestures\": " << (blockGestures ? "true" : "false")
           << ",\n  \"volume\": " << masterVolume
           << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
@@ -1130,6 +1132,7 @@ struct App {
     mpe::take::Player player;
     std::string takeNote;                  // what happened last, for the panel
     double takeSpeed = 1;
+    int ghostLook = 0;                   // the Fingers choice: mpe::take::GhostStyle::Look
     int takeLoop = -1;                     // the section played round and round, -1: all of it once
     bool confirmTakeDelete = false;
     bool openingTake = false;              // the open dialog is for a take file
@@ -1409,6 +1412,7 @@ struct App {
         s.finger = c.finger; s.trail = c.trail; s.next = c.next; s.text = c.text; s.back = c.back;
         s.radius = tokens::ghost::radius; s.grow = tokens::ghost::grow; s.trailMs = tokens::ghost::trailMs;
         s.previewMs = tokens::ghost::previewMs; s.textSize = tokens::ghost::textSize;
+        s.look = ghostLook;
         return s;
     }
     // ---- the rail and its panels -----------------------------------------------------------------
@@ -1513,7 +1517,7 @@ struct App {
     // ---- the panel beside the rail ----
 
     enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
-               aRecord, aTake, aListen, aAlong, aSpeed, aLoop, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
+               aRecord, aTake, aListen, aAlong, aSpeed, aFingers, aLoop, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
                aTakeUse, aTakeKeep };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
@@ -1718,6 +1722,8 @@ struct App {
                 for (int k = 0; k < 3; k++) if (std::fabs(kSpeeds[k] - takeSpeed) < 1e-6) sp = k;
                 p.items.push_back({PItem::Label, "Speed", std::to_string(int(std::lround(takeSpeed * 100))) + "%", x, y, in, 40}); y += 42;
                 chips({"50%", "75%", "100%"}, sp, aSpeed, 0);
+                p.items.push_back({PItem::Label, "Fingers", mpe::take::kGhostLooks[std::clamp(ghostLook, 0, 3)], x, y, in, 40}); y += 42;
+                chips({mpe::take::kGhostLooks[0], mpe::take::kGhostLooks[1], mpe::take::kGhostLooks[2], mpe::take::kGhostLooks[3]}, ghostLook, aFingers, 0);
                 if (!f.sections.empty()) {
                     p.items.push_back({PItem::Label, "Loop", takeLoop < 0 || takeLoop >= int(f.sections.size()) ? "All of it" : f.sections[size_t(takeLoop)],
                                        x, y, in, 40}); y += 42;
@@ -1853,6 +1859,7 @@ struct App {
                 case aListen: playTake(mpe::take::Player::Listen); break;
                 case aAlong: playTake(mpe::take::Player::PlayAlong); break;
                 case aSpeed: takeSpeed = kSpeeds[std::clamp(it.arg2, 0, 2)]; player.setSpeed(takeSpeed); break;
+                case aFingers: ghostLook = std::clamp(it.arg2, 0, 3); saveConfig(); break;
                 case aLoop: takeLoop = it.arg2 - 1; if (player.loaded()) player.loopSection(takeLoop, nowMs(), takeSink()); break;
                 case aTakeDelete: if (confirmTakeDelete) deleteTake(); else confirmTakeDelete = true; break;
                 case aTakeOpen: askToOpenTake(); break;

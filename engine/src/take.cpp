@@ -797,20 +797,58 @@ std::vector<uint8_t> Player::drawGhosts(int side, float w, float h, const GhostS
     const float bigger = std::max(1.f, std::min(w, h) / 400.f);   // a little bigger on a big surface
     const float R = st.radius * std::min(bigger, 1.6f);
     for (const Stroke& s : strokes_) {
-        if (s.side != side) continue;
-        // Coming: a ring that closes in on where the finger goes down.
+        if (s.side != side || st.look == GhostStyle::Off) continue;
+        // Coming: where the finger goes down next.
         if (s.down > pos && s.down <= pos + st.previewMs * speed_) {
             const Touch& d = take_.touches[s.events.front()];
-            float k = float((s.down - pos) / (st.previewMs * speed_));
+            float k = float((s.down - pos) / (st.previewMs * speed_));   // 1 far off, 0 now
             float x = d.x * w, y = d.y * h;
-            l.circle(x, y, R * (1 + 1.6f * k), 0, List::alpha(st.next, 1 - k), 2.5f);
-            if (!s.label.empty()) l.text(x, y + st.textSize * 0.35f, st.textSize * 0.85f, List::alpha(st.next, 1 - k), 1 | 4, s.label);
+            if (st.look == GhostStyle::Dots) {
+                // A small dot, filling in as it comes.
+                l.circle(x, y, R * 0.32f, List::alpha(st.next, 0.9f * (1 - k)), 0, 0);
+                if (!s.label.empty()) l.text(x, y - R * 0.5f, st.textSize * 0.75f, List::alpha(st.next, 1 - k), 1 | 4, s.label);
+            } else if (st.look == GhostStyle::Falling) {
+                // A drop falling from the top to its key, its path behind it.
+                float fy = y * (1 - k);
+                l.line(x, 0, x, fy, List::alpha(st.next, 0.25f * (1 - k)), std::max(2.f, R * 0.25f));
+                l.rect(x - R * 0.6f, fy - R * 0.35f, R * 1.2f, R * 0.7f, R * 0.3f, List::alpha(st.next, 0.35f + 0.6f * (1 - k)));
+                if (!s.label.empty()) l.text(x, fy - R * 0.55f, st.textSize * 0.8f, List::alpha(st.next, 1 - k), 1 | 4, s.label);
+            } else {
+                // A ring that closes in on where the finger goes down.
+                l.circle(x, y, R * (1 + 1.6f * k), 0, List::alpha(st.next, 1 - k), 2.5f);
+                if (!s.label.empty()) l.text(x, y + st.textSize * 0.35f, st.textSize * 0.85f, List::alpha(st.next, 1 - k), 1 | 4, s.label);
+            }
             continue;
         }
         float x, y, f;
         if (!at(s, pos, &x, &y, &f)) continue;
         x *= w; y *= h;
-        // Its trail: where it was over the last moments, fading.
+        f = std::clamp(f, 0.f, 1.f);
+        if (st.look == GhostStyle::Dots) {
+            // A dot, a little bigger as it presses harder; a short trail.
+            float px = x, py = y;
+            for (int k = 1; k <= 6; k++) {
+                double tp = pos - st.trailMs * 0.5 * k / 6;
+                float tx, ty, tf;
+                if (tp < s.down || !at(s, tp, &tx, &ty, &tf)) break;
+                tx *= w; ty *= h;
+                l.line(px, py, tx, ty, List::alpha(st.trail, 0.6f * (1 - float(k) / 7)), 2);
+                px = tx; py = ty;
+            }
+            l.circle(x, y, R * 0.38f + st.grow * 0.35f * f, List::alpha(st.finger, 0.9f), 0, 0);
+            if (!s.label.empty()) l.text(x, y - R * 0.6f, st.textSize * 0.8f, st.text, 1 | 4, s.label);
+            continue;
+        }
+        if (st.look == GhostStyle::Falling) {
+            // Held: the key lit under the finger, and above it a bar of the time it has left.
+            float left = float(std::max(0.0, s.up - pos) / (st.previewMs * speed_));
+            float bh = std::min(y, R * 2.5f * std::min(left, 4.f));
+            if (bh > 1) l.rect(x - R * 0.18f, y - R * 0.4f - bh, R * 0.36f, bh, R * 0.18f, List::alpha(st.trail, 0.8f));
+            l.rect(x - R * 0.7f, y - R * 0.4f, R * 1.4f, R * 0.8f, R * 0.35f, List::alpha(st.finger, 0.55f + 0.4f * f));
+            if (!s.label.empty()) l.text(x, y + st.textSize * 0.35f, st.textSize * 0.9f, st.back | 0xFFu, 1 | 4, s.label);
+            continue;
+        }
+        // Rings: its trail, where it was over the last moments, fading.
         const int n = 14;
         float px = x, py = y;
         for (int k = 1; k <= n; k++) {
@@ -822,7 +860,7 @@ std::vector<uint8_t> Player::drawGhosts(int side, float w, float h, const GhostS
             l.line(px, py, tx, ty, List::alpha(st.trail, a), std::max(1.5f, R * 0.45f * a));
             px = tx; py = ty;
         }
-        float r = R + st.grow * std::clamp(f, 0.f, 1.f);
+        float r = R + st.grow * f;
         l.glow(x, y, r * 1.5f, List::alpha(st.finger, 0.45f), List::alpha(st.finger, 0));
         l.circle(x, y, r, List::alpha(st.finger, 0.18f), st.finger, 3);
         if (!s.label.empty()) l.text(x, y + st.textSize * 0.35f, st.textSize, st.text, 1 | 4, s.label);

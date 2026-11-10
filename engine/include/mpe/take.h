@@ -243,7 +243,14 @@ std::vector<double> settingsFor(const Take& t, int side, const Json& manifest, s
 struct GhostStyle {
     uint32_t finger = 0xFFFFFFFFu, trail = 0xFFFFFF80u, next = 0xFFFFFF60u, text = 0xFFFFFFFFu, back = 0x000000A0u;
     float radius = 22, grow = 16, trailMs = 450, previewMs = 700, textSize = 15;
+    // How the fingers look (the app's Fingers choice): rings closing in on the next note, a ring under
+    // each finger and its trail; small dots; notes falling from the top to their key, each held one
+    // with a bar of the time it has left; or none (only the line along the top and the words).
+    enum Look { Rings = 0, Dots = 1, Falling = 2, Off = 3 };
+    int look = Rings;
 };
+// The Fingers choice's names, in order (Look): the same words in both apps.
+inline const char* const kGhostLooks[4] = {"Rings", "Dots", "Falling", "Off"};
 
 class Player {
 public:

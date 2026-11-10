@@ -52,9 +52,12 @@ object Takes {
     var surfaceH = 0f
 
     private lateinit var dir: File
+    private var appContext: Context? = null
 
     fun init(context: Context) {
         dir = File(context.filesDir, "takes").apply { mkdirs() }
+        appContext = context.applicationContext
+        look = (prefs?.getInt("ghost_look", 0) ?: 0).coerceIn(0, 3)
         scan()
     }
 
@@ -196,11 +199,22 @@ object Takes {
             if (now < 0 || Math.floor(now / 1000) != Math.floor(recording / 1000) || (recording == 0.0) != (now == 0.0)) recording = now
         }
         if (playing == 0) return null
+        ghostSizes[5] = look.toFloat()
         val g = Native.nativeTakeTick(w, h, if (Eink) Tokens.Ghost.eink else Tokens.Ghost.dark, ghostSizes)
         if (g == null) playing = 0                // it came to its end
         return g
     }
-    private val ghostSizes = floatArrayOf(Tokens.Ghost.radius, Tokens.Ghost.grow, Tokens.Ghost.trailMs, Tokens.Ghost.previewMs, Tokens.Ghost.textSize)
+    private val ghostSizes = floatArrayOf(Tokens.Ghost.radius, Tokens.Ghost.grow, Tokens.Ghost.trailMs, Tokens.Ghost.previewMs, Tokens.Ghost.textSize, 0f)
+
+    /** How the ghost fingers look: 0 Rings, 1 Dots, 2 Falling, 3 Off (the engine's GhostStyle::Look). Kept. */
+    var look by mutableIntStateOf(0)
+        private set
+    val looks = listOf("Rings", "Dots", "Falling", "Off")
+    fun changeLook(k: Int) {
+        look = k.coerceIn(0, looks.size - 1)
+        prefs?.edit()?.putInt("ghost_look", look)?.apply()
+    }
+    private val prefs get() = appContext?.getSharedPreferences("mpe", Context.MODE_PRIVATE)
 
     fun delete(t: Take) {
         if (t.file.name == chosen) stop()

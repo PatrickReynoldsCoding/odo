@@ -19,7 +19,7 @@ The rail's **App** group has **Takes**, after **App**. Its panel, the same in bo
 |---|---|
 | RECORD | **Record**; while recording, **Stop recording · 0:12**. Recording starts at the first finger down. Stopped, it is kept as "Take 1", "Take 2"... |
 | YOURS | Each take: its name, and "0:38 · Grid · recorded" (or "written by hand"). Tap one to choose it. **Open a take file…** |
-| THIS TAKE | **Listen** (it plays, with ghost fingers) or **Play along** (only the ghost fingers: you play). Tapped again: **Stop**. **Speed**: 50%, 75%, 100%. **Loop**: "All of it", or one section round and round. **Use its settings** (play with how it was set up, without playing it). **Keep its settings as a new preset** (one of yours, named as the take, on view). **Share "…" as a file…**, **Delete "…"** (tap twice). |
+| THIS TAKE | **Listen** (it plays, with ghost fingers) or **Play along** (only the ghost fingers: you play). Tapped again: **Stop**. **Speed**: 50%, 75%, 100%. **Fingers**: Rings, Dots, Falling, Off (how the ghost fingers look; kept). **Loop**: "All of it", or one section round and round. **Use its settings** (play with how it was set up, without playing it). **Keep its settings as a new preset** (one of yours, named as the take, on view). **Share "…" as a file…**, **Delete "…"** (tap twice). |
 
 A take is a take and a preset: it keeps everything a preset keeps (each side's controller and all
 its settings, each part's sound and its version, the part's level, tone, drive, touch, release,
@@ -39,6 +39,10 @@ The ghost fingers: a glowing circle where each finger is, bigger with more force
 name in it and a fading trail behind it; a ring closing in where the next finger goes down; a thin
 line across the top for how far it has played; the section's name and the take's words at the
 top. Their colours and sizes are `ghost` in `ui/tokens.json` (dark and e-ink).
+That is **Rings**, the first of the **Fingers** looks. **Dots**: a small dot for each finger (bigger
+with more force) and for the next ones coming, a short trail, no rings. **Falling**: each next note
+falls from the top of the surface to its key; a held one lights its key, with a bar above it of
+the time it has left. **Off**: no fingers, only the line along the top and the words.
 
 ## The file
 
