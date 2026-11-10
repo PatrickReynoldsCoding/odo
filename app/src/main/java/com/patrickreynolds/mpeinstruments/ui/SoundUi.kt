@@ -120,8 +120,12 @@ fun PitchAssistControls(scale: Int, root: Int, strength: Float, accent: Color, c
 @Composable
 fun PartEffects(k: Int, c: Color) {
     val p = AppState.perf.part(k)
-    LabeledSlider("Brightness", p.brightness, 0f..1f, if (p.brightness >= 0.999f) "open" else pct(p.brightness), accent = c) { v ->
-        AppState.updatePart(k) { it.copy(brightness = v) }
+    // Past 100%: open, with air (a lift above about 6 kHz).
+    LabeledSlider("Brightness", p.brightness, 0f..1.5f,
+                  when { p.brightness > 1.01f -> "open, air ${pct(p.brightness - 1f)}"; p.brightness >= 0.99f -> "open"; else -> pct(p.brightness) },
+                  accent = c) { v -> AppState.updatePart(k) { it.copy(brightness = if (kotlin.math.abs(v - 1f) < 0.02f) 1f else v) } }
+    LabeledSlider("Width", p.width, 0f..1f, if (p.width < 0.01f) "mono" else pct(p.width), accent = c) { v ->
+        AppState.updatePart(k) { it.copy(width = v) }
     }
     LabeledSlider("Drive", p.drive, 0f..1f, if (p.drive < 0.01f) "clean" else pct(p.drive), accent = c) { v ->
         AppState.updatePart(k) { it.copy(drive = v) }

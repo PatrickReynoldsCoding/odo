@@ -5,16 +5,16 @@ about: A short excerpt of ROLI's demo, to learn from: ROLI, "Seaboard BLOCK M: A
 about: played on a Seaboard with Kontakt Upright Bass. Music and performance theirs (all rights reserved).
 about: Transcribed for odo by machine (Basic Pitch) with each note's own pitch curve (bends, scoops,
 about: vibrato) and loudness (pressure) measured from the recording, in free time (one beat a second).
-about: On the touch pad, chromatic: Bass (the pad): bass-guitar.
+about: On the touch pad, chromatic: the pad: upright-bass.
 about: A test of how close a touch screen gets to the Seaboard: listen against the video.
 tempo: 60
 meter: 4/4
 key: C major
 controller: patrickreynolds/touchpad
-settings: {"scale": 0, "size": 24, "vibrato": 0, "glide": 1, "shift": -7}
-sound: patrickreynolds/bass-guitar
+settings: {"scale": 0, "vibrato": 0, "glide": 1, "size": 24, "shift": -6}
+sound: patrickreynolds/upright-bass
 volume: 1
-preset: {"effects": {"bpm": 60, "reverbSize": 0.65, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/bass-guitar"}]}]}
+preset: {"effects": {"bpm": 60, "reverbSize": 0.62, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/upright-bass", "volume": 1, "brightness": 1, "drive": 0, "pressureCurve": 0.8, "reverb": 0.18, "delay": 0, "release": 0, "width": 0}]}]}
 
 score
 tempo 60

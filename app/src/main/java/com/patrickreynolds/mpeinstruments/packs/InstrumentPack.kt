@@ -38,23 +38,25 @@ data class SoundDefaults(
     val drive: Float = 0f,
     val pressureCurve: Float = 1f,
     val release: Float = 0f,
+    val width: Float = 0f,
 ) {
     /** A part playing [instrument] (its newest version, if it is another instrument), with these effects. */
     fun applyTo(p: Part, instrument: String = p.instrument) = p.copy(instrument = instrument,
         version = if (instrument == p.instrument) p.version else "", reverb = reverb, delay = delay,
-        brightness = brightness, drive = drive, pressureCurve = pressureCurve, release = release)
+        brightness = brightness, drive = drive, pressureCurve = pressureCurve, release = release, width = width)
 
     companion object {
         fun from(o: JSONObject?, d: SoundDefaults = SoundDefaults()) = if (o == null) d else SoundDefaults(
             f(o, "reverb", d.reverb), f(o, "reverbSize", d.reverbSize), f(o, "reverbDamp", d.reverbDamp), f(o, "delay", d.delay),
-            f(o, "brightness", d.brightness), f(o, "drive", d.drive), f(o, "pressureCurve", d.pressureCurve), f(o, "release", d.release))
+            f(o, "brightness", d.brightness), f(o, "drive", d.drive), f(o, "pressureCurve", d.pressureCurve), f(o, "release", d.release),
+            f(o, "width", d.width))
         /** An instrument's own `declare sound "reverb=0.3 delay=0 ..."`; what it leaves out comes from [d]. */
         fun declared(text: String, d: SoundDefaults = SoundDefaults()): SoundDefaults {
             val m = text.trim().split(Regex("\\s+")).mapNotNull { it.split("=").takeIf { p -> p.size == 2 } }
                 .mapNotNull { p -> p[1].toFloatOrNull()?.let { p[0] to it } }.toMap()
             return SoundDefaults(m["reverb"] ?: d.reverb, m["reverbSize"] ?: d.reverbSize, m["reverbDamp"] ?: d.reverbDamp,
                 m["delay"] ?: d.delay, m["brightness"] ?: d.brightness, m["drive"] ?: d.drive,
-                m["pressureCurve"] ?: d.pressureCurve, m["release"] ?: d.release)
+                m["pressureCurve"] ?: d.pressureCurve, m["release"] ?: d.release, m["width"] ?: d.width)
         }
         private fun f(o: JSONObject, k: String, d: Float) = o.optDouble(k, d.toDouble()).toFloat()
     }

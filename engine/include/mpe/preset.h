@@ -33,6 +33,7 @@ struct Part {
     int transpose = 0;
     double volume = 1, brightness = 1, drive = 0, pressureCurve = 1, reverb = 0.15, delay = 0;
     double release = 0;        // s the note plays on after the finger lifts; 0: the instrument's own
+    double width = 0;          // 0 mono in the middle .. 1 wide (brightness past 1: air)
     Arp arp;
 };
 

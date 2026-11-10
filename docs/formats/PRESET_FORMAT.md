@@ -52,6 +52,8 @@ UTF-8 JSON, at most 1 MB. MIME type `application/vnd.odo.preset+json`.
 | `parts[].sound` | The instrument package's id (`patrickreynolds/cello`, not the older `strings/cello`). |
 | `parts[].version` | (1.1) The sound's version the preset was made with. Both apps write it. If that version is here, it plays; if not, the newest plays and the app says so. Left out: the newest. |
 | `parts[].*` | How the part plays. A part with only `sound` plays with that sound's own effects. |
+| `parts[].brightness` | 0 dark to 1 open; past 1 (to 2) open with air, a lift above about 6 kHz (+8 dB at 2). |
+| `parts[].width` | 0 mono, in the middle, to 1 wide: the part spread across the stereo field (its low end stays in the middle). Left out: 0. |
 
 Values out of range are clamped. A value of the wrong type takes the default.
 

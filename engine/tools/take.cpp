@@ -306,13 +306,14 @@ int renderCmd(const std::string& file, const Options& o) {
             c.drive = float(sm["drive"].num(0));
             c.pressureCurve = float(sm["pressureCurve"].num(1));
             c.release = float(sm["release"].num(0));
+            c.width = float(sm["width"].num(0));
             if (part == 0) { perf.reverbSize = float(sm["reverbSize"].num(0.5)); perf.reverbDamp = float(sm["reverbDamp"].num(0.4)); }
             if (size_t(k) < setup.sides.size() && j < setup.sides[size_t(k)].parts.size()) {
                 const preset::Part& q = setup.sides[size_t(k)].parts[j];
                 if (q.full) {
                     c.transpose = q.transpose; c.volume = float(q.volume); c.brightness = float(q.brightness);
                     c.drive = float(q.drive); c.pressureCurve = float(q.pressureCurve); c.reverb = float(q.reverb);
-                    c.delay = float(q.delay); c.release = float(q.release);
+                    c.delay = float(q.delay); c.release = float(q.release); c.width = float(q.width);
                     c.arp = q.arp.on; c.order = ArpOrder(q.arp.order); c.rate = float(q.arp.rate); c.gate = float(q.arp.gate);
                     c.octaves = q.arp.octaves; c.latch = q.arp.latch;
                 }

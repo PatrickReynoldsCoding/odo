@@ -17,7 +17,7 @@ int main() {
     Side s;
     s.controller = "patrickreynolds/grid";
     s.settings = mpe::Json::parse(R"({"split": 1, "slide": 0.25, "latch": true})");
-    Part a; a.sound = "patrickreynolds/bass-guitar"; a.full = true; a.transpose = -12; a.reverb = 0.05;
+    Part a; a.sound = "patrickreynolds/bass-guitar"; a.full = true; a.transpose = -12; a.reverb = 0.05; a.width = 0.6; a.brightness = 1.4;
     a.arp.on = true; a.arp.order = 2; a.arp.rate = 8; a.arp.octaves = 2;
     Part b; b.sound = "patrickreynolds/lead"; b.full = true; b.volume = 0.7;
     s.parts = {a, b};
@@ -35,6 +35,7 @@ int main() {
     CHECK(q.sides[0].parts.size() == 2, "two parts");
     const Part& qa = q.sides[0].parts[0];
     CHECK(qa.full && qa.sound == a.sound && qa.transpose == -12 && near(qa.reverb, 0.05), "part 0's sound and settings");
+    CHECK(near(qa.width, 0.6) && near(qa.brightness, 1.4), "part 0's width and air (brightness past 1)");
     CHECK(qa.arp.on && qa.arp.order == 2 && near(qa.arp.rate, 8) && qa.arp.octaves == 2, "part 0's arp");
     CHECK(near(q.sides[0].parts[1].volume, 0.7), "part 1's volume");
     CHECK(write(q) == text, "written again, the same file");

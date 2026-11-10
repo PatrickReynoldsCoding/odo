@@ -930,6 +930,7 @@ struct App {
             c.drive = float(s["drive"].num(0));
             c.pressureCurve = float(s["pressureCurve"].num(1));
             c.release = float(s["release"].num(0));
+            c.width = float(s["width"].num(0));
             // The preset on gave this part how it plays (as odo on Android's parts): while its sound
             // is the one it named.
             const std::vector<mpe::preset::Part>& given = sides[k].parts;
@@ -943,6 +944,7 @@ struct App {
                 c.reverb = float(q.reverb);
                 c.delay = float(q.delay);
                 c.release = float(q.release);
+                c.width = float(q.width);
                 c.arp = q.arp.on;
                 c.order = mpe::ArpOrder(q.arp.order);
                 c.rate = float(q.arp.rate);

@@ -98,6 +98,7 @@ Json partJson(const Part& q) {
     const Arp& a = q.arp;
     o.num("transpose", q.transpose).num("volume", q.volume).num("brightness", q.brightness).num("drive", q.drive)
      .num("pressureCurve", q.pressureCurve).num("reverb", q.reverb).num("delay", q.delay).num("release", q.release)
+     .num("width", q.width)
      .obj("arp", Obj().flag("on", a.on).num("order", a.order).num("rate", a.rate).num("gate", a.gate)
                       .num("octaves", a.octaves).flag("latch", a.latch).j);
     return o.j;
@@ -119,6 +120,7 @@ Part partFrom(const Json& q) {
     part.reverb = finite(q["reverb"], d.reverb, 0, 1);
     part.delay = finite(q["delay"], d.delay, 0, 1);
     part.release = finite(q["release"], d.release, 0, 60);
+    part.width = finite(q["width"], d.width, 0, 1);
     const Json& a = q["arp"];
     part.arp.on = a["on"].boolean(d.arp.on);
     part.arp.order = int(finite(a["order"], d.arp.order, 0, 5));

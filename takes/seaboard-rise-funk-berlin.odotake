@@ -5,17 +5,17 @@ about: A short excerpt of ROLI's demo, to learn from: ROLI, "Seaboard RISE x SWA
 about: played on a Seaboard with a split: Cypher2 "Mean Hard-Sync Funk 5D" | Cypher2 "Berlin Progression". Music and performance theirs (all rights reserved).
 about: Transcribed for odo by machine (Basic Pitch) with each note's own pitch curve (bends, scoops,
 about: vibrato) and loudness (pressure) measured from the recording, in free time (one beat a second).
-about: On the touch pad, chromatic: Funk (left pad): sync-lead; Berlin (right pad): supersaw.
+about: On the touch pad, chromatic: left pad: sync-funk; right pad: berlin.
 about: A test of how close a touch screen gets to the Seaboard: listen against the video.
 tempo: 60
 meter: 4/4
 key: C major
 controller: patrickreynolds/touchpad
-settings: {"scale": 0, "size": 49, "vibrato": 0, "glide": 1, "split": true, "splitAt": 0.45, "rightSize": 47, "shift": -15, "shift2": -7}
-sound: patrickreynolds/sync-lead
-sound: patrickreynolds/supersaw
+settings: {"scale": 0, "vibrato": 0, "glide": 1, "split": true, "splitAt": 0.5, "size": 49, "rightSize": 47, "shift": 2, "shift2": -21}
+sound: patrickreynolds/sync-funk
+sound: patrickreynolds/berlin
 volume: 1
-preset: {"effects": {"bpm": 60, "reverbSize": 0.65, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/sync-lead"}, {"sound": "patrickreynolds/supersaw"}]}]}
+preset: {"effects": {"bpm": 89, "reverbSize": 0.55, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/sync-funk", "volume": 1, "brightness": 1, "drive": 0.15, "pressureCurve": 0.8, "reverb": 0.12, "delay": 0, "release": 0, "width": 0}, {"sound": "patrickreynolds/berlin", "volume": 0.55, "brightness": 1, "drive": 0, "pressureCurve": 1, "reverb": 0.3, "delay": 0.18, "release": 0, "width": 0.5}]}]}
 
 score
 tempo 60

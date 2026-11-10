@@ -12,7 +12,8 @@
         "synths/pad",
         "synths/string-machine",
         "synths/glass-pad",
-        "synths/brass-synth"
+        "synths/brass-synth",
+        "synths/berlin"
       ]
     },
     {
@@ -33,7 +34,8 @@
       "instruments": [
         "synths/sub-bass",
         "synths/acid-bass",
-        "synths/wobble-bass"
+        "synths/wobble-bass",
+        "synths/sync-funk"
       ]
     }
   ]

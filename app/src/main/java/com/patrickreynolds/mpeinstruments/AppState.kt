@@ -461,7 +461,7 @@ object AppState {
             .put("version", find(part.instrument, part.version)?.version ?: "").put("transpose", part.transpose)
             .put("volume", d(part.volume)).put("brightness", d(part.brightness)).put("drive", d(part.drive))
             .put("pressureCurve", d(part.pressureCurve)).put("reverb", d(part.reverb))
-            .put("delay", d(part.delay)).put("release", d(part.release))
+            .put("delay", d(part.delay)).put("release", d(part.release)).put("width", d(part.width))
             .put("arp", JSONObject().put("on", part.arp.on).put("order", part.arp.order).put("rate", d(part.arp.rate))
                 .put("gate", d(part.arp.gate)).put("octaves", part.arp.octaves).put("latch", part.arp.latch)))
         val o = JSONObject().put("format", "odo-preset/1").put("name", p.name)

@@ -41,12 +41,13 @@ data class Part(
     val delay: Float = 0f,
     val release: Float = 0f,       // s the note plays on and fades after the finger lifts; 0 = the instrument's own
     val arp: Arp = Arp(),
+    val width: Float = 0f,         // 0 mono in the middle .. 1 wide (brightness past 1: air)
 ) {
     fun json() = JSONObject().apply {
         put("instrument", instrument); if (version.isNotEmpty()) put("version", version); put("transpose", transpose)
         put("volume", volume.toDouble()); put("brightness", brightness.toDouble()); put("drive", drive.toDouble())
         put("pressureCurve", pressureCurve.toDouble()); put("reverb", reverb.toDouble()); put("delay", delay.toDouble())
-        put("release", release.toDouble()); put("arpeggio", arp.json())
+        put("release", release.toDouble()); put("width", width.toDouble()); put("arpeggio", arp.json())
     }
 
     companion object {
@@ -57,7 +58,8 @@ data class Part(
             o.optDouble("reverb", d.reverb.toDouble()).toFloat(), o.optDouble("delay", d.delay.toDouble()).toFloat(),
             o.optDouble("release", d.release.toDouble()).toFloat().coerceIn(0f, RELEASE_MAX),
             // Before 0.16 the arp was in the part itself; from 0.16 to 0.20 in the controller (Controller.legacyArps).
-            o.optJSONObject("arpeggio")?.let { Arp.from(it) } ?: Arp.from(o))
+            o.optJSONObject("arpeggio")?.let { Arp.from(it) } ?: Arp.from(o),
+            o.optDouble("width", d.width.toDouble()).toFloat().coerceIn(0f, 1f))
     }
 }
 
@@ -104,7 +106,7 @@ data class Perf(
 
     /** The layout nativeSetPerformance (jni.cpp) reads. Keep the two in step. */
     fun toArray(shape: EngineShape): FloatArray {
-        val a = FloatArray(11 + PARTS * 14)
+        val a = FloatArray(11 + PARTS * 15)
         val layout = layout(shape)
         a[0] = layout.toFloat(); a[1] = shape.splitNote.toFloat(); a[2] = bpm
         a[3] = SCALES[shape.scale.coerceIn(SCALES.indices)].mask.toFloat(); a[4] = shape.scaleRoot.toFloat()
@@ -118,11 +120,11 @@ data class Perf(
                 layout == 2 -> part(0).arp
                 else -> p.arp
             }.let { if (shape.arpLatch) it else it.copy(latch = false) }
-            val b = 11 + 14 * k
+            val b = 11 + 15 * k
             a[b] = if (r.on) 1f else 0f; a[b + 1] = r.order.toFloat(); a[b + 2] = r.rate; a[b + 3] = r.gate
             a[b + 4] = r.octaves.toFloat(); a[b + 5] = if (r.latch) 1f else 0f; a[b + 6] = p.transpose.toFloat()
             a[b + 7] = p.volume; a[b + 8] = p.brightness; a[b + 9] = p.drive; a[b + 10] = p.pressureCurve
-            a[b + 11] = p.reverb; a[b + 12] = p.delay; a[b + 13] = p.release
+            a[b + 11] = p.reverb; a[b + 12] = p.delay; a[b + 13] = p.release; a[b + 14] = p.width
         }
         return a
     }

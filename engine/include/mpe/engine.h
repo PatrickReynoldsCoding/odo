@@ -63,7 +63,10 @@ struct PartConfig {
     int transpose = 0;         // semitones, on top of the engine's transpose
     float volume = 1;
     // sound
-    float brightness = 1;      // 0 = dark (300 Hz low-pass) .. 1 = open (no filter)
+    float brightness = 1;      // 0 = dark (300 Hz low-pass) .. 1 = open (no filter) .. 2 = open, with air
+                               // (a high shelf from about 6 kHz, up to +8 dB)
+    float width = 0;           // 0 = mono, in the middle .. 1 = wide (spread across the stereo field; the
+                               // low end stays in the middle)
     float drive = 0;           // 0 = clean .. 1 = saturated
     float pressureCurve = 1;   // pressure ^ curve: < 1 swells sooner, > 1 needs a firmer press
     float reverb = 0;          // send to the master reverb, 0..1

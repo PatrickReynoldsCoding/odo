@@ -107,7 +107,7 @@ source of truth. Example:
 | `post` | whether it has a `post` stage | the packing tool |
 | `tags` | for finding it: winds, keys, drums | `tags` |
 | `knobs` | its own knobs: id, name, range, default | from its sliders |
-| `sound` | the effects it is meant to be heard with: reverb and delay sends, room, brightness, drive, touch response, release | `sound` (today in the pack manifests) |
+| `sound` | the effects it is meant to be heard with: reverb and delay sends, room, brightness (past 1: air), drive, touch response, release, width | `sound` (today in the pack manifests) |
 | `faust` | the Faust version that expanded it | the packing tool |
 
 Test hints stay as they are (`ringout`, `window`, `pitched`) and go into the manifest too.

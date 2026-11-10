@@ -56,6 +56,42 @@ int main() {
         CHECK(ok, "single: two fingers, two voices on part 0, each following its own finger (%zu voices)", v.size());
     }
 
+    // ---- a part's width and air ----
+    {
+        auto play = [](const char* sound, float width, float brightness, float* side, float* top) {
+            Rig r(sound);
+            Performance p;
+            p.part[0].width = width; p.part[0].brightness = brightness; p.part[0].reverb = 0;
+            r.engine.setPerformance(p);
+            r.run(0.01);
+            r.noteOn(1, 72, 90);
+            r.press(1, 90);
+            std::vector<float> buf(256);
+            double s = 0, m = 0, hi = 0, all = 0;
+            float p1 = 0, p2 = 0;
+            for (int k = 0; k < kSr / 2 / 128; k++) {
+                r.engine.render(buf.data(), 128, r.clockNs);
+                r.clockNs += int64_t(1e9 * 128 / kSr);
+                if (k < 40) continue;
+                for (int i = 0; i < 128; i++) {
+                    float L = buf[2 * i], R = buf[2 * i + 1];
+                    s += double(L - R) * (L - R); m += double(L + R) * (L + R);
+                    const float d2 = L - 2 * p1 + p2;                                   // a second difference: the top
+                    hi += double(d2) * d2; all += double(L) * L; p2 = p1; p1 = L;
+                }
+            }
+            *side = float(std::sqrt(s / std::max(m, 1e-12)));
+            *top = float(std::sqrt(hi / std::max(all, 1e-12)));
+        };
+        float side0, top0, side1, top1, sideA, topA;
+        play("winds/flute", 0, 1, &side0, &top0);
+        play("winds/flute", 1, 1, &side1, &top1);
+        play("synths/square-lead", 0, 1, &sideA, &top0);
+        play("synths/square-lead", 0, 1.6f, &sideA, &topA);
+        CHECK(side0 < 0.01f && side1 > 0.2f, "width: 0 is mono, 1 spreads it (side/mid %.3f, %.3f)", side0, side1);
+        CHECK(topA > top0 * 1.2f && sideA < 0.01f, "air: brightness past 1 lifts the top (%.3f -> %.3f)", top0, topA);
+    }
+
     // ---- split: left of the split point plays part 0, the rest part 1 ----
     {
         Rig r("strings/cello");

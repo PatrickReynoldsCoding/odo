@@ -67,7 +67,8 @@ preset: {"effects": {"reverbSize": 0.7, "reverbDamp": 0.35}, "sides": [{"parts":
 | `effects.delayBeats`, `effects.delayFeedback`, `effects.delayPingPong` | Delay | The echo: its time in beats (at `effects.bpm`), how much comes back (0 to 0.9), and whether it goes left and right. |
 | `effects.bpm` | | The tempo the delay and arps follow. Set it to the score's `tempo`. |
 | `parts[].volume` | Level | 0 to 1.5; 1 as the pack means it. |
-| `parts[].brightness` | Brightness | 0 to 1: 1 open, lower is darker. |
+| `parts[].brightness` | Brightness | 0 to 1: 1 open, lower is darker; past 1 (to 2): open with air (a lift above about 6 kHz). |
+| `parts[].width` | Width | 0 to 1: 0 mono in the middle, 1 spread wide across the stereo field. |
 | `parts[].drive` | Drive | 0 to 1: 0 clean. |
 | `parts[].pressureCurve` | Touch | Below 1 sensitive (a light touch is loud), above 1 firm. |
 | `parts[].release` | Release | Seconds the note plays on after the finger lifts; 0 the instrument's own. A pedal held down, for a piano. |

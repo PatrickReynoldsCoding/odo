@@ -5,17 +5,17 @@ about: A short excerpt of ROLI's demo, to learn from: ROLI, "Seaboard RISE x SWA
 about: played on a Seaboard with a split: Equator Acoustic Piano | SWAM Viola. Music and performance theirs (all rights reserved).
 about: Transcribed for odo by machine (Basic Pitch) with each note's own pitch curve (bends, scoops,
 about: vibrato) and loudness (pressure) measured from the recording, in free time (one beat a second).
-about: On the touch pad, chromatic: Piano (left pad): piano; Viola (right pad): viola.
+about: On the touch pad, chromatic: left pad: piano; right pad: viola.
 about: A test of how close a touch screen gets to the Seaboard: listen against the video.
 tempo: 60
 meter: 4/4
 key: C major
 controller: patrickreynolds/touchpad
-settings: {"scale": 0, "size": 49, "vibrato": 0, "glide": 1, "split": true, "splitAt": 0.6, "rightSize": 47, "shift": -13, "shift2": -18}
+settings: {"scale": 0, "vibrato": 0, "glide": 1, "split": true, "splitAt": 0.6, "size": 49, "rightSize": 47, "shift": -13, "shift2": -19}
 sound: patrickreynolds/piano
 sound: patrickreynolds/viola
 volume: 1
-preset: {"effects": {"bpm": 60, "reverbSize": 0.65, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/piano"}, {"sound": "patrickreynolds/viola"}]}]}
+preset: {"effects": {"bpm": 60, "reverbSize": 0.62, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/piano", "volume": 1, "brightness": 1.5, "drive": 0, "pressureCurve": 0.7, "reverb": 0.3, "delay": 0, "release": 0, "width": 0.6}, {"sound": "patrickreynolds/viola", "volume": 1, "brightness": 1.35, "drive": 0, "pressureCurve": 1, "reverb": 0.4, "delay": 0, "release": 0, "width": 0.6}]}]}
 
 score
 tempo 60

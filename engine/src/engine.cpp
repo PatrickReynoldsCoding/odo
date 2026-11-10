@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#if defined(__x86_64__) || defined(__SSE__)
+#include <xmmintrin.h>
+#endif
 #include "faust/dsp/dsp.h"
 #include "faust/gui/MapUI.h"
 
@@ -124,7 +127,13 @@ struct Engine::Fx {
     int pos = 0;
     float time = -1, lpL = 0, lpR = 0;         // delay time in frames (smoothed), feedback low-pass
     float tone[kParts][4] = {};                     // per part: two one-pole stages, left and right
+    float air[kParts][2] = {};                      // per part: the air shelf's low-pass, left and right
+    std::vector<float> wide[kParts];                // per part: the width's delay line
+    int widePos[kParts] = {};
+    float wideHp[kParts][2] = {};                   // its high-pass (the low end stays in the middle)
+    float wideNow[kParts] = {};                     // the width, smoothed
     explicit Fx(int sr) : dl(size_t(sr) * 5 / 2), dr(size_t(sr) * 5 / 2) {
+        for (auto& w : wide) w.assign(size_t(sr) / 40 + 2, 0.f);   // 25 ms
         reverb = mpe_create_fx_reverb();
         reverb->init(sr);
         reverb->buildUserInterface(&ui);
@@ -638,6 +647,42 @@ void Engine::partFx(int p, float* l, float* r, int n) {
         const float k = 1.f + c.drive * 8.f, makeup = 1.f / std::sqrt(k);
         for (int i = 0; i < n; i++) { l[i] = std::tanh(l[i] * k) * makeup; r[i] = std::tanh(r[i] * k) * makeup; }
     }
+    // Air: brightness past 1 lifts the top, a shelf from about 6 kHz (up to +8 dB at 2).
+    float* sa = fx_->air[p];
+    if (c.brightness > 1.001f) {
+        const float g = std::pow(10.f, std::min(c.brightness - 1.f, 1.f) * 8.f / 20.f) - 1.f;
+        const float a = 1.f - std::exp(-2.f * float(M_PI) * 6000.f / sr_);
+        for (int i = 0; i < n; i++) {
+            sa[0] += (l[i] - sa[0]) * a; l[i] += (l[i] - sa[0]) * g;
+            sa[1] += (r[i] - sa[1]) * a; r[i] += (r[i] - sa[1]) * g;
+        }
+    } else if (n > 0) {
+        sa[0] = l[n - 1]; sa[1] = r[n - 1];
+    }
+    // Width: the part's middle, and beside it a copy a few ms late (above about 250 Hz), added to
+    // one side and taken from the other: a mono sound spread across the stereo field.
+    float& wn = fx_->wideNow[p];
+    const float wantW = clampf(c.width, 0.f, 1.f);
+    if (wantW > 0.001f || wn > 0.001f) {
+        std::vector<float>& d = fx_->wide[p];
+        int& pos = fx_->widePos[p];
+        float* hp = fx_->wideHp[p];
+        const int len = int(d.size());
+        const int lag = std::min(len - 1, int(0.011f * float(sr_)));      // 11 ms
+        const float ha = 1.f - std::exp(-2.f * float(M_PI) * 250.f / sr_);
+        const float k = 1.f - std::exp(-1.f / (0.05f * float(sr_)));     // 50 ms smoothing
+        for (int i = 0; i < n; i++) {
+            wn += (wantW - wn) * k;
+            const float mid = (l[i] + r[i]) * 0.5f, side = (l[i] - r[i]) * 0.5f;
+            d[size_t(pos)] = mid;
+            float late = d[size_t((pos - lag + len) % len)];
+            pos = (pos + 1) % len;
+            hp[0] += (late - hp[0]) * ha;                                 // its low end out
+            const float s2 = side + (late - hp[0]) * wn * 0.7f;
+            l[i] = mid + s2;
+            r[i] = mid - s2;
+        }
+    }
 }
 
 // The delay (tempo-synced, optionally ping-pong) and the reverb, added to the mix.
@@ -742,7 +787,24 @@ int Engine::fingers(FingerView* out, int max) const {
     return n;
 }
 
+// While audio is made: numbers too small to hear (denormals, in the tails of decaying filters) are
+// flushed to zero, not worked out slowly; as it was afterwards.
+namespace {
+struct FlushDenormals {
+#if defined(__x86_64__) || defined(__SSE__)
+    unsigned was;
+    FlushDenormals() : was(_mm_getcsr()) { _mm_setcsr(was | 0x8040); }   // FTZ and DAZ
+    ~FlushDenormals() { _mm_setcsr(was); }
+#elif defined(__aarch64__)
+    uint64_t was;
+    FlushDenormals() { asm volatile("mrs %0, fpcr" : "=r"(was)); uint64_t v = was | (uint64_t(1) << 24); asm volatile("msr fpcr, %0" : : "r"(v)); }
+    ~FlushDenormals() { asm volatile("msr fpcr, %0" : : "r"(was)); }
+#endif
+};
+}  // namespace
+
 void Engine::render(float* out, int frames, int64_t nowNs) {
+    FlushDenormals ftz;
     const int64_t t0 = steadyNowNs();
     takeUpdates();
 
