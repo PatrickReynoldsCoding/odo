@@ -14,8 +14,8 @@ them. Written 2026-11-09, with the first version of the controller.
   every tuning.
 - **Colours**: the Grid's five ways, and four more: White keys, Sharps and flats (the Lumatone's
   way), Rainbow (Hexatone's spectrum), Distance from the key.
-- **Touch**: everything the Grid does (it is the Grid's code), plus a touch's size or force as
-  pressure, the nearest a screen has to a Lumatone key's aftertouch.
+- **Touch**: the Grid's dynamics and tone inside a key, its own two-finger slide (below), and a
+  touch's size or force as pressure, the nearest a screen has to a Lumatone key's aftertouch.
 
 ## What we looked at
 
@@ -110,15 +110,35 @@ note's nearest 12-tone degree on the chain of fifths), and:
 ### Touch
 
 The Hex keyboard is the Grid with hexagons: `hex.c` defines `KEYS_HEX` and includes
-`controllers/grid/grid.c`, and gives only the keys' shape (where they are, which note each plays,
-how it sounds, how it looks). Every way a finger plays a key is the Grid's own code: dynamics and
-tone inside a key, sliding out past it to bend (toward the next key's note, now in any tuning) or
-change the tone, vibrato, Slide between notes and its glide (between the six keys round one), the
-Slide, Inside and Slide out toggles (double tap for good, held for now), Latch, Hold, the Bend,
-Tone and Dynamics controls, moving, sizing and turning them with two fingers, the split, the
-flips and Flip 90°. Its rail is the Grid's, the same groups and words ("key" for "square"), plus
-Note layout, Tuning, the two steps and Press harder. Its manifest is made from the Grid's
-(`controllers/hex/manifest.py`) and a test checks they keep the same order.
+`controllers/grid/grid.c`, and gives the keys' shape (where they are, which note each plays, how
+it sounds, how it looks) and its own touch past the inside of a key. From the Grid: dynamics and
+tone inside a key (and the Inside toggle), Latch, Hold, the Bend, Tone and Dynamics controls,
+moving, sizing and turning them with two fingers, the split, the flips and Flip 90°. Its rail is
+the Grid's, the same groups and words ("key" for "square"), less what its touch doesn't use, plus
+Note layout, Tuning, the two steps, Press harder and the slide's snap. Its manifest is made from
+the Grid's (`controllers/hex/manifest.py`) and a test checks they keep the same order.
+
+**Two fingers to slide** (hex 2.0.0; `hex.c`, "two fingers to slide"):
+
+- **One finger** plays a key and keeps its note wherever it goes: no bend, no slide between notes,
+  no vibrato (the Grid's ways out of a square, Slide between notes and the wiggle are off and off
+  the rail).
+- **Two fingers in the same key** are one note. Slide both out of the key and it bends. Before
+  both are out, nothing; lift the second and it is one finger again; lift the first and the second
+  plays on.
+- **The bend** follows how near the finger is to the keys either side along its row (on the turned
+  keyboard, the keys above and below): each key's own note at its middle, and in between by how far
+  across: on the line between C and D, C♯. Further keys on the row go on the same way. In a just or
+  unequal tuning it bends between the keys' own notes. Across the row the finger changes nothing.
+- **Once sliding, one finger plays it**: the one further out of the key; the other is let go of and
+  can lift and play another key.
+- **Snap the slide to points** (Touch): off, any pitch; on, **Points between keys** (1 to 24) evenly
+  spaced points from one key's note to the next. 1: only the notes; 4: quarter of the way each.
+- **Drawn**: two fingers in a key, a ring round it; sliding, the row's line with its points and
+  where the slide is.
+- **The Touch panel** is its own: Inside a key (dynamics, tone, the loudness range), then three keys
+  along a row with the slide's line, its points and the half way point, and the snap. Both apps
+  show it (the controller draws it).
 
 A Lumatone key knows how far down it is, all the time. A touch screen knows where a finger is and,
 on most, how big the touch is (Android's pressure is usually worked out from it) or, on some, how

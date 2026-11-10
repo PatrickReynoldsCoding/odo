@@ -264,26 +264,77 @@ static void hexPackage() {
     CHECK(pressures.size() <= 1, "Press harder off: the force changes nothing (%zu pressures)", pressures.size());
     host.touch(id++, ControllerHost::Up, 251, 400 - 2.5f * 86.60254f, 0, 0);
 
-    // The Grid's ways of playing are there: slide between notes, from C4 to the key on its right (D4).
-    host.setting(at("slide"), 1);
+    // Its own touch: one finger keeps its note wherever it goes (no bend, no slide between notes).
+    // Upright (Flip 90°, not mirrored), the row runs left to right: C4 in the middle, D4 to its
+    // right, B♭3 to its left (Wicki-Hayden: whole tones along a row). The middle key's middle is
+    // (251, 183.5), the keys 100 apart.
+    const float my = 400 - 2.5f * 86.60254f;
     int before = ons;
-    host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0);
-    host.touch(id, ControllerHost::Move, 351, 400 - 2.5f * 86.60254f, 0, 0);
-    CHECK(ons == before + 2 && std::fabs(ch[lastCh].pitch() - 62) < 0.01, "Slide between notes: onto the next key, its note (%.2f)", ch[lastCh].pitch());
-    host.touch(id++, ControllerHost::Up, 351, 400 - 2.5f * 86.60254f, 0, 0);
-    host.setting(at("slide"), 0);
-    // Sliding out across, past the key's edge (upright, across is left and right): a bend toward the
-    // next key's note (Bend, Next note: the defaults). The finger's slow position follows in time.
-    host.touch(id, ControllerHost::Down, 251, 400 - 2.5f * 86.60254f, 0, 0);
-    host.touch(id, ControllerHost::Move, 380, 400 - 2.5f * 86.60254f, 0, 0);
-    for (int k = 0; k < 60; k++) {
-        host.tick();
-        struct timespec ts{0, 10000000};
-        nanosleep(&ts, nullptr);
-    }
-    float bent = ch[lastCh].pitch();
-    CHECK(bent > 60.5f && bent <= 62.01f, "sliding out to the right bends toward the next key's D (%.2f)", bent);
-    host.touch(id++, ControllerHost::Up, 351, 400 - 2.5f * 86.60254f, 0, 0);
+    host.touch(id, ControllerHost::Down, 251, my, 0, 0);
+    host.touch(id, ControllerHost::Move, 351, my, 0, 0);
+    CHECK(ons == before + 1 && std::fabs(ch[lastCh].pitch() - 60) < 0.01, "one finger slid onto D: still C4, no bend (%.2f)", ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, 351, my, 0, 0);
+    // Two fingers in C4: one note. Only one out: nothing yet. Both out: it slides, by how near the
+    // finger is to the next key: on the line between C and D (50 right), C♯; at D's middle, D.
+    before = ons;
+    int a = id++, b = id++;
+    host.touch(a, ControllerHost::Down, 245, my, 0, 0);
+    host.touch(b, ControllerHost::Down, 257, my + 5, 0, 0);
+    CHECK(ons == before + 1, "two fingers in a key: one note (%d)", ons - before);
+    host.touch(a, ControllerHost::Move, 330, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "one of the two out of the key: no bend yet (%.2f)", ch[lastCh].pitch());
+    host.touch(b, ControllerHost::Move, 305, my + 5, 0, 0);      // both out: the one further out (a) plays it
+    CHECK(std::fabs(ch[lastCh].pitch() - 61.58f) < 0.02, "both out: a slide, 0.79 of a key toward D (%.2f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Move, 301, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 61) < 0.02, "on the line between C and D: C♯ (%.2f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Move, 351, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 62) < 0.01, "at D's middle: D (%.2f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Move, 151, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 58) < 0.01, "back past C to B♭'s middle: B♭ (%.2f)", ch[lastCh].pitch());
+    int slideCh = lastCh;
+    // The other finger is free: it lifts and plays another key, a new note, and the slide goes on.
+    host.touch(b, ControllerHost::Up, 305, my, 0, 0);
+    before = ons;
+    host.touch(b, ControllerHost::Down, 351, my - 2 * 86.60254f, 0, 0);
+    CHECK(ons == before + 1 && lastCh != slideCh, "the freed finger plays another key: a new note");
+    host.touch(b, ControllerHost::Up, 351, my - 2 * 86.60254f, 0, 0);
+    host.touch(a, ControllerHost::Move, 201, my, 0, 0);
+    CHECK(std::fabs(ch[slideCh].pitch() - 59) < 0.02, "the slide goes on with one finger: B (%.2f)", ch[slideCh].pitch());
+    host.touch(a, ControllerHost::Up, 201, my, 0, 0);
+    // Snap: 1 point, only the notes; 4 points, quarter steps between keys.
+    host.setting(at("slideSnap"), 1);
+    host.setting(at("snapPoints"), 1);
+    a = id++; b = id++;
+    host.touch(a, ControllerHost::Down, 245, my, 0, 0);
+    host.touch(b, ControllerHost::Down, 257, my, 0, 0);
+    host.touch(a, ControllerHost::Move, 325, my, 0, 0);
+    host.touch(b, ControllerHost::Move, 310, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 62) < 0.01, "snap, 1 point: 0.74 of a key snaps to D (%.2f)", ch[lastCh].pitch());
+    host.setting(at("snapPoints"), 4);
+    host.touch(a, ControllerHost::Move, 314, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 61.5f) < 0.01, "snap, 4 points: 0.63 of a key snaps to 3/4 (%.2f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Up, 314, my, 0, 0);
+    host.touch(b, ControllerHost::Up, 310, my, 0, 0);
+    host.setting(at("slideSnap"), 0);
+    // The second finger lifted before they slid: back to one finger, which plays no bend.
+    a = id++; b = id++;
+    host.touch(a, ControllerHost::Down, 251, my, 0, 0);
+    host.touch(b, ControllerHost::Down, 255, my, 0, 0);
+    host.touch(b, ControllerHost::Up, 255, my, 0, 0);
+    host.touch(a, ControllerHost::Move, 351, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "the second lifted first: one finger again, no bend (%.2f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Up, 351, my, 0, 0);
+    // A just tuning slides to its own notes: at D's middle, D just (9/8 above C: 2.04 semitones).
+    host.setting(at("tuning"), HT_JUST);
+    a = id++; b = id++;
+    host.touch(a, ControllerHost::Down, 245, my, 0, 0);
+    host.touch(b, ControllerHost::Down, 257, my, 0, 0);
+    host.touch(b, ControllerHost::Move, 330, my, 0, 0);
+    host.touch(a, ControllerHost::Move, 351, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 62.039f) < 0.01, "just: the slide reaches D at 9/8 (%.3f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Up, 351, my, 0, 0);
+    host.touch(b, ControllerHost::Up, 330, my, 0, 0);
+    host.setting(at("tuning"), HT_12);
     host.stop();
     CHECK(host.lastError().empty(), "no errors from the WebAssembly (%s)", host.lastError().c_str());
     (void)offs; (void)vel;

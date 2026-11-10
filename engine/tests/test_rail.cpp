@@ -248,9 +248,11 @@ static void hex() {
     Json g = load("grid"), m = load("hex");
     const Json& gs = g["settings"];
     const Json& hs = m["settings"];
-    // Its own, in hex.c's order (KEYS_EXTRA_SETTINGS): five, then a Scala file's count and its 128 places.
+    // Its own, in hex.c's order (KEYS_EXTRA_SETTINGS): five, then a Scala file's count and its 128 places, then the slide's snap.
     std::vector<std::string> own = {"hexLayout", "tuning", "stepRight", "stepUpRight", "press", "scala"};
     for (int k = 1; k <= 128; k++) own.push_back("scala" + std::to_string(k));
+    own.push_back("slideSnap");
+    own.push_back("snapPoints");
     bool same = hs.size() == gs.size() + own.size();
     for (size_t i = 0; i < gs.size() && same; i++)
         if (hs[i]["id"].str() != gs[i]["id"].str() || hs[i]["type"].str() != gs[i]["type"].str()) {
@@ -284,9 +286,21 @@ static void hex() {
           "Keys top to bottom: 3 to 16, 5");
     auto col = find(rs, "colours");
     CHECK(col && col->choices.size() == 9 && col->display == "Sharps and flats", "Colours: the Grid's and four more, Sharps and flats");
+    // Its touch is its own: the Grid's slide, vibrato and slide-out settings are not on its rail;
+    // its slide's snap is, the points only with it on.
+    for (const char* id : {"slide", "slideOnly", "sideSlide", "sideOut", "outOn", "vibrato", "slideGlide", "xTarget"})
+        CHECK(!find(rs, id), "%s: not on the Hex keyboard's rail", id);
+    auto sn = find(rs, "slideSnap");
+    CHECK(sn && sn->group == "Touch" && sn->widget == Widget::Switch && !find(rs, "snapPoints"), "Snap the slide to points: a switch in Touch, off");
+    {
+        auto vs = defaults(m);
+        vs[idx(m, "slideSnap")] = 1;
+        auto sp = find(rail::rows(m, vs), "snapPoints");
+        CHECK(sp && sp->widget == Widget::Slider && sp->display == "4", "on: Points between keys, a slider at 4");
+    }
     // The settings both have read the same, but for the word for a key.
     auto grs = rail::rows(g, defaults(g));
-    for (const char* id : {"slide", "slideOnly", "touchEdit", "latch", "sideLatch", "sideSlide", "sideInside", "sideOut", "flip90", "moveControls", "vibrato"}) {
+    for (const char* id : {"touchEdit", "latch", "sideLatch", "sideInside", "flip90", "moveControls"}) {
         auto a = find(grs, id), b = find(rs, id);
         CHECK(a && b && a->label == b->label && a->group == b->group && a->choices == b->choices, "%s: the same on both", id);
     }
