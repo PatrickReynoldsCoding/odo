@@ -2,7 +2,7 @@
   "id": "winds-brass-voices",
   "name": "Winds, Brass & Voices",
   "order": 4,
-  "description": "Flute, clarinet, oboe, sax, pan flute, whistle and harmonica; trumpet, trombone and horn; sung vowels. Mostly quick sketches.",
+  "description": "Flute, clarinet, oboe, sax, duduk, pan flute, whistle and harmonica; trumpet, trombone and horn; sung vowels. Mostly quick sketches.",
   "source": "https://github.com/PatrickReynoldsCoding/faust-mpe-instruments",
   "groups": [
     {
@@ -13,6 +13,8 @@
         "winds/clarinet",
         "winds/oboe",
         "winds/alto-sax",
+        "winds/tenor-sax",
+        "winds/duduk",
         "winds/pan-flute",
         "winds/whistle",
         "winds/harmonica"

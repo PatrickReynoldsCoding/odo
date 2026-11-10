@@ -66,6 +66,7 @@ int main() {
         r.engine.setPerformance(p);
         r.run(0.01);
         r.noteOn(1, 48, 80); r.noteOn(2, 72, 80);
+        r.press(1, 70); r.press(2, 70);       // pressed as a finger is: a bowed note with no pressure is near silent
         auto x = r.run(0.6);
         CHECK(gated(r, 0, 48) == 1 && gated(r, 1, 48) == 0, "split: note 48 plays the left part only");
         CHECK(gated(r, 1, 72) == 1 && gated(r, 0, 72) == 0, "split: note 72 plays the right part only");

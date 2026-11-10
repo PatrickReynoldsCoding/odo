@@ -129,7 +129,7 @@ Times in a note (FROM, UNTIL) are parts of it, 0 its start, 1 its end.
 | `swell A B [C]` | - | Pressure from A to B through the note (A, B at its middle, then C). |
 | `press P [P...]` | 0.7 | Pressure P all through; several: a curve, the values spread evenly from the note's start to its end. |
 | `tone A [B...]` | - | Tone (slide) from A to B; more than two: a curve, as `press`. |
-| `pitch D [D...]` | - | The pitch as a curve: semitones from the note (`0`, `+0.3`, `-1.5`), spread evenly from its start to its end, the finger going between them. For a performance's own scoops, falls and vibrato, measured from a recording. Up to 256 values. Needs a controller whose pitch follows the finger (the touch pad; the Grid with `"slide": 1` starts a new note at each square). |
+| `pitch D [D...]` | - | The pitch as a curve: semitones from the note (`0`, `+0.3`, `-1.5`), spread evenly from its start to its end, the finger going between them. For a performance's own scoops, falls and vibrato, measured from a recording. Up to 256 values. Needs a controller whose pitch follows the finger: the touch pad with `"glide": 1` (free; at 0 it snaps to the notes). The Grid with `"slide": 1` starts a new note at each square. A curved note is checked to within a quarter of a semitone of its curve. |
 | `slide [PART]` | 0.25 | Does not lift: in the last PART of the note it slides to this voice's next note, which starts without a new finger. A portamento, or a leading note sliding into the tonic. |
 | `stacc` | | Lifts half way through: short and detached. |
 | `say WORDS` | | Words to show while this note plays. Last in the brackets. |

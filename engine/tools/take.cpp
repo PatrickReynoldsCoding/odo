@@ -167,7 +167,7 @@ int check(const std::vector<std::string>& files, const Options& o) {
         for (const auto& e : rep.errors) std::printf("  error: %s\n", e.c_str());
         int wrong = 0;
         for (const auto& p : rep.played) {
-            if (p.found && std::fabs(p.pitch - p.wanted) < 0.05f) continue;
+            if (p.asWritten()) continue;
             wrong++;
             if (!p.found) std::printf("  line %d: %s was not heard at all (%s)\n", p.line, noteName(p.wanted).c_str(), barBeat(t, p.t).c_str());
             else std::printf("  line %d: wanted %s, heard %s (%s): %s\n", p.line, noteName(p.wanted).c_str(), noteName(p.pitch).c_str(),

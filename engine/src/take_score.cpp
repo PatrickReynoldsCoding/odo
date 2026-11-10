@@ -544,6 +544,24 @@ bool Layout::scan(const Package& pkg, const std::vector<double>& values, float w
                 if (std::fabs(grid[k].pitch - float(c.note)) <= best + 0.08f) { mx += x; my += y; m++; }
             }
             c.x = float(mx / m); c.y = float(my / m);
+            // Where the pitch moves with the finger across a key (a touch pad gliding freely), the
+            // middle found on the probe grid can be a little off the note: find where it is exact.
+            Note at;
+            if (probe(c.x, c.y, 0.7f, &at) && std::fabs(at.pitch - float(c.note)) > 0.005f) {
+                float a = c.x0, b = c.x1;
+                Note na, nb;
+                if (probe(a, c.y, 0.7f, &na) && probe(b, c.y, 0.7f, &nb) &&
+                    (na.pitch - float(c.note)) * (nb.pitch - float(c.note)) < 0) {
+                    const bool rising = nb.pitch > na.pitch;
+                    for (int it = 0; it < 14; it++) {
+                        float mid = (a + b) / 2;
+                        Note nm;
+                        if (!probe(mid, c.y, 0.7f, &nm)) break;
+                        if ((nm.pitch < float(c.note)) == rising) a = mid; else b = mid;
+                    }
+                    c.x = (a + b) / 2;
+                }
+            }
             cells_.push_back(c);
         }
     responses_.assign(cells_.size(), Response());
@@ -741,6 +759,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
             if (!p.cell) continue;
             Report::Played pl;
             pl.line = n.line; pl.wanted = n.pitches[k]; pl.t = t0; pl.end = t1;
+            if (curve) { pl.curved = true; pl.slack = 1e9f; for (float d : curve->pts) pl.slack = std::min(pl.slack, std::fabs(d)); }
             rep.played.push_back(pl);
             const Layout::Cell& c = *p.cell;
             Layout::Response r = layout.response(c);

@@ -16,7 +16,9 @@
 // Playing (Player) sends the take's notes into a ControllerHost, as its own notes go, so it
 // sounds as it was played; and draws a ghost finger for each touch, over the controller.
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -222,7 +224,16 @@ struct Report {
     std::vector<std::string> errors, warnings;
     // Each score note: what the controller played for it (the sounding pitch nearest the one
     // wanted, just after it starts; the lowest and highest while held), to check against it.
-    struct Played { int line = 0; float wanted = 0; double t = 0, end = 0; float pitch = 0, low = 0, high = 0; bool found = false; };
+    struct Played {
+        int line = 0; float wanted = 0; double t = 0, end = 0; float pitch = 0, low = 0, high = 0; bool found = false;
+        bool curved = false; // it has a pitch curve
+        float slack = 0;     // ... and the nearest that curve comes to the note (semitones)
+        // Heard as written: it came within `tolerance` of the note. A curved note within a quarter of a
+        // semitone of its curve's nearest (a controller follows a moving finger a moment late).
+        bool asWritten(float tolerance = 0.05f) const {
+            return found && std::fabs(pitch - wanted) <= (curved ? slack + std::max(tolerance, 0.25f) : tolerance);
+        }
+    };
     std::vector<Played> played;
 };
 

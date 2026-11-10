@@ -17,7 +17,7 @@
 #include "mesh.h"
 
 #define MAX_FINGERS 15
-#define MAX_COLS 24
+#define MAX_COLS 49   /* a Seaboard RISE 49's keys */
 #define TRAIL 28
 #define MAX_RIPPLES 16
 #define MAX_GRABS 4

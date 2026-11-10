@@ -485,11 +485,22 @@ static void examples() {
         std::vector<std::string> warnings;
         bool ok = parse(ss.str(), t, &err, &warnings);
         Report rep;
+        // Each part's middle from its sound, as odo lays a take out (60 and 72 without them).
         float c[2] = {60, 72};
+        if (!t.sides.empty())
+            for (size_t j = 0; j < 2 && j < t.sides[0].sounds.size(); j++) {
+                const std::string& id = t.sides[0].sounds[j];
+                std::string perr;
+                auto snd = Package::read(std::string(MPE_TEST_PACKAGES) + "/" + id.substr(id.find('/') + 1) + ".odoi", &perr);
+                if (!snd) continue;
+                double lo = snd->manifest["range"][size_t(0)].num(), hi = snd->manifest["range"][size_t(1)].num();
+                if (lo > 0 && hi > 0) c[j] = float(69 + 12 * std::log2(std::sqrt(lo * hi) / 440));
+                if (t.sides[0].sounds.size() == 1) c[1] = c[0];
+            }
         auto pkg = controller(t.sides.empty() || t.sides[0].controller.empty() ? "grid" : t.sides[0].controller.substr(t.sides[0].controller.find('/') + 1));
         ok = ok && pkg && prepare(t, *pkg, {}, 1000, 560, c, &rep);
         int wrong = 0;
-        for (const auto& p : rep.played) wrong += !p.found || std::fabs(p.pitch - p.wanted) > 0.02f;
+        for (const auto& p : rep.played) wrong += !p.asWritten(0.02f);
         for (const auto& w : warnings) std::printf("      %s\n", w.c_str());
         for (const auto& w : rep.warnings) std::printf("      %s\n", w.c_str());
         for (const auto& w : rep.errors) std::printf("      %s\n", w.c_str());
