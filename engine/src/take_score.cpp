@@ -216,11 +216,14 @@ bool gestures(const std::string& inside, const Key& key, std::vector<Gesture>& o
         } else if (kind == "at") {
             if (!nums(1, 2) || a.size() != 2) { if (why->empty()) *why = "(" + it + "): at X Y, 0..1 across and down"; return false; }
             g.kind = Gesture::At; g.a = float(a[0]); g.b = float(a[1]);
+        } else if (kind == "vel" || kind == "velocity") {
+            if (!nums(1, 1) || a.size() != 1 || a[0] < 0 || a[0] > 1) { if (why->empty()) *why = "(" + it + "): vel V, how hard the finger lands, 0..1"; return false; }
+            g.kind = Gesture::Velocity; g.a = float(a[0]);
         } else if (kind == "part") {
             if (!nums(1, 1) || a.size() != 1) { if (why->empty()) *why = "(" + it + "): part N"; return false; }
             g.kind = Gesture::Part; g.a = float(a[0]);
         } else {
-            *why = "(" + it + "): \"" + w[0] + "\" is not a gesture (vib, bend, swell, press, tone, pitch, slide, stacc, say, at, part)";
+            *why = "(" + it + "): \"" + w[0] + "\" is not a gesture (vib, bend, swell, press, tone, pitch, vel, slide, stacc, say, at, part)";
             return false;
         }
         out.push_back(g);
@@ -735,7 +738,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
     for (size_t i = 0; i < score.notes.size(); i++) {
         const ScoreNote& n = score.notes[i];
         const double t0 = score.ms(n.beat), t1 = score.ms(n.beat + n.beats), dur = t1 - t0;
-        const Gesture *vib = nullptr, *swell = nullptr, *press = nullptr, *tone = nullptr, *slide = nullptr, *curve = nullptr;
+        const Gesture *vib = nullptr, *swell = nullptr, *press = nullptr, *tone = nullptr, *slide = nullptr, *curve = nullptr, *vel = nullptr;
         bool stacc = false;
         std::vector<const Gesture*> bends;
         for (const Gesture& g : n.gestures) {
@@ -748,6 +751,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 case Gesture::Staccato: stacc = true; break;
                 case Gesture::Bend: bends.push_back(&g); break;
                 case Gesture::Pitch: curve = &g; break;
+                case Gesture::Velocity: vel = &g; break;
                 case Gesture::Say: out.says.push_back({t0, dur, g.text}); break;
                 default: break;
             }
@@ -812,6 +816,9 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
             auto at = [&](double t, float* x, float* y, float* force) {
                 float u = dur > 0 ? float((t - t0) / dur) : 0;
                 float pr = pressAt(u), tn = toneAt(u);
+                // vel: the finger lands that hard (a controller's strike velocity), then goes to the
+                // note's pressure within 30 ms.
+                if (vel) pr = vel->a + ((pr >= 0 ? pr : 0.7f) - vel->a) * smooth(float((t - t0) / 30.0));
                 float dx, dy;
                 offsetFor(r, pr, tn, hw, hh, &dx, &dy);
                 float bx = p.x, by = p.y;
@@ -837,7 +844,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 }
                 *force = pr >= 0 ? pr : 0.7f;
             };
-            bool moving = vib || swell || tone || curve || (press && press->pts.size() > 1) || !bends.empty() || (slides && k == 0);
+            bool moving = vib || swell || tone || curve || vel || (press && press->pts.size() > 1) || !bends.empty() || (slides && k == 0);
             double lift = stacc ? t0 + dur * 0.5 : t1 - std::min(25.0, dur * 0.25);
             int finger;
             auto carry = carried.find(i);

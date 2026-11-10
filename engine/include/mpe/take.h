@@ -137,9 +137,10 @@ private:
 // ---- a score: a take written by hand (TAKE_AUTHORING.md) ------------------------------------------
 
 struct Gesture {
-    enum Kind { Vibrato, Bend, Swell, Press, Tone, Slide, Staccato, Say, At, Part, Pitch } kind;
+    enum Kind { Vibrato, Bend, Swell, Press, Tone, Slide, Staccato, Say, At, Part, Pitch, Velocity } kind;
     float a = 0, b = 0, c = 0;           // Vibrato: depth semitones, rate Hz, from (0..1). Bend: to, from, until.
                                          // Swell: start, end, middle (<0: none). Tone: start, end. Slide: fraction. At: x, y.
+                                         // Velocity: how hard the finger lands, 0..1.
     bool absolute = false;               // Bend: `a` is a note number, not semitones from the note
     // Press, Tone, Pitch: values spread evenly through the note, from its start to its end (Pitch:
     // semitones from the note). One value: all through it.

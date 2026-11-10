@@ -408,6 +408,18 @@ static void curves() {
     float lo = 1, hi = 0;
     for (const Note& n : t.notes) if (n.kind != Off) { lo = std::min(lo, n.pressure); hi = std::max(hi, n.pressure); }
     CHECK(lo < 0.4f && hi > 0.8f, "the pressure follows its curve (%.2f to %.2f)", lo, hi);
+    // vel: how hard the finger lands (the note's velocity), apart from how it is held.
+    {
+        Take v;
+        std::string e2;
+        CHECK(parse("odo-take/1.1\ntempo: 60\ncontroller: patrickreynolds/touchpad\nsettings: {\"scale\": 0, \"size\": 24}\n"
+                    "score\nG4:2(vel 0.2, press 0.8)\nend\n", v, &e2), "a score with vel reads (%s)", e2.c_str());
+        Report r2;
+        CHECK(prepare(v, *pad, {}, 1000, 560, c, &r2) && r2.errors.empty(), "it plays");
+        float velocity = -1, held = 0;
+        for (const Note& n : v.notes) { if (n.kind == On && velocity < 0) velocity = n.velocity; if (n.kind == Change) held = n.pressure; }
+        CHECK(velocity > 0.1f && velocity < 0.3f && held > 0.7f, "vel 0.2: struck softly (%.2f), then held at its pressure (%.2f)", velocity, held);
+    }
     // Bad curves are said so.
     Take bad;
     std::vector<std::string> errors;
