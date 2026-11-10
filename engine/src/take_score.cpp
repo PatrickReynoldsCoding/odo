@@ -133,6 +133,8 @@ std::vector<std::string> tokens(const std::string& s, std::string* why) {
     return out;
 }
 
+constexpr size_t kMaxPts = 256;   // values in a press, tone or pitch curve
+
 bool gestures(const std::string& inside, const Key& key, std::vector<Gesture>& out, std::string* why) {
     std::vector<std::string> items;
     {
@@ -183,11 +185,20 @@ bool gestures(const std::string& inside, const Key& key, std::vector<Gesture>& o
             g.kind = Gesture::Swell;
             g.a = float(a[0]); g.b = float(a[1]); g.c = float(a.size() > 2 ? a[2] : -1);
         } else if (kind == "press") {
-            if (!nums(1, 1) || a.size() != 1) { if (why->empty()) *why = "(" + it + "): press P, 0..1"; return false; }
+            if (!nums(1, kMaxPts) || a.empty()) { if (why->empty()) *why = "(" + it + "): press P [P...], 0..1"; return false; }
             g.kind = Gesture::Press; g.a = float(a[0]);
+            for (double v : a) g.pts.push_back(float(std::clamp(v, 0.0, 1.0)));
         } else if (kind == "tone") {
-            if (!nums(1, 2) || a.empty()) { if (why->empty()) *why = "(" + it + "): tone FROM [TO], 0..1"; return false; }
+            if (!nums(1, kMaxPts) || a.empty()) { if (why->empty()) *why = "(" + it + "): tone FROM [TO...], 0..1"; return false; }
             g.kind = Gesture::Tone; g.a = float(a[0]); g.b = float(a.size() > 1 ? a[1] : a[0]);
+            for (double v : a) g.pts.push_back(float(std::clamp(v, 0.0, 1.0)));
+        } else if (kind == "pitch") {
+            if (!nums(1, kMaxPts) || a.empty()) { if (why->empty()) *why = "(" + it + "): pitch D [D...], semitones from the note"; return false; }
+            g.kind = Gesture::Pitch;
+            for (double v : a) {
+                if (v < -24 || v > 24) { *why = "(" + it + "): pitch: semitones from the note, -24..24"; return false; }
+                g.pts.push_back(float(v));
+            }
         } else if (kind == "slide" || kind == "glide") {
             if (!nums(1, 1)) return false;
             g.kind = Gesture::Slide; g.a = float(a.empty() ? 0.25 : a[0]);
@@ -209,7 +220,7 @@ bool gestures(const std::string& inside, const Key& key, std::vector<Gesture>& o
             if (!nums(1, 1) || a.size() != 1) { if (why->empty()) *why = "(" + it + "): part N"; return false; }
             g.kind = Gesture::Part; g.a = float(a[0]);
         } else {
-            *why = "(" + it + "): \"" + w[0] + "\" is not a gesture (vib, bend, swell, press, tone, slide, stacc, say, at, part)";
+            *why = "(" + it + "): \"" + w[0] + "\" is not a gesture (vib, bend, swell, press, tone, pitch, slide, stacc, say, at, part)";
             return false;
         }
         out.push_back(g);
@@ -603,6 +614,15 @@ namespace {
 
 float smooth(float u) { u = std::clamp(u, 0.f, 1.f); return u * u * (3 - 2 * u); }
 
+// A curve's value a part u (0..1) of the way through: its points evenly from start to end.
+float along(const std::vector<float>& pts, float u, float otherwise) {
+    if (pts.empty()) return otherwise;
+    if (pts.size() == 1) return pts[0];
+    float q = std::clamp(u, 0.f, 1.f) * float(pts.size() - 1);
+    size_t j = std::min(size_t(q), pts.size() - 2);
+    return pts[j] + (pts[j + 1] - pts[j]) * (q - float(j));
+}
+
 // Where in a cell to put the finger for this pressure and tone (either < 0: don't care).
 void offsetFor(const Layout::Response& r, float press, float tone, float hw, float hh, float* dx, float* dy) {
     *dx = *dy = 0;
@@ -697,7 +717,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
     for (size_t i = 0; i < score.notes.size(); i++) {
         const ScoreNote& n = score.notes[i];
         const double t0 = score.ms(n.beat), t1 = score.ms(n.beat + n.beats), dur = t1 - t0;
-        const Gesture *vib = nullptr, *swell = nullptr, *press = nullptr, *tone = nullptr, *slide = nullptr;
+        const Gesture *vib = nullptr, *swell = nullptr, *press = nullptr, *tone = nullptr, *slide = nullptr, *curve = nullptr;
         bool stacc = false;
         std::vector<const Gesture*> bends;
         for (const Gesture& g : n.gestures) {
@@ -709,6 +729,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 case Gesture::Slide: slide = &g; break;
                 case Gesture::Staccato: stacc = true; break;
                 case Gesture::Bend: bends.push_back(&g); break;
+                case Gesture::Pitch: curve = &g; break;
                 case Gesture::Say: out.says.push_back({t0, dur, g.text}); break;
                 default: break;
             }
@@ -730,9 +751,26 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                     if (swell->c >= 0) return u < 0.5f ? swell->a + (swell->b - swell->a) * u * 2 : swell->b + (swell->c - swell->b) * (u - 0.5f) * 2;
                     return swell->a + (swell->b - swell->a) * u;
                 }
-                return press ? press->a : -1.f;
+                return press ? along(press->pts, u, press->a) : -1.f;
             };
-            auto toneAt = [&](float u) -> float { return tone ? tone->a + (tone->b - tone->a) * u : -1.f; };
+            auto toneAt = [&](float u) -> float {
+                if (!tone) return -1.f;
+                return tone->pts.size() > 2 ? along(tone->pts, u, tone->a) : tone->a + (tone->b - tone->a) * u;
+            };
+            // A pitch curve: where each of its points is, the finger going between them.
+            std::vector<std::pair<float, float>> curvePlaces;
+            if (curve) {
+                for (float d : curve->pts) {
+                    Place q;
+                    if (std::fabs(d) < 1e-4f) q = p;
+                    else if (!placeOf(n.pitches[k] + d, p.x, p.y, c.part, q)) {
+                        rep.warnings.push_back("line " + std::to_string(n.line) + ": the pitch curve goes to " + noteName(n.pitches[k] + d) +
+                                               ", which has no place: kept to the note");
+                        q = p;
+                    }
+                    curvePlaces.push_back({q.x - p.x, q.y - p.y});
+                }
+            }
             // Vibrato: along the way to the next note up, as far as its depth.
             float vdx = 1, vdy = 0, perSemi = std::max(hw, hh) * 2;
             if (const Layout::Cell* up = layout.find(c.note + 1, c.x, c.y, c.part)) {
@@ -758,6 +796,13 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 float dx, dy;
                 offsetFor(r, pr, tn, hw, hh, &dx, &dy);
                 float bx = p.x, by = p.y;
+                if (!curvePlaces.empty()) {
+                    float q = std::clamp(u, 0.f, 1.f) * float(curvePlaces.size() - 1);
+                    size_t j = std::min(size_t(q), curvePlaces.size() - 1), j2 = std::min(j + 1, curvePlaces.size() - 1);
+                    float fr = q - float(j);
+                    bx += curvePlaces[j].first + (curvePlaces[j2].first - curvePlaces[j].first) * fr;
+                    by += curvePlaces[j].second + (curvePlaces[j2].second - curvePlaces[j].second) * fr;
+                }
                 for (size_t b = 0; b < bends.size(); b++) {
                     float s = smooth((u - bends[b]->b) / (bends[b]->c - bends[b]->b));
                     bx += (targets[b].first - bx) * s;
@@ -773,7 +818,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 }
                 *force = pr >= 0 ? pr : 0.7f;
             };
-            bool moving = vib || swell || tone || !bends.empty() || (slides && k == 0);
+            bool moving = vib || swell || tone || curve || (press && press->pts.size() > 1) || !bends.empty() || (slides && k == 0);
             double lift = stacc ? t0 + dur * 0.5 : t1 - std::min(25.0, dur * 0.25);
             int finger;
             auto carry = carried.find(i);

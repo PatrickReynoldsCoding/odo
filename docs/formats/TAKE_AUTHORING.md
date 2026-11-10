@@ -127,8 +127,9 @@ Times in a note (FROM, UNTIL) are parts of it, 0 its start, 1 its end.
 | `vib DEPTH RATE FROM` | 0.3, 5.5, 0.2 | Rocks to and fro along the way to the next note up, DEPTH semitones each way, RATE times a second, from FROM on (easing in over a quarter of a second). |
 | `bend TO FROM UNTIL` | -, 0.15, FROM+0.35 | Slides toward TO between FROM and UNTIL, and stays. TO: `+2`, `-1`, `+0.5` (semitones from the note), `0` (back to it), or a note (`E4`). Bends follow each other: `bend +1 0.1 0.4, bend 0 0.6 0.9` goes up and comes back. |
 | `swell A B [C]` | - | Pressure from A to B through the note (A, B at its middle, then C). |
-| `press P` | 0.7 | Pressure P all through. |
-| `tone A [B]` | - | Tone (slide) from A to B. |
+| `press P [P...]` | 0.7 | Pressure P all through; several: a curve, the values spread evenly from the note's start to its end. |
+| `tone A [B...]` | - | Tone (slide) from A to B; more than two: a curve, as `press`. |
+| `pitch D [D...]` | - | The pitch as a curve: semitones from the note (`0`, `+0.3`, `-1.5`), spread evenly from its start to its end, the finger going between them. For a performance's own scoops, falls and vibrato, measured from a recording. Up to 256 values. Needs a controller whose pitch follows the finger (the touch pad; the Grid with `"slide": 1` starts a new note at each square). |
 | `slide [PART]` | 0.25 | Does not lift: in the last PART of the note it slides to this voice's next note, which starts without a new finger. A portamento, or a leading note sliding into the tonic. |
 | `stacc` | | Lifts half way through: short and detached. |
 | `say WORDS` | | Words to show while this note plays. Last in the brackets. |
@@ -162,6 +163,7 @@ those movements. `check` says, note by note, if it played another note than the 
   RATE 4.5 to 6. Not on short notes.
 - **Slides** for leading notes rising into the tonic, and for a sung, joined line; a slide's PART
   0.25 to 0.5. On the Grid it needs `"slide": 1`.
+- **Curves** (`pitch`, `press`, several values) when copying a recorded performance: a value every 50 to 100 ms is plenty.
 - **Bends** for blues and folk ornaments: up a semitone or two and back (`bend +1 0.1 0.35, bend 0 0.6 0.85`).
 - **Staccato** for dance tunes and marches.
 - Simple first: a take for a newcomer has one voice. A second voice (`voice chords`, chords in
@@ -178,6 +180,8 @@ those movements. `check` says, note by note, if it played another note than the 
 4. Put in sections at its phrases, and a few words where something new comes.
 5. Put in the gestures (above): few, where they make the music.
 6. `tools/take check` it, at a phone's size and a computer's. Fix every error and warning.
+   `odo-take render FILE -o out.wav` (the tool built with `MPE_LIBFAUST`, as odo for computers is) plays it
+   through its sounds and effects into a WAV, to listen to or to compare with a recording.
 7. `tools/take notes` it, and read the notes through: is that the tune?
 
 ## A worked example

@@ -13,7 +13,13 @@
 //   --size WxH                      the surface, dp (default: the take's, or 900x500)
 //   --center N[,M]                  the middle of each part's instrument, a MIDI note (default 60,72)
 //   --setting ID=VALUE              a setting of the controller (repeats), over the take's
+//   --sounds DIR                    instrument packages (.odoi): each part's middle from its sound, as odo
+//                                   does (default: third_party/mpe-instruments/build/packages, if there)
+//   odo-take render FILE -o OUT.wav [--tail S]   (built with MPE_LIBFAUST) what it sounds like: its notes
+//                                   played through its sounds, with its preset's effects, 48 kHz stereo
+#include <algorithm>
 #include <cmath>
+#include <memory>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,10 +29,18 @@
 #include <string>
 #include <vector>
 #include "mpe/take.h"
+#ifdef MPE_LIBFAUST
+#include "mpe/controller.h"
+#include "mpe/engine.h"
+#include "mpe/faust_loader.h"
+#endif
 
 using namespace mpe;
 using namespace mpe::take;
 
+#ifndef ODO_SOUNDS
+#define ODO_SOUNDS ""
+#endif
 #ifndef ODO_CONTROLLERS
 #define ODO_CONTROLLERS "controllers/build"
 #endif
@@ -34,8 +48,9 @@ using namespace mpe::take;
 namespace {
 
 struct Options {
-    std::string controller, library = ODO_CONTROLLERS, out;
-    float w = 0, h = 0;
+    std::string controller, library = ODO_CONTROLLERS, out, sounds = ODO_SOUNDS;
+    float w = 0, h = 0, tail = 3;
+    bool centersGiven = false;
     float centers[2] = {60, 72};
     std::vector<std::pair<std::string, double>> settings;
 };
@@ -54,6 +69,21 @@ std::string clock(double ms) {
     int s = int(ms / 1000);
     std::snprintf(b, sizeof b, "%d:%02d.%03d", s / 60, s % 60, int(std::fmod(ms, 1000)));
     return b;
+}
+
+// An instrument package by its id ("patrickreynolds/cello" -> DIR/cello.odoi); null if not there.
+std::unique_ptr<Package> soundPackage(const Options& o, const std::string& id) {
+    if (o.sounds.empty() || id.empty()) return nullptr;
+    std::string err;
+    return Package::read(o.sounds + "/" + id.substr(id.find('/') + 1) + ".odoi", &err);
+}
+
+// The middle of an instrument's range, a MIDI note: what odo tells a controller (odo for computers' centerNote).
+float centerNote(const Package& p) {
+    const Json& r = p.manifest["range"];
+    double lo = r[size_t(0)].num(), hi = r[size_t(1)].num();
+    if (lo <= 0 || hi <= 0) return 60;
+    return float(69 + 12 * std::log2(std::sqrt(lo * hi) / 440));
 }
 
 // The take, read and (if written by hand) expanded on its controller. False: said why on stderr.
@@ -81,11 +111,20 @@ bool load(const std::string& path, const Options& o, Take& t, Report& rep, std::
             if (!had) t.sides[0].settings.push_back(kv);
         }
     }
+    // Each part's middle: from the command line, else from its sound (as odo does), else 60 and 72.
+    float centers[2] = {o.centers[0], o.centers[1]};
+    if (!o.centersGiven && !o.sounds.empty() && !t.sides.empty())
+        for (size_t j = 0; j < 2 && j < t.sides[0].sounds.size(); j++) {
+            std::unique_ptr<Package> snd = soundPackage(o, t.sides[0].sounds[j]);
+            if (snd) centers[j] = centerNote(*snd);
+        }
+    // One sound: both parts play it (as odo tells a controller).
+    if (!o.centersGiven && !t.sides.empty() && t.sides[0].sounds.size() == 1) centers[1] = centers[0];
     float w = o.w, h = o.h;
     if (w <= 0 && !t.sides.empty() && t.sides[0].width > 0) { w = t.sides[0].width; h = t.sides[0].height; }
     if (w <= 0) { w = 900; h = 500; }
     if (!t.performed()) {
-        bool ok = prepare(t, *pkg, {}, w, h, o.centers, &rep);
+        bool ok = prepare(t, *pkg, {}, w, h, centers, &rep);
         if (!ok && !quiet) {
             for (const auto& e : rep.errors) std::fprintf(stderr, "%s: %s\n", path.c_str(), e.c_str());
             return false;
@@ -216,6 +255,117 @@ int usage() {
 
 }  // namespace
 
+#ifdef MPE_LIBFAUST
+// What it sounds like: each side's notes played through a controller host of its own (on its own
+// channels and parts, as odo for computers routes them) into one engine with the take's sounds
+// and preset, faster than real time. 48 kHz, 16-bit stereo WAV.
+int renderCmd(const std::string& file, const Options& o) {
+    if (o.out.empty()) { std::fprintf(stderr, "render: -o OUT.wav\n"); return 2; }
+    Take t;
+    Report rep;
+    std::unique_ptr<Package> ctl;
+    if (!load(file, o, t, rep, ctl)) return 1;
+    for (const auto& e : rep.errors) std::fprintf(stderr, "%s: %s\n", file.c_str(), e.c_str());
+    const int kSr = 48000;
+    Engine engine(kSr);
+    MidiInput in(engine);
+    double clock = 0;
+    int64_t nowNs = 1000000000;
+    auto sink = [&](const uint8_t* b, int n) { in.feed(b, n, nowNs); };
+    const preset::Preset setup = presetOf(t);
+    Performance perf;
+    std::vector<std::unique_ptr<ControllerHost>> hosts;
+    std::vector<int> base;
+    int part = 0;
+    const int sides = std::max<int>(1, int(t.sides.size()));
+    std::string cache = "/tmp/odo-take-render-cache";
+    for (int k = 0; k < sides; k++) {
+        const Side* sd = k < int(t.sides.size()) ? &t.sides[size_t(k)] : nullptr;
+        auto h = std::make_unique<ControllerHost>(sink);
+        h->setClock([&clock] { return clock; });
+        h->setPart(part);
+        int per = 15 / sides;
+        h->setChannels(1 + k * per, per);
+        hosts.push_back(std::move(h));
+        base.push_back(part);
+        size_t n = sd ? std::max<size_t>(1, sd->sounds.size()) : 1;
+        for (size_t j = 0; j < n && part < kParts; j++, part++) {
+            std::string id = sd && j < sd->sounds.size() ? sd->sounds[j] : "";
+            std::unique_ptr<Package> snd = soundPackage(o, id);
+            if (!snd) { std::fprintf(stderr, "%s: the sound %s is not in %s\n", file.c_str(), id.c_str(), o.sounds.c_str()); return 1; }
+            std::string err;
+            int index = loadInstrumentPackage(*snd, cache, &err);
+            if (index < 0) { std::fprintf(stderr, "%s: %s: %s\n", file.c_str(), id.c_str(), err.c_str()); return 1; }
+            engine.setInstrument(part, index);
+            // The sound's own effects, then the preset's part over them (as odo does).
+            const Json& sm = snd->manifest["sound"];
+            PartConfig& c = perf.part[part];
+            c.reverb = float(sm["reverb"].num(0.15));
+            c.delay = float(sm["delay"].num(0));
+            c.brightness = float(sm["brightness"].num(1));
+            c.drive = float(sm["drive"].num(0));
+            c.pressureCurve = float(sm["pressureCurve"].num(1));
+            c.release = float(sm["release"].num(0));
+            if (part == 0) { perf.reverbSize = float(sm["reverbSize"].num(0.5)); perf.reverbDamp = float(sm["reverbDamp"].num(0.4)); }
+            if (size_t(k) < setup.sides.size() && j < setup.sides[size_t(k)].parts.size()) {
+                const preset::Part& q = setup.sides[size_t(k)].parts[j];
+                if (q.full) {
+                    c.transpose = q.transpose; c.volume = float(q.volume); c.brightness = float(q.brightness);
+                    c.drive = float(q.drive); c.pressureCurve = float(q.pressureCurve); c.reverb = float(q.reverb);
+                    c.delay = float(q.delay); c.release = float(q.release);
+                    c.arp = q.arp.on; c.order = ArpOrder(q.arp.order); c.rate = float(q.arp.rate); c.gate = float(q.arp.gate);
+                    c.octaves = q.arp.octaves; c.latch = q.arp.latch;
+                }
+            }
+        }
+    }
+    perf.layout = part > 1 ? mpe::Layout::Split : mpe::Layout::Single;
+    if (setup.hasEffects) {
+        perf.bpm = float(setup.effects.bpm); perf.reverbSize = float(setup.effects.reverbSize);
+        perf.reverbDamp = float(setup.effects.reverbDamp); perf.delayBeats = float(setup.effects.delayBeats);
+        perf.delayFeedback = float(setup.effects.delayFeedback); perf.delayPingPong = setup.effects.delayPingPong;
+    }
+    engine.setPerformance(perf);
+    engine.setVolume(0.8f * float(t.volume >= 0 ? t.volume : 1));
+    // Let the engine take its instruments and performance (they hand over at the next block).
+    std::vector<float> buf(2 * 64), out;
+    for (int i = 0; i < 8; i++) { engine.render(buf.data(), 64, nowNs); nowNs += 1000000000LL * 64 / kSr; engine.collectRetired(); }
+    std::vector<Note> notes = t.notes;
+    std::stable_sort(notes.begin(), notes.end(), [](const Note& a, const Note& b) { return a.t < b.t; });
+    const double end = t.length() + o.tail * 1000;
+    size_t next = 0;
+    const int block = 64;
+    for (double ms = 0; ms < end; ms += 1000.0 * block / kSr) {
+        clock = ms;
+        for (; next < notes.size() && notes[next].t <= ms; next++) {
+            const Note& n = notes[next];
+            if (n.side < 0 || size_t(n.side) >= hosts.size()) continue;
+            hosts[size_t(n.side)]->injectNote(n.kind, ControllerHost::kInjectedVoice + n.voice, n.part, n.pitch, n.pressure, n.slide, n.velocity);
+        }
+        engine.render(buf.data(), block, nowNs);
+        nowNs += 1000000000LL * block / kSr;
+        out.insert(out.end(), buf.begin(), buf.end());
+    }
+    for (auto& h : hosts) h->stop();
+    // 16-bit WAV.
+    std::ofstream f(o.out, std::ios::binary);
+    if (!f) { std::fprintf(stderr, "render: cannot write %s\n", o.out.c_str()); return 1; }
+    auto u32 = [&](uint32_t v) { f.write(reinterpret_cast<const char*>(&v), 4); };
+    auto u16 = [&](uint16_t v) { f.write(reinterpret_cast<const char*>(&v), 2); };
+    uint32_t bytes = uint32_t(out.size() * 2);
+    f.write("RIFF", 4); u32(36 + bytes); f.write("WAVEfmt ", 8); u32(16); u16(1); u16(2); u32(kSr); u32(kSr * 4); u16(4); u16(16);
+    f.write("data", 4); u32(bytes);
+    float peak = 0;
+    for (float v : out) {
+        peak = std::max(peak, std::fabs(v));
+        int16_t q = int16_t(std::lround(std::clamp(v, -1.f, 1.f) * 32767));
+        f.write(reinterpret_cast<const char*>(&q), 2);
+    }
+    std::printf("%s: %s, %.1f s, %zu notes, peak %.2f\n", file.c_str(), o.out.c_str(), double(out.size() / 2) / kSr, notes.size(), double(peak));
+    return 0;
+}
+#endif
+
 int main(int argc, char** argv) {
     if (argc < 3) return usage();
     std::string cmd = argv[1];
@@ -227,12 +377,15 @@ int main(int argc, char** argv) {
         if (a == "--controller" && more) o.controller = argv[++i];
         else if (a == "--library" && more) o.library = argv[++i];
         else if ((a == "-o" || a == "--out") && more) o.out = argv[++i];
+        else if (a == "--sounds" && more) o.sounds = argv[++i];
+        else if (a == "--tail" && more) o.tail = float(std::atof(argv[++i]));
         else if (a == "--size" && more) {
             if (std::sscanf(argv[++i], "%fx%f", &o.w, &o.h) != 2 || o.w <= 0 || o.h <= 0) return usage();
         } else if (a == "--center" && more) {
             int n = std::sscanf(argv[++i], "%f,%f", &o.centers[0], &o.centers[1]);
             if (n == 1) o.centers[1] = o.centers[0] + 12;
             if (n < 1) return usage();
+            o.centersGiven = true;
         } else if (a == "--setting" && more) {
             std::string s = argv[++i];
             size_t eq = s.find('=');
@@ -247,5 +400,8 @@ int main(int argc, char** argv) {
     if (cmd == "expand") return expandCmd(files[0], o);
     if (cmd == "notes") return notesCmd(files[0], o);
     if (cmd == "touches") return touchesCmd(files[0], o);
+#ifdef MPE_LIBFAUST
+    if (cmd == "render") return renderCmd(files[0], o);
+#endif
     return usage();
 }

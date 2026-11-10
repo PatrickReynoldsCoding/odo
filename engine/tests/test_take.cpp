@@ -381,6 +381,39 @@ static void authored() {
           rep.errors.empty() ? "the Grid had it: chromatic" : rep.errors[0].c_str());
 }
 
+static void curves() {
+    auto pad = controller("touchpad");
+    if (!pad) return;
+    // On the touch pad, chromatic and wide: a pitch curve down two and up one, and a pressure curve.
+    const char* text =
+        "odo-take/1.1\n"
+        "tempo: 60\n"
+        "controller: patrickreynolds/touchpad\n"
+        "settings: {\"scale\": 0, \"size\": 24}\n"
+        "score\n"
+        "G4:4(pitch 0 0.5 1 0.5 0 -1 -2 0, press 0.3 0.9 0.5 0.6)\n"
+        "end\n";
+    Take t;
+    std::string err;
+    CHECK(parse(text, t, &err) && !t.performed(), "a score with curves reads (%s)", err.c_str());
+    Report rep;
+    float c[2] = {60, 60};
+    CHECK(prepare(t, *pad, {}, 1000, 560, c, &rep) && rep.errors.empty(), "it plays on the touch pad (%s)",
+          rep.errors.empty() ? "" : rep.errors[0].c_str());
+    std::vector<Heard> h = heard(t);
+    CHECK(h.size() == 1, "one note, the finger never lifted (%zu)", h.size());
+    if (!h.empty()) CHECK(h[0].low < 65.3f && h[0].low > 64.7f && h[0].high > 67.7f && h[0].high < 68.3f,
+                          "the pitch follows the curve, F4 to G#4 (%.2f to %.2f)", h[0].low, h[0].high);
+    float lo = 1, hi = 0;
+    for (const Note& n : t.notes) if (n.kind != Off) { lo = std::min(lo, n.pressure); hi = std::max(hi, n.pressure); }
+    CHECK(lo < 0.4f && hi > 0.8f, "the pressure follows its curve (%.2f to %.2f)", lo, hi);
+    // Bad curves are said so.
+    Take bad;
+    std::vector<std::string> errors;
+    Score sc;
+    CHECK(!parseScore("C4:1(pitch 0 30)\n", sc, &errors, nullptr) && !errors.empty(), "a pitch curve past two octaves is an error");
+}
+
 static void examples() {
     auto grid = controller("grid");
     if (!grid) return;
@@ -554,6 +587,7 @@ static void presets() {
 }
 
 int main() {
+    curves();
     fileRoundTrip();
     recordAndPlay();
     scores();
