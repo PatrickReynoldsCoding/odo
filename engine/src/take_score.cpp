@@ -984,3 +984,115 @@ bool prepare(Take& t, const Package& pkg, std::vector<double> values, float widt
 }
 
 }  // namespace mpe::take
+
+namespace mpe::take {
+
+bool laidOutFor(const Take& t, const Json& manifest, const std::vector<double>& values, float width, float height) {
+    if (t.sides.empty()) return true;
+    const Side& s = t.sides[0];
+    if (s.width > 0 && (std::fabs(s.width - width) > 1 || std::fabs(s.height - height) > 1)) return false;
+    const Json& st = manifest["settings"];
+    for (const auto& kv : s.settings)
+        for (size_t i = 0; i < st.size() && i < values.size(); i++)
+            if (st[i]["id"].str() == kv.first && std::fabs(values[i] - kv.second) > 1e-9) return false;
+    return true;
+}
+
+namespace {
+
+// A recorded take's side-0 fingers from its notes: each held note a finger on the key for it
+// (near where the hand last was), moving with its bend, pressure and tone.
+std::vector<Touch> fromNotes(const Take& t, Layout& layout) {
+    std::vector<Touch> out;
+    const float W = layout.width(), H = layout.height();
+    struct Held { int finger; const Layout::Cell* cell; float x, y; };
+    std::map<int, Held> held;              // voice -> its finger
+    int nextFinger = 1;
+    float lastX = -1, lastY = -1;
+    auto placeFor = [&](const Layout::Cell& c, const Note& n, float* x, float* y) {
+        float bx = c.x, by = c.y;
+        float d = n.pitch - float(c.note);
+        if (std::fabs(d) > 0.01f) {        // bent: toward the keys it bends to
+            int step = d > 0 ? 1 : -1;
+            const Layout::Cell* from = &c;
+            float left = std::fabs(d);
+            int k = c.note;
+            while (left > 1e-3f) {
+                const Layout::Cell* to = layout.find(k + step, from->x, from->y, c.part);
+                if (!to) break;
+                float f = std::min(1.f, left);
+                bx = from->x + (to->x - from->x) * f;
+                by = from->y + (to->y - from->y) * f;
+                if (left <= 1) break;
+                from = to; k += step; left -= 1;
+            }
+        }
+        Layout::Response r = layout.response(c);
+        float dx, dy;
+        offsetFor(r, n.pressure, n.slide, (c.x1 - c.x0) / 2, (c.y1 - c.y0) / 2, &dx, &dy);
+        *x = bx + dx; *y = by + dy;
+    };
+    auto emit = [&](double tm, int finger, int phase, float x, float y, float force) {
+        Touch e;
+        e.t = tm; e.side = 0; e.finger = finger; e.phase = phase;
+        e.x = std::clamp(x, 0.f, W) / W; e.y = std::clamp(y, 0.f, H) / H; e.force = std::clamp(force, 0.f, 1.f);
+        out.push_back(e);
+    };
+    std::vector<Note> notes;
+    for (const Note& n : t.notes) if (n.side == 0) notes.push_back(n);
+    std::stable_sort(notes.begin(), notes.end(), [](const Note& a, const Note& b) { return a.t < b.t; });
+    for (const Note& n : notes) {
+        auto it = held.find(n.voice);
+        if (n.kind == On) {
+            if (it != held.end()) { emit(n.t, it->second.finger, Up, it->second.x, it->second.y, 0); held.erase(it); }
+            int base = int(std::lround(n.pitch));
+            const Layout::Cell* c = layout.find(base, lastX, lastY, n.part);
+            if (!c) c = layout.find(base, lastX, lastY, -1);
+            if (!c) continue;
+            Held h{nextFinger++, c, 0, 0};
+            placeFor(*c, n, &h.x, &h.y);
+            emit(n.t, h.finger, Down, h.x, h.y, n.pressure);
+            lastX = h.x; lastY = h.y;
+            held[n.voice] = h;
+        } else if (n.kind == Change && it != held.end()) {
+            placeFor(*it->second.cell, n, &it->second.x, &it->second.y);
+            emit(n.t, it->second.finger, Move, it->second.x, it->second.y, n.pressure);
+        } else if (n.kind == Off && it != held.end()) {
+            emit(n.t, it->second.finger, Up, it->second.x, it->second.y, 0);
+            held.erase(it);
+        }
+    }
+    for (auto& kv : held) emit(t.length(), kv.second.finger, Up, kv.second.x, kv.second.y, 0);
+    return out;
+}
+
+}  // namespace
+
+bool relayout(Take& t, const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[2],
+              Report* report) {
+    Report local;
+    Report& rep = report ? *report : local;
+    Layout layout;
+    std::string err;
+    float c[2] = {centers[0], centers[1]};
+    if (!layout.scan(pkg, values, width, height, c, &err)) { rep.errors.push_back(err); return false; }
+    std::vector<Touch> fresh;
+    Score sc;
+    if (!t.score.empty() &&
+        parseScore(t.score, sc, nullptr, nullptr, t.scoreLine > 0 ? t.scoreLine : 1, t.tempo, t.meterBeats, t.meterUnit, t.key)) {
+        Take tmp;
+        expand(sc, layout, tmp, &rep);
+        fresh = std::move(tmp.touches);
+    } else {
+        fresh = fromNotes(t, layout);
+    }
+    t.touches.erase(std::remove_if(t.touches.begin(), t.touches.end(), [](const Touch& e) { return e.side == 0; }), t.touches.end());
+    t.touches.insert(t.touches.end(), fresh.begin(), fresh.end());
+    auto rank = [](int ph) { return ph == Up || ph == Cancel ? 0 : ph == Down ? 1 : 2; };
+    std::stable_sort(t.touches.begin(), t.touches.end(), [&](const Touch& a, const Touch& b) {
+        return a.t < b.t || (a.t == b.t && rank(a.phase) < rank(b.phase));
+    });
+    return true;
+}
+
+}  // namespace mpe::take

@@ -240,6 +240,16 @@ bool prepare(Take& t, const Package& controller, std::vector<double> values, flo
 // The take's settings for side `side` over `values` (by position, from the controller's manifest).
 std::vector<double> settingsFor(const Take& t, int side, const Json& manifest, std::vector<double> values);
 
+// Whether side 0's controller is set (values, by position) and sized (w x h dp) as the take was
+// laid out on: its touches (the ghost fingers) land on the keys that play its notes.
+bool laidOutFor(const Take& t, const Json& manifest, const std::vector<double>& values, float width, float height);
+// Its ghost fingers laid out again on the controller as it is now (values as they are, not the
+// take's): a take written by hand from its score, one that was played from its notes (each held
+// note a finger on the key for it, moving with its bends, pressure and tone). What it plays (its
+// notes) is unchanged. Side 0's touches are replaced; false if the controller cannot be scanned.
+bool relayout(Take& t, const Package& controller, const std::vector<double>& values, float width, float height,
+              const float centers[2], Report* report = nullptr);
+
 // ---- playing -------------------------------------------------------------------------------------
 
 // The look of the ghost fingers: from ui/tokens.json's "ghost" (each app gives its own tokens).
@@ -285,11 +295,14 @@ public:
     // The ghost fingers over side `side`'s surface (w x h dp) now, as a draw list
     // (CONTROLLER_FORMAT.md's): each finger down, with its trail; the next ones coming; the words.
     std::vector<uint8_t> drawGhosts(int side, float w, float h, const GhostStyle& style) const;
+    // New touches for the take playing (relayout()'s): it plays on where it was, its notes as they were.
+    void retouch(std::vector<Touch> touches);
 
 private:
     // One finger from down to up: its touches (indices into take_.touches) and the note it started.
     struct Stroke { int side = 0, finger = 0; std::vector<size_t> events; double down = 0, up = 0; std::string label; };
     void seek(double pos);
+    void buildStrokes();
     void allOff(const Sink& sink);
     bool at(const Stroke& s, double pos, float* x, float* y, float* force) const;
 

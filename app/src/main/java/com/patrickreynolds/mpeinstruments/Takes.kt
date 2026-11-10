@@ -180,12 +180,32 @@ object Takes {
         val r = String(Native.nativeTakePlay(t.file.readBytes(), mode, c.values.toDoubleArray(), surfaceW, surfaceH, centers[0], centers[1],
                                              speed, loop), Charsets.UTF_8)
         note = listOf(left, r.removePrefix("!")).filter { it.isNotEmpty() }.joinToString(". ")
-        if (!r.startsWith("!")) playing = mode + 1
+        if (!r.startsWith("!")) { playing = mode + 1; laidW = surfaceW; laidH = surfaceH; laidValues = c.values.toList() }
     }
 
     fun stop() {
         if (playing != 0) Native.nativeTakeStop()
         playing = 0
+    }
+
+    // The layout the ghosts were last laid out for: the surface (dp) and the controller's settings.
+    private var laidW = 0f
+    private var laidH = 0f
+    private var laidValues: List<Double> = emptyList()
+    private var laidAt = 0L
+
+    /** While a take plays: if the surface or the controller's settings changed (the rail closed, a
+     *  layout setting), lay its ghost fingers out again so they stay on the keys (at most 4 a second). */
+    private fun followLayout(w: Float, h: Float) {
+        val c = AppState.controller as? PackageController ?: return
+        val values = c.values.toList()
+        if (Math.abs(w - laidW) < 0.5f && Math.abs(h - laidH) < 0.5f && values == laidValues) return
+        val now = System.currentTimeMillis()
+        if (now - laidAt < 250) return
+        laidAt = now
+        laidW = w; laidH = h; laidValues = values
+        val centers = (0 until 2).map { AppState.instrument(if (AppState.partCount > 1) it else 0)?.centerNote ?: 60f }
+        Native.nativeTakeRelayout(values.toDoubleArray(), w, h, centers[0], centers[1])
     }
 
     fun changeSpeed(s: Double) { speed = s; Native.nativeTakeSpeed(s) }
@@ -199,6 +219,7 @@ object Takes {
             if (now < 0 || Math.floor(now / 1000) != Math.floor(recording / 1000) || (recording == 0.0) != (now == 0.0)) recording = now
         }
         if (playing == 0) return null
+        followLayout(w, h)
         ghostSizes[5] = look.toFloat()
         val g = Native.nativeTakeTick(w, h, if (Eink) Tokens.Ghost.eink else Tokens.Ghost.dark, ghostSizes)
         if (g == null) playing = 0                // it came to its end

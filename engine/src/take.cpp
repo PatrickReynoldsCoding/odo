@@ -592,11 +592,7 @@ Take Recorder::stop() {
 
 // ---- playing -------------------------------------------------------------------------------------
 
-void Player::load(Take t) {
-    take_ = std::move(t);
-    auto byTime = [](const auto& a, const auto& b) { return a.t < b.t; };
-    std::stable_sort(take_.touches.begin(), take_.touches.end(), byTime);
-    std::stable_sort(take_.notes.begin(), take_.notes.end(), byTime);
+void Player::buildStrokes() {
     strokes_.clear();
     std::map<std::pair<int, int>, size_t> open;
     for (size_t i = 0; i < take_.touches.size(); i++) {
@@ -632,6 +628,20 @@ void Player::load(Take t) {
             break;
         }
     }
+}
+
+void Player::retouch(std::vector<Touch> touches) {
+    take_.touches = std::move(touches);
+    std::stable_sort(take_.touches.begin(), take_.touches.end(), [](const Touch& a, const Touch& b) { return a.t < b.t; });
+    buildStrokes();
+}
+
+void Player::load(Take t) {
+    take_ = std::move(t);
+    auto byTime = [](const auto& a, const auto& b) { return a.t < b.t; };
+    std::stable_sort(take_.touches.begin(), take_.touches.end(), byTime);
+    std::stable_sort(take_.notes.begin(), take_.notes.end(), byTime);
+    buildStrokes();
     loaded_ = true;
     playing_ = false;
     pos_ = 0;

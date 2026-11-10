@@ -1130,6 +1130,10 @@ struct App {
     int takeOn = -1;                       // the take chosen in the panel
     mpe::take::Recorder recorder;
     mpe::take::Player player;
+    mpe::take::Take loadedTake;          // the take playing as loaded (its own touches), to lay its ghosts out from
+    float laidW = 0, laidH = 0;          // the layout its ghosts were last laid out for
+    std::vector<double> laidValues;
+    double laidAt = -1e9;
     std::string takeNote;                  // what happened last, for the panel
     double takeSpeed = 1;
     int ghostLook = 0;                   // the Fingers choice: mpe::take::GhostStyle::Look
@@ -1270,10 +1274,33 @@ struct App {
                        " not on the controller as it is set: " + rep.errors[0];
         } else takeNote.clear();
         if (!left.empty()) takeNote = takeNote.empty() ? left : left + ". " + takeNote;
+        loadedTake = t;
         player.load(std::move(t));
+        laidW = laidH = -1;
+        laidAt = -1e9;
+        followLayout();
         player.setSpeed(takeSpeed);
         player.loopSection(takeLoop, nowMs(), takeSink());
         player.play(mode, nowMs(), takeSink());
+    }
+
+    // While a take plays: its ghost fingers on the keys of side 0's controller as it is now set and
+    // sized (its own touches if as it was laid out; else laid out again). At most four times a second.
+    void followLayout() {
+        if (!player.loaded()) return;
+        Side& sd = sides[0];
+        if (!sd.host || sd.controller < 0) return;
+        if (std::fabs(sd.w - laidW) < 0.5f && std::fabs(sd.h - laidH) < 0.5f && sd.settings == laidValues) return;
+        double now = nowMs();
+        if (now - laidAt < 250) return;
+        laidAt = now; laidW = sd.w; laidH = sd.h; laidValues = sd.settings;
+        const mpe::Package& pkg = *lib.controllers[size_t(sd.controller)];
+        if (mpe::take::laidOutFor(loadedTake, pkg.manifest, sd.settings, sd.w, sd.h)) { player.retouch(loadedTake.touches); return; }
+        float centers[2] = {60, 72};
+        for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
+            centers[j] = centerNote(*lib.instruments[size_t(j && partsOf(0) > 1 ? sound2Of(0) : sd.sound)].pkg);
+        mpe::take::Take t = loadedTake;
+        if (mpe::take::relayout(t, pkg, sd.settings, sd.w, sd.h, centers)) player.retouch(std::move(t.touches));
     }
 
     std::string freeTakeName() const {
@@ -2405,6 +2432,7 @@ struct App {
             if (changed) saveConfig();
         }
         player.update(nowMs(), takeSink());              // a take playing: its notes due now
+        if (player.playing()) followLayout();            // its ghosts on the keys, as the layout is now
         SDL_SetRenderViewport(renderer, nullptr);
         draw::Color back = rgba(look().ink);        // between the sides: black, or e-ink's white
         SDL_SetRenderDrawColor(renderer, Uint8(back.r * 255), Uint8(back.g * 255), Uint8(back.b * 255), 255);

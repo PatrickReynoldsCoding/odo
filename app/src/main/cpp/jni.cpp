@@ -182,6 +182,17 @@ static std::string& ctlError() { static std::string e; return e; }
 #include "mpe/take.h"
 static mpe::take::Recorder& recorder() { static mpe::take::Recorder r; return r; }
 static mpe::take::Player& player() { static mpe::take::Player p; return p; }
+// The take playing as it was loaded (its own touches), to lay its ghosts out again from.
+static mpe::take::Take& loadedTake() { static mpe::take::Take t; return t; }
+// Its ghost fingers on the controller as it is now set and sized: its own touches if that is how it
+// was laid out, else laid out again (mpe::take::relayout). What it plays does not change.
+static void fitGhosts(const std::vector<double>& v, float w, float h, const float centers[2]) {
+    if (!ctl() || !player().loaded()) return;
+    const mpe::take::Take& was = loadedTake();
+    if (mpe::take::laidOutFor(was, ctl()->package().manifest, v, w, h)) { player().retouch(was.touches); return; }
+    mpe::take::Take t = was;
+    if (mpe::take::relayout(t, ctl()->package(), v, w, h, centers)) player().retouch(std::move(t.touches));
+}
 
 FN(jboolean, nativeCtlLoad)(JNIEnv* env, jobject, jbyteArray bytes) {
     jsize n = env->GetArrayLength(bytes);
@@ -503,13 +514,27 @@ FN(jbyteArray, nativeTakePlay)(JNIEnv* env, jobject, jbyteArray text, jint mode,
             note = std::to_string(rep.errors.size()) + (rep.errors.size() == 1 ? " note is" : " notes are") +
                    " not on the controller as it is set: " + rep.errors[0];
     }
+    loadedTake() = t;
     player().load(std::move(t));
+    {
+        std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
+        if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
+        float centers[2] = {center0, center1};
+        fitGhosts(v, w, h, centers);
+    }
     player().setSpeed(speed);
     player().loopSection(loop, takeNowMs(), takeSink());
     player().play(mode == 1 ? mpe::take::Player::PlayAlong : mpe::take::Player::Listen, takeNowMs(), takeSink());
     return bytesOut(env, note);
 }
 FN(void, nativeTakeStop)(JNIEnv*, jobject) { player().stop(takeSink()); }
+// The controller's size or settings changed while a take plays: its ghosts follow the keys.
+FN(void, nativeTakeRelayout)(JNIEnv* env, jobject, jdoubleArray values, jfloat w, jfloat h, jfloat center0, jfloat center1) {
+    std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
+    if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
+    float centers[2] = {center0, center1};
+    fitGhosts(v, w, h, centers);
+}
 FN(void, nativeTakeSpeed)(JNIEnv*, jobject, jdouble speed) { player().setSpeed(speed); }
 FN(void, nativeTakeLoop)(JNIEnv*, jobject, jint section) { if (player().loaded()) player().loopSection(section, takeNowMs(), takeSink()); }
 // playing (0/1), mode (0 listen, 1 play along), position ms, length ms.

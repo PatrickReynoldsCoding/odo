@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include "check.h"
 #include "mpe/take.h"
@@ -414,6 +415,58 @@ static void curves() {
     CHECK(!parseScore("C4:1(pitch 0 30)\n", sc, &errors, nullptr) && !errors.empty(), "a pitch curve past two octaves is an error");
 }
 
+static void relaid() {
+    auto hex = controller("hex");
+    if (!hex) return;
+    const char* text =
+        "odo-take/1.1\n"
+        "tempo: 100\n"
+        "controller: patrickreynolds/hex\n"
+        "settings: {\"chromatic\": 1, \"cols\": 6}\n"
+        "score\n"
+        "C4:1 E4:1 G4:1 C5:1 A3+E4:2 D4:1(press 0.4 0.9) G3:1\n"
+        "end\n";
+    const Json& st = hex->manifest["settings"];
+    auto valuesWith = [&](double cols) {
+        std::vector<double> v;
+        for (size_t i = 0; i < st.size(); i++) {
+            std::string id = st[i]["id"].str();
+            v.push_back(id == "cols" ? cols : id == "chromatic" ? 1 : st[i]["default"].num(0));
+        }
+        return v;
+    };
+    for (bool fromNotes : {false, true}) {
+        Take t;
+        std::string err;
+        parse(text, t, &err);
+        float c[2] = {60, 60};
+        Report rep;
+        CHECK(prepare(t, *hex, {}, 900, 500, c, &rep) && rep.errors.empty(), "relayout: it plays on the Hex at 900x500");
+        if (fromNotes) t.score.clear();                 // as a take that was played, not written
+        std::vector<double> v = valuesWith(9);
+        CHECK(laidOutFor(t, hex->manifest, valuesWith(6), 900, 500) && !laidOutFor(t, hex->manifest, v, 900, 500) &&
+              !laidOutFor(t, hex->manifest, valuesWith(6), 1300, 500), "relayout: a change of size or of a setting is seen");
+        Take moved = t;
+        CHECK(relayout(moved, *hex, v, 1300, 560, c), "relayout: laid out again at 1300x560 with 9 keys a column");
+        // Every finger down lands on a key playing its note.
+        mpe::take::Layout lay;
+        lay.scan(*hex, v, 1300, 560, c);
+        int downs = 0, right = 0;
+        std::vector<float> want;
+        for (const Note& n : moved.notes) if (n.kind == On) want.push_back(std::round(n.pitch));
+        std::multiset<float> wanted(want.begin(), want.end());
+        for (const Touch& e : moved.touches) {
+            if (e.phase != Down) continue;
+            downs++;
+            Note got;
+            if (lay.probe(e.x * 1300, e.y * 560, 0.6f, &got) && wanted.count(std::round(got.pitch))) right++;
+        }
+        CHECK(downs == int(want.size()) && right == downs, "relayout (%s): each finger lands on its note's key (%d of %d)",
+              fromNotes ? "from its notes" : "from its score", right, downs);
+        CHECK(moved.notes.size() == t.notes.size(), "relayout: what it plays is unchanged");
+    }
+}
+
 static void examples() {
     auto grid = controller("grid");
     if (!grid) return;
@@ -587,6 +640,7 @@ static void presets() {
 }
 
 int main() {
+    relaid();
     curves();
     fileRoundTrip();
     recordAndPlay();

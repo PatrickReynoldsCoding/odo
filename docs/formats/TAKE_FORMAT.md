@@ -39,6 +39,14 @@ The ghost fingers: a glowing circle where each finger is, bigger with more force
 name in it and a fading trail behind it; a ring closing in where the next finger goes down; a thin
 line across the top for how far it has played; the section's name and the take's words at the
 top. Their colours and sizes are `ghost` in `ui/tokens.json` (dark and e-ink).
+The ghosts follow the keys. A take's touches are where its fingers were on the controller as it
+was set and sized then; played on a controller set or sized differently (another number of keys,
+another layout, the rail closed), odo lays them out again (`mpe::take::relayout`): a take written
+by hand from its score, one that was played from its notes (each held note a finger on its key,
+moving with its bends, pressure and tone). It does so again whenever the size or a setting changes
+while it plays, and goes back to the take's own touches when the controller is as it was. What
+it plays (its notes) never changes.
+
 That is **Rings**, the first of the **Fingers** looks. **Dots**: a small dot for each finger (bigger
 with more force) and for the next ones coming, a short trail, no rings. **Falling**: each next note
 falls from the top of the surface to its key; a held one lights its key, with a bar above it of
