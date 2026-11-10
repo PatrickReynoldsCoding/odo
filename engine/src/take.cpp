@@ -244,10 +244,12 @@ bool parse(const std::string& text, Take& out, std::string* error, std::vector<s
                 else warn(i, "surface: its width and height in dp");
             }
             else if (key == "centers") {
-                double a = 0, b = 0;
-                if (!w.empty() && number(w[0], a)) {
-                    sd().centers[0] = sd().centers[1] = float(a);
-                    if (w.size() > 1 && number(w[1], b)) sd().centers[1] = float(b);
+                // One to four: each part's; those left out as the one before.
+                double a = 0;
+                for (size_t j = 0; j < size_t(kCenters); j++) {
+                    if (j < w.size() && number(w[j], a)) sd().centers[j] = float(a);
+                    else if (j > 0) sd().centers[j] = sd().centers[j - 1];
+                    else break;
                     sd().hasCenters = true;
                 }
             }
@@ -372,7 +374,14 @@ std::string write(const Take& t) {
         }
         for (const std::string& snd : s.sounds) field("sound", snd);
         if (s.width > 0 && s.height > 0) field("surface", fnum(s.width) + " " + fnum(s.height));
-        if (s.hasCenters) field("centers", fnum(s.centers[0]) + " " + fnum(s.centers[1]));
+        if (s.hasCenters) {
+            // Those after the second only when a part there has its own (older readers take two).
+            int n = 2;
+            for (int j = 2; j < kCenters; j++) if (s.centers[j] != s.centers[j - 1]) n = j + 1;
+            std::string v;
+            for (int j = 0; j < n; j++) v += (j ? " " : "") + fnum(s.centers[j]);
+            field("centers", v);
+        }
     }
     if (!t.score.empty()) {
         o += "\nscore\n" + t.score;
@@ -526,8 +535,7 @@ void Recorder::attach(ControllerHost& host, int side, const std::vector<std::str
     sd.sounds = sounds;
     sd.width = host.width();
     sd.height = host.height();
-    sd.centers[0] = host.centerNote(0);
-    sd.centers[1] = host.centerNote(1);
+    for (int j = 0; j < kCenters; j++) sd.centers[j] = host.centerNote(j);
     sd.hasCenters = true;
     ControllerHost* h = &host;          // the taps live in the host: it is there whenever they are called
     ControllerHost::Taps taps;

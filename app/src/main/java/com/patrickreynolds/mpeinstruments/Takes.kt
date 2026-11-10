@@ -187,8 +187,8 @@ object Takes {
         }
         val left = said.substringAfter(". ", "")  // what of its set-up is not here
         val c = AppState.controller as? PackageController ?: run { note = "Takes play on a controller on the screen."; return }
-        val centers = (0 until 2).map { AppState.instrument(if (AppState.partCount > 1) it else 0)?.centerNote ?: 60f }
-        val r = String(Native.nativeTakePlay(t.file.readBytes(), mode, c.values.toDoubleArray(), surfaceW, surfaceH, centers[0], centers[1],
+        val centers = partCenters()
+        val r = String(Native.nativeTakePlay(t.file.readBytes(), mode, c.values.toDoubleArray(), surfaceW, surfaceH, centers,
                                              speed, loop), Charsets.UTF_8)
         note = listOf(left, r.removePrefix("!")).filter { it.isNotEmpty() }.joinToString(". ")
         if (!r.startsWith("!")) { playing = mode + 1; laidW = surfaceW; laidH = surfaceH; laidValues = c.values.toList() }
@@ -215,9 +215,13 @@ object Takes {
         if (now - laidAt < 250) return
         laidAt = now
         laidW = w; laidH = h; laidValues = values
-        val centers = (0 until 2).map { AppState.instrument(if (AppState.partCount > 1) it else 0)?.centerNote ?: 60f }
-        Native.nativeTakeRelayout(values.toDoubleArray(), w, h, centers[0], centers[1])
+        val centers = partCenters()
+        Native.nativeTakeRelayout(values.toDoubleArray(), w, h, centers)
     }
+
+    /** Each part's instrument middle (MIDI note), for laying a take out: four, the parts past those
+     *  playing as the last one. */
+    private fun partCenters() = FloatArray(4) { AppState.instrument(it.coerceAtMost(AppState.partCount - 1))?.centerNote ?: 60f }
 
     fun changeSpeed(s: Double) { speed = s; Native.nativeTakeSpeed(s) }
     fun changeLoop(k: Int) { loop = k; Native.nativeTakeLoop(k) }

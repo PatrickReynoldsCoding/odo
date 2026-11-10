@@ -23,6 +23,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <atomic>
 #include <cmath>
@@ -225,8 +226,8 @@ struct App {
     // One side of the window: a controller, its settings and its sound (part k of the engine).
     struct Side {
         int controller = 0, sound = 0;
-        int sound2 = -1;                // a split controller's second part's sound (the Grid's top), -1: as the first
-        int engineIndex2 = -1;          // the instrument its second part plays now
+        int more[3] = {-1, -1, -1};     // a split controller's further parts' sounds (the Grid's top...), -1: as the first
+        int engineMore[3] = {-1, -1, -1};   // the instrument each of those plays now
         std::unique_ptr<mpe::ControllerHost> host;
         std::vector<double> settings;   // the controller's, by position
         float x = 0, y = 0, w = 0, h = 0;   // its place in the window
@@ -251,7 +252,7 @@ struct App {
     std::string configPath = home() + "/.config/odo/settings.json";
     bool persist = true;
     std::map<std::string, std::map<std::string, double>> saved;
-    std::string savedController[kSides], savedSound[kSides], savedSound2[kSides];
+    std::string savedController[kSides], savedSound[kSides], savedMore[kSides][3];
     int savedSplit = 0, savedActive = 0;
     bool savedFullscreen = false;
 
@@ -268,7 +269,8 @@ struct App {
         for (size_t k = 0; k < s.size() && k < size_t(kSides); k++) {
             if (!s[k]["controller"].str().empty()) savedController[k] = s[k]["controller"].str();
             if (!s[k]["sound"].str().empty()) savedSound[k] = s[k]["sound"].str();
-            if (!s[k]["sound2"].str().empty()) savedSound2[k] = s[k]["sound2"].str();
+            for (int j = 1; j < 4; j++)            // "sound2" .. "sound4": a split controller's further parts
+                if (std::string key = "sound" + std::to_string(j + 1); !s[k][key.c_str()].str().empty()) savedMore[k][j - 1] = s[k][key.c_str()].str();
             for (size_t j = 0; j < s[k]["parts"].size(); j++) sides[k].parts.push_back(mpe::preset::partFrom(s[k]["parts"][j]));
         }
         layered = j["layered"].boolean();
@@ -290,7 +292,7 @@ struct App {
             p.split = std::clamp(int(ps[i]["split"].num(0)), 0, kSplitCount - 1);
             const mpe::Json& sd = ps[i]["sides"];
             for (size_t k = 0; k < sd.size() && k < size_t(kSides); k++) {
-                PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), sd[k]["sound2"].str(), {}, {}};
+                PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), {sd[k]["sound2"].str(), sd[k]["sound3"].str(), sd[k]["sound4"].str()}, {}, {}};
                 for (const auto& kv : sd[k]["settings"].o) s.settings[kv.first] = kv.second.num();
                 for (size_t j = 0; j < sd[k]["parts"].size(); j++) s.parts.push_back(mpe::preset::partFrom(sd[k]["parts"][j]));
                 p.sides.push_back(std::move(s));
@@ -316,8 +318,9 @@ struct App {
     std::string soundId(int k) const {
         return lib.instruments.empty() ? "" : lib.ref(sides[k].sound);
     }
-    std::string sound2Id(int k) const {
-        return lib.instruments.empty() || sides[k].sound2 < 0 ? "" : lib.ref(sides[k].sound2);
+    // Part j's (1..3) own sound, or "" when it plays the first's.
+    std::string moreId(int k, int j) const {
+        return lib.instruments.empty() || sides[k].more[j - 1] < 0 ? "" : lib.ref(sides[k].more[j - 1]);
     }
     // Where side k keeps its controller's settings.
     std::string settingsKey(int k) const { return k == 0 ? controllerId(0) : controllerId(k) + "#" + std::to_string(k + 1); }
@@ -333,7 +336,8 @@ struct App {
           << ",\n  \"split\": " << split << ",\n  \"active\": " << active << ",\n  \"sides\": [";
         for (int k = 0; k < kSides; k++) {
             f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k))
-              << ", \"sound2\": " << quoted(sound2Id(k));
+              << ", \"sound2\": " << quoted(moreId(k, 1)) << ", \"sound3\": " << quoted(moreId(k, 2))
+              << ", \"sound4\": " << quoted(moreId(k, 3));
             if (!sides[k].parts.empty()) {
                 f << ", \"parts\": [";
                 for (size_t j = 0; j < sides[k].parts.size(); j++) f << (j ? ", " : "") << mpe::preset::toJson(mpe::preset::partJson(sides[k].parts[j]));
@@ -366,7 +370,8 @@ struct App {
             for (size_t k = 0; k < p.sides.size(); k++) {
                 const PresetSide& s = p.sides[k];
                 f << (k ? ", " : "") << "{\"controller\": " << quoted(s.controller) << ", \"sound\": " << quoted(s.sound)
-                  << ", \"sound2\": " << quoted(s.sound2) << ", \"settings\": {";
+                  << ", \"sound2\": " << quoted(s.more[0]) << ", \"sound3\": " << quoted(s.more[1])
+                  << ", \"sound4\": " << quoted(s.more[2]) << ", \"settings\": {";
                 bool f2 = true;
                 for (const auto& sv : s.settings) { f << (f2 ? "" : ", ") << quoted(sv.first) << ": " << sv.second; f2 = false; }
                 f << "}";
@@ -426,7 +431,7 @@ struct App {
     // A preset opened from a file (mpe::preset) may carry what this app has no settings for: each
     // part's own settings (its volume, effects, arp), layering and the shared effects, as odo on
     // Android has them. They are kept, and given back when the preset is shared, while its sounds stay.
-    struct PresetSide { std::string controller, sound, sound2; std::map<std::string, double> settings;
+    struct PresetSide { std::string controller, sound; std::array<std::string, 3> more; std::map<std::string, double> settings;
                         std::vector<mpe::preset::Part> parts; };
     struct Preset { std::string name; int split = 0; std::vector<PresetSide> sides; bool builtIn = false;
                     bool layered = false, hasEffects = false; mpe::preset::Effects effects; };
@@ -438,7 +443,7 @@ struct App {
     static std::vector<Preset> builtInPresets() {
         auto side = [](const char* c, const char* s, std::map<std::string, double> st = {}, const char* s2 = "") {
             return PresetSide{std::string("patrickreynolds/") + c, std::string("patrickreynolds/") + s,
-                              *s2 ? std::string("patrickreynolds/") + s2 : std::string(), std::move(st), {}};
+                              {*s2 ? std::string("patrickreynolds/") + s2 : std::string(), "", ""}, std::move(st), {}};
         };
         auto built = [](const char* name, int split, std::vector<PresetSide> sides) {
             Preset p; p.name = name; p.split = split; p.sides = std::move(sides); p.builtIn = true; return p;
@@ -474,7 +479,8 @@ struct App {
         for (Preset& p : builtInPresets()) {
             bool ok = true;
             for (const PresetSide& s : p.sides)
-                ok = ok && controllerIndex(s.controller) >= 0 && soundIndex(s.sound) >= 0 && (s.sound2.empty() || soundIndex(s.sound2) >= 0);
+                ok = ok && controllerIndex(s.controller) >= 0 && soundIndex(s.sound) >= 0 &&
+                     std::all_of(s.more.begin(), s.more.end(), [&](const std::string& m) { return m.empty() || soundIndex(m) >= 0; });
             if (ok) out.push_back(std::move(p));
         }
         out.insert(out.end(), userPresets.begin(), userPresets.end());
@@ -492,7 +498,7 @@ struct App {
         p.split = split;
         p.layered = layered; p.hasEffects = hasEffects; p.effects = effects;   // as the preset on gave them
         for (int k = 0; k < count(); k++) {
-            PresetSide s{controllerId(k), soundId(k), sound2Id(k), {}, sides[k].parts};
+            PresetSide s{controllerId(k), soundId(k), {moreId(k, 1), moreId(k, 2), moreId(k, 3)}, {}, sides[k].parts};
             if (sides[k].host) {
                 const mpe::Json& st = sides[k].host->manifest()["settings"];
                 for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) s.settings[st[i]["id"].str()] = sides[k].settings[i];
@@ -507,7 +513,8 @@ struct App {
         if (p.split != split || p.sides.size() != size_t(count())) return false;
         for (int k = 0; k < count(); k++) {
             const PresetSide& s = p.sides[size_t(k)];
-            if (s.controller != controllerId(k) || s.sound != soundId(k) || s.sound2 != sound2Id(k)) return false;
+            if (s.controller != controllerId(k) || s.sound != soundId(k) || s.more[0] != moreId(k, 1) || s.more[1] != moreId(k, 2) ||
+                s.more[2] != moreId(k, 3)) return false;
             if (!sides[k].host) continue;
             const mpe::Json& st = sides[k].host->manifest()["settings"];
             for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) {
@@ -545,7 +552,7 @@ struct App {
             sd.parts = s.parts;
             if (int c = controllerIndex(s.controller); c >= 0) sd.controller = c;
             if (int n = soundIndex(s.sound); n >= 0) sd.sound = n;
-            sd.sound2 = s.sound2.empty() ? -1 : soundIndex(s.sound2);
+            for (int j = 0; j < 3; j++) sd.more[j] = s.more[size_t(j)].empty() ? -1 : soundIndex(s.more[size_t(j)]);
             // Its settings over the ones kept for that controller (a side after the first starts
             // from the first side's, as when a controller is chosen); then it starts again with them.
             int ki = int(k);
@@ -586,7 +593,7 @@ struct App {
         std::string out;
         for (int k = 0; k < count() && !lib.instruments.empty(); k++)
             for (int j = 0; j < partsOf(k); j++)
-                out += (out.empty() ? "" : " + ") + lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].pkg->name();
+                out += (out.empty() ? "" : " + ") + lib.instruments[size_t(soundOf(k, j))].pkg->name();
         return out;
     }
 
@@ -646,7 +653,7 @@ struct App {
                 fs.parts[j].version = version;
             };
             put(0, s.sound);
-            if (!s.sound2.empty()) put(1, s.sound2);
+            for (int j = 1; j < 4; j++) if (!s.more[size_t(j - 1)].empty()) put(j, s.more[size_t(j - 1)]);
             f.sides.push_back(std::move(fs));
         }
         return f;
@@ -696,7 +703,7 @@ struct App {
                 else if (j < 2) missingSound++;
             }
             s.sound = !found.empty() && found[0] >= 0 ? lib.ref(found[0]) : soundId(ki);
-            s.sound2 = found.size() > 1 && found[1] >= 0 ? lib.ref(found[1]) : "";
+            for (size_t j = 1; j < 4; j++) s.more[j - 1] = found.size() > j && found[j] >= 0 ? lib.ref(found[j]) : "";
             for (const auto& kv : fs.settings.o) s.settings[kv.first] = kv.second.num();
             p.sides.push_back(std::move(s));
         }
@@ -862,7 +869,7 @@ struct App {
             for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
                 if (st[i]["id"].str() == from) { n = std::min(n, 1 + int(sd.settings[i])); break; }
         }
-        return std::clamp(n, 1, 2);
+        return std::clamp(n, 1, mpe::kParts);
     }
     // The engine part of side k's first sound: the sides' parts one after another (at most kParts in all).
     int partBase(int k) const {
@@ -870,7 +877,8 @@ struct App {
         for (int j = 0; j < k; j++) b += partsOf(j);
         return std::min(b, mpe::kParts - 1);
     }
-    int sound2Of(int k) const { return sides[k].sound2 < 0 ? sides[k].sound : sides[k].sound2; }
+    // Part j's sound on side k: its own, or (none chosen) the first's.
+    int soundOf(int k, int j) const { int s = j > 0 && j < 4 ? sides[k].more[j - 1] : -1; return s < 0 ? sides[k].sound : s; }
 
     // Each side's controller sends on its own MIDI channels, to its own parts: a side's notes never
     // take another's channel or sound.
@@ -882,7 +890,7 @@ struct App {
     }
     // After the parts in use change: every side routed again and the sounds put in their parts.
     void reroute() {
-        for (int k = 0; k < count(); k++) { route(k); sides[k].engineIndex = sides[k].engineIndex2 = -1; }
+        for (int k = 0; k < count(); k++) { route(k); sides[k].engineIndex = -1; for (int& e : sides[k].engineMore) e = -1; }
         applySounds();
         ensureLoading();
     }
@@ -921,7 +929,7 @@ struct App {
         for (int k = 0; k < count() && !lib.instruments.empty(); k++)
         for (int j = 0; j < partsOf(k); j++) {
             int part = std::min(partBase(k) + j, mpe::kParts - 1);
-            const mpe::Package& pkg = *lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].pkg;
+            const mpe::Package& pkg = *lib.instruments[size_t(soundOf(k, j))].pkg;
             const mpe::Json& s = pkg.manifest["sound"];
             mpe::PartConfig& c = p.part[part];
             c.reverb = float(s["reverb"].num(0.15));
@@ -969,9 +977,9 @@ struct App {
         for (int k = 0; k < count() && !lib.instruments.empty(); k++) {
             Side& sd = sides[k];
             for (int j = 0; j < partsOf(k); j++) {
-                const Instrument& in = lib.instruments[size_t(j ? sound2Of(k) : sd.sound)];
+                const Instrument& in = lib.instruments[size_t(soundOf(k, j))];
                 if (in.index < 0) continue;
-                int& now = j ? sd.engineIndex2 : sd.engineIndex;
+                int& now = j ? sd.engineMore[j - 1] : sd.engineIndex;
                 if (now != in.index) { engine->setInstrument(std::min(partBase(k) + j, mpe::kParts - 1), in.index); now = in.index; }
                 if (sd.host) sd.host->instrument(j, centerNote(*in.pkg));
             }
@@ -993,15 +1001,16 @@ struct App {
         for (size_t j = 0; j < from.size() && j < 2; j++)
             for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++) {
                 if (st[i]["id"].str() != from[j].str()) continue;
-                double v = isDrums(j ? sound2Of(k) : sd.sound) ? 1 : 0;
+                double v = isDrums(soundOf(k, j)) ? 1 : 0;
                 if (sd.settings[i] != v) { sd.host->setting(int(i), v); keepSetting(k, i, v); }
             }
     }
 
-    void chooseSound2(int k, int n) {
-        if (lib.instruments.empty()) return;
+    // Part j's (1..3) sound on side k.
+    void chooseSoundPart(int k, int j, int n) {
+        if (lib.instruments.empty() || j < 1 || j > 3) return;
         n = (n % int(lib.instruments.size()) + int(lib.instruments.size())) % int(lib.instruments.size());
-        sides[k].sound2 = n;
+        sides[k].more[j - 1] = n;
         if (lib.instruments[size_t(n)].index >= 0) { status.clear(); applySounds(); }
         else ensureLoading();
         saveConfig();
@@ -1031,7 +1040,7 @@ struct App {
         if (compiling || lib.instruments.empty()) return;
         for (int k = 0; k < count(); k++)
         for (int j = 0; j < partsOf(k); j++) {
-            int n = j ? sound2Of(k) : sides[k].sound;
+            int n = soundOf(k, j);
             Instrument& in = lib.instruments[size_t(n)];
             if (in.index >= 0 || !in.error.empty()) continue;
             compiling = true;
@@ -1066,7 +1075,7 @@ struct App {
     bool soundsReady() const {
         for (int k = 0; k < count(); k++)
             for (int j = 0; j < partsOf(k); j++)
-                if (lib.instruments.empty() || lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].index < 0) return false;
+                if (lib.instruments.empty() || lib.instruments[size_t(soundOf(k, j))].index < 0) return false;
         return true;
     }
 
@@ -1278,7 +1287,7 @@ struct App {
         if (!t.performed()) {
             float centers[2] = {60, 72};
             for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
-                centers[j] = centerNote(*lib.instruments[size_t(j && partsOf(0) > 1 ? sound2Of(0) : sd.sound)].pkg);
+                centers[j] = centerNote(*lib.instruments[size_t(soundOf(0, std::min(j, partsOf(0) - 1)))].pkg);
             mpe::take::Report rep;
             bool ok = mpe::take::prepare(t, *lib.controllers[size_t(sd.controller)], sd.settings, sd.w, sd.h, centers, &rep);
             if (!ok) { takeNote = rep.errors.empty() ? "It could not be played." : rep.errors[0]; return; }
@@ -1310,7 +1319,7 @@ struct App {
         if (mpe::take::laidOutFor(loadedTake, pkg.manifest, sd.settings, sd.w, sd.h)) { player.retouch(loadedTake.touches); return; }
         float centers[2] = {60, 72};
         for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
-            centers[j] = centerNote(*lib.instruments[size_t(j && partsOf(0) > 1 ? sound2Of(0) : sd.sound)].pkg);
+            centers[j] = centerNote(*lib.instruments[size_t(soundOf(0, std::min(j, partsOf(0) - 1)))].pkg);
         mpe::take::Take t = loadedTake;
         if (mpe::take::relayout(t, pkg, sd.settings, sd.w, sd.h, centers)) player.retouch(std::move(t.touches));
     }
@@ -1321,7 +1330,7 @@ struct App {
     struct DelayTime { const char* name; double beats; };
     static constexpr DelayTime kDelayTimes[6] = {{"1/16", 0.25}, {"1/8", 0.5}, {"1/8.", 0.75}, {"1/4", 1}, {"1/4.", 1.5}, {"1/2", 2}};
 
-    const mpe::Package& soundPkg(int j) const { return *lib.instruments[size_t(j ? sound2Of(active) : sides[active].sound)].pkg; }
+    const mpe::Package& soundPkg(int j) const { return *lib.instruments[size_t(soundOf(active, j))].pkg; }
     // Part j of the side in use, as it plays now: as the preset on gave it, or its sound's own.
     mpe::preset::Part shownPart(int j) const {
         const mpe::Package& pkg = soundPkg(j);
@@ -1437,7 +1446,7 @@ struct App {
             Side& sd = sides[k];
             if (!sd.host) continue;
             std::vector<std::string> sounds;
-            for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) sounds.push_back(lib.instruments[size_t(j ? sound2Of(k) : sd.sound)].pkg->id());
+            for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) sounds.push_back(lib.instruments[size_t(soundOf(k, j))].pkg->id());
             recorder.attach(*sd.host, k, sounds);
         }
         takeNote.clear();
@@ -1549,6 +1558,7 @@ struct App {
     enum Key { kNone = -100, kPresetKey = -1, kSplitKey = -2, kControllerKey = -3, kSoundKey = -4, kSound2Key = -5, kAppKey = -6, kGroupKey = -7, kTakesKey = -8, kEffectsKey = -9 };
     int panelKey = kNone;
     std::string panelGroup;                        // kGroupKey: the group it shows
+    int panelPart = 1;                             // kSound2Key: the part (1..3) whose sound it chooses
     float panelScroll = 0, settingsScroll = 0;
     int folded = -1;                               // a group's panel: the setting whose long list of chips is open
     bool renaming = false;                         // the preset panel: a new name being typed
@@ -1666,8 +1676,10 @@ struct App {
             int n = soundIndex(s.sound);
             snd += (snd.empty() ? "" : ", ") + (n >= 0 ? lib.instruments[size_t(n)].pkg->name() : std::string("?"));
             auto sp = s.settings.find("split");
-            int n2 = s.sound2.empty() ? -1 : soundIndex(s.sound2);
-            if (n2 >= 0 && sp != s.settings.end() && sp->second != 0) snd += " + " + lib.instruments[size_t(n2)].pkg->name();
+            for (const std::string& m : s.more) {
+                int n2 = m.empty() ? -1 : soundIndex(m);
+                if (n2 >= 0 && sp != s.settings.end() && sp->second != 0) snd += " + " + lib.instruments[size_t(n2)].pkg->name();
+            }
         }
         return (p.split ? std::string(kSplits[p.split].name) + " \xC2\xB7 " : "") + ctl + " \xC2\xB7 " + snd;
     }
@@ -1753,12 +1765,12 @@ struct App {
             }
             y += float((n + 1) / 2) * 104;
         } else if (panelKey == kSoundKey || panelKey == kSound2Key) {
-            if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < 2)) { panelKey = kNone; return Panel(); }
+            if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < panelPart + 1)) { panelKey = kNone; return Panel(); }
             bool two = partsOf(active) > 1;
             const mpe::Json& parts = sd.host ? sd.host->manifest()["parts"] : mpe::Json();
-            p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? 1 : 0)].str() : "Sound";
+            p.title = two ? "Sound: " + parts[size_t(panelKey == kSound2Key ? panelPart : 0)].str() : "Sound";
             p.sub = forSide.empty() ? "Type to find one" : forSide + " \xC2\xB7 type to find one";
-            int chosen = panelKey == kSound2Key ? sound2Of(active) : sd.sound;
+            int chosen = panelKey == kSound2Key ? soundOf(active, panelPart) : sd.sound;
             // The sound's versions, when it has more than one: the newest, and those kept to go back to.
             if (std::vector<int> vs = lib.versions(chosen); vs.size() > 1) {
                 heading("VERSION");
@@ -1797,7 +1809,7 @@ struct App {
             // Each sound's tone, drive, touch, release, sends and level; the shared reverb and delay
             // (Android's Effects, in the same words).
             p.title = "Effects"; p.sub = "Kept in presets";
-            const int n = std::min(partsOf(active), 2);
+            const int n = partsOf(active);
             auto slider = [&](const std::string& label, const std::string& value, double frac, int code) {
                 p.items.push_back({PItem::Label, label, value, x, y, in, 40}); y += 40;
                 PItem s{PItem::Slider, "", "", x + 9, y, in - 18, 30};
@@ -2021,8 +2033,8 @@ struct App {
                 case aSplit: setSplit(it.arg); break;
                 case aController: chooseController(active, it.arg); break;
                 case aSoundFilter: soundFilter = it.arg2; panelScroll = 0; break;
-                case aSound: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
-                case aVersion: if (panelKey == kSound2Key) chooseSound2(active, it.arg2); else chooseSound(active, it.arg2); break;
+                case aSound: if (panelKey == kSound2Key) chooseSoundPart(active, panelPart, it.arg2); else chooseSound(active, it.arg2); break;
+                case aVersion: if (panelKey == kSound2Key) chooseSoundPart(active, panelPart, it.arg2); else chooseSound(active, it.arg2); break;
                 case aLook: setEink(it.arg2 == 1); break;
                 case aGestures: setBlockGestures(!blockGestures); break;
                 case aPanic: engine->panic(); break;                  // every note stops, as on Android
@@ -2086,7 +2098,11 @@ struct App {
             const Box& b = *it;
             if (x < b.x || x >= b.x + b.w || at < b.y || at >= b.y + b.h) continue;
             switch (b.kind) {
-                case Box::Part: openPanel(b.key ? kSound2Key : kSoundKey); return;
+                case Box::Part:
+                    if (b.key && panelKey == kSound2Key && panelPart != b.key) { panelPart = b.key; panelScroll = 0; return; }
+                    if (b.key) panelPart = b.key;
+                    openPanel(b.key ? kSound2Key : kSoundKey);
+                    return;
                 case Box::Cell: if (b.key != active) { setActive(b.key); panelKey = panelKey == kGroupKey ? kNone : panelKey; } return;
                 case Box::Tile: if (b.key != kSoundKey) openPanel(b.key); return;
                 case Box::Group: openGroup(b.text); return;
@@ -2368,8 +2384,8 @@ struct App {
                     break;
                 }
                 case Box::Part: {
-                    int n = b.key ? sound2Of(active) : sd.sound;
-                    bool open = (b.key ? kSound2Key : kSoundKey) == panelKey;
+                    int n = soundOf(active, b.key);
+                    bool open = b.key ? panelKey == kSound2Key && panelPart == b.key : panelKey == kSoundKey;
                     const Instrument& s = lib.instruments[size_t(n)];
                     soundBadge(n, b.x + 6, y + 7, 30);
                     std::string name = s.pkg->name() + (s.newest ? "" : " " + s.version()) + (s.index < 0 && s.error.empty() ? "..." : "");
@@ -2577,7 +2593,7 @@ struct App {
                 sd.host->init(sd.w, sd.h, eink ? 1 : 0);
                 for (size_t i = 0; i < sd.settings.size(); i++) sd.host->setting(int(i), sd.settings[i]);
                 for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) {
-                    const Instrument& in = lib.instruments[size_t(j ? sound2Of(k) : sd.sound)];
+                    const Instrument& in = lib.instruments[size_t(soundOf(k, j))];
                     if (in.index >= 0) sd.host->instrument(j, centerNote(*in.pkg));
                 }
             }
@@ -2856,10 +2872,12 @@ int main(int argc, char** argv) {
         int n = app.soundIndex(sid);
         if (n < 0) n = app.soundIndex(sid.substr(0, sid.find('@')));
         if (n >= 0) app.sides[k].sound = n;
-        if (!app.savedSound2[k].empty()) {
-            int n2 = app.soundIndex(app.savedSound2[k]);
-            if (n2 < 0) n2 = app.soundIndex(app.savedSound2[k].substr(0, app.savedSound2[k].find('@')));
-            if (n2 >= 0) app.sides[k].sound2 = n2;
+        for (int j = 0; j < 3; j++) {
+            const std::string& m = app.savedMore[k][j];
+            if (m.empty()) continue;
+            int n2 = app.soundIndex(m);
+            if (n2 < 0) n2 = app.soundIndex(m.substr(0, m.find('@')));
+            if (n2 >= 0) app.sides[k].more[j] = n2;
         }
         for (size_t i = 0; i < app.lib.controllers.size(); i++) if (app.lib.controllers[i]->id() == cid) app.sides[k].controller = int(i);
         if (k < int(controllerIds.size()) && (app.lib.controllers.empty() || app.lib.controllers[size_t(app.sides[k].controller)]->id() != cid))

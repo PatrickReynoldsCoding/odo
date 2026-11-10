@@ -32,6 +32,10 @@
 
 namespace mpe::take {
 
+// Each part's instrument middle is told to a controller: up to four parts (a controller's
+// keyboards, as many as the engine's parts).
+constexpr int kCenters = 4;
+
 constexpr const char* kFormat = "odo-take/1.1";  // "odo-take/<major>[.<minor>]": a newer major is refused
                                                   // 1.1: the "preset" and "volume" lines
 constexpr const char* kExtension = ".odotake";
@@ -58,7 +62,7 @@ struct Side {
     std::vector<std::pair<std::string, double>> settings;    // setting id -> value, at the start
     std::vector<std::string> sounds;                         // each part's sound (instrument package id)
     float width = 0, height = 0;                             // its surface, dp (0: not known)
-    float centers[2] = {60, 60};                             // each part's instrument middle (MIDI note)
+    float centers[4] = {60, 60, 60, 60};                     // each part's instrument middle (MIDI note)
     bool hasCenters = false;
 };
 
@@ -202,7 +206,7 @@ public:
     Layout& operator=(Layout&&) noexcept;
     // values: its settings by position (as ControllerHost::values()). False and *error if it can't run.
     bool scan(const Package& controller, const std::vector<double>& values, float width, float height,
-              const float centers[2], std::string* error = nullptr);
+              const float centers[kCenters], std::string* error = nullptr);
     const std::vector<Cell>& cells() const { return cells_; }
     float width() const { return w_; }
     float height() const { return h_; }
@@ -248,12 +252,12 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report);
 // Plays a take's touches through a copy of the controller, on its own clock, and keeps the notes
 // it plays in `t.notes` (replacing any). values: its settings by position.
 bool render(Take& t, const Package& controller, const std::vector<double>& values, float width, float height,
-            const float centers[2], std::string* error = nullptr);
+            const float centers[kCenters], std::string* error = nullptr);
 // All of it for a take written by hand: its score, expanded on this controller as set (with the
 // take's own settings over `values`) at this size, and rendered. A take that was performed is
 // left as it is. Afterwards t.performed().
 bool prepare(Take& t, const Package& controller, std::vector<double> values, float width, float height,
-             const float centers[2], Report* report = nullptr);
+             const float centers[kCenters], Report* report = nullptr);
 // The take's settings for side `side` over `values` (by position, from the controller's manifest).
 std::vector<double> settingsFor(const Take& t, int side, const Json& manifest, std::vector<double> values);
 
@@ -265,7 +269,7 @@ bool laidOutFor(const Take& t, const Json& manifest, const std::vector<double>& 
 // note a finger on the key for it, moving with its bends, pressure and tone). What it plays (its
 // notes) is unchanged. Side 0's touches are replaced; false if the controller cannot be scanned.
 bool relayout(Take& t, const Package& controller, const std::vector<double>& values, float width, float height,
-              const float centers[2], Report* report = nullptr);
+              const float centers[kCenters], Report* report = nullptr);
 
 // ---- playing -------------------------------------------------------------------------------------
 

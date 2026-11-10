@@ -187,7 +187,13 @@ static mpe::take::Player& player() { static mpe::take::Player p; return p; }
 static mpe::take::Take& loadedTake() { static mpe::take::Take t; return t; }
 // Its ghost fingers on the controller as it is now set and sized: its own touches if that is how it
 // was laid out, else laid out again (mpe::take::relayout). What it plays does not change.
-static void fitGhosts(const std::vector<double>& v, float w, float h, const float centers[2]) {
+// Each part's instrument middle, from the app (the parts after those given: as the last).
+static void centersIn(JNIEnv* env, jfloatArray a, float* out) {
+    jsize n = a ? std::min<jsize>(env->GetArrayLength(a), mpe::take::kCenters) : 0;
+    if (n > 0) env->GetFloatArrayRegion(a, 0, n, out);
+    for (int j = n; j < mpe::take::kCenters; j++) out[j] = j ? out[j - 1] : 60.f;
+}
+static void fitGhosts(const std::vector<double>& v, float w, float h, const float centers[mpe::take::kCenters]) {
     if (!ctl() || !player().loaded()) return;
     const mpe::take::Take& was = loadedTake();
     if (mpe::take::laidOutFor(was, ctl()->package().manifest, v, w, h)) { player().retouch(was.touches); return; }
@@ -496,7 +502,7 @@ FN(jbyteArray, nativeTakePreset)(JNIEnv* env, jobject, jbyteArray text) {
 // (dp), for these instruments' middles. "" if it plays with every note; else what went wrong ("!"
 // first if it does not play at all).
 FN(jbyteArray, nativeTakePlay)(JNIEnv* env, jobject, jbyteArray text, jint mode, jdoubleArray values, jfloat w, jfloat h,
-                               jfloat center0, jfloat center1, jdouble speed, jint loop) {
+                               jfloatArray centerArr, jdouble speed, jint loop) {
     if (!ctl()) return bytesOut(env, "!No controller to play it on.");
     if (recorder().recording()) recorder().stop();
     player().stop(takeSink());
@@ -507,7 +513,8 @@ FN(jbyteArray, nativeTakePlay)(JNIEnv* env, jobject, jbyteArray text, jint mode,
     if (!t.performed()) {
         std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
         if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
-        float centers[2] = {center0, center1};
+        float centers[mpe::take::kCenters];
+        centersIn(env, centerArr, centers);
         mpe::take::Report rep;
         if (!mpe::take::prepare(t, ctl()->package(), v, w, h, centers, &rep))
             return bytesOut(env, "!" + (rep.errors.empty() ? std::string("It could not be played.") : rep.errors[0]));
@@ -520,7 +527,8 @@ FN(jbyteArray, nativeTakePlay)(JNIEnv* env, jobject, jbyteArray text, jint mode,
     {
         std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
         if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
-        float centers[2] = {center0, center1};
+        float centers[mpe::take::kCenters];
+        centersIn(env, centerArr, centers);
         fitGhosts(v, w, h, centers);
     }
     player().setSpeed(speed);
@@ -530,10 +538,11 @@ FN(jbyteArray, nativeTakePlay)(JNIEnv* env, jobject, jbyteArray text, jint mode,
 }
 FN(void, nativeTakeStop)(JNIEnv*, jobject) { player().stop(takeSink()); }
 // The controller's size or settings changed while a take plays: its ghosts follow the keys.
-FN(void, nativeTakeRelayout)(JNIEnv* env, jobject, jdoubleArray values, jfloat w, jfloat h, jfloat center0, jfloat center1) {
+FN(void, nativeTakeRelayout)(JNIEnv* env, jobject, jdoubleArray values, jfloat w, jfloat h, jfloatArray centerArr) {
     std::vector<double> v(size_t(values ? env->GetArrayLength(values) : 0));
     if (!v.empty()) env->GetDoubleArrayRegion(values, 0, jsize(v.size()), v.data());
-    float centers[2] = {center0, center1};
+    float centers[mpe::take::kCenters];
+    centersIn(env, centerArr, centers);
     fitGhosts(v, w, h, centers);
 }
 FN(void, nativeTakeSpeed)(JNIEnv*, jobject, jdouble speed) { player().setSpeed(speed); }

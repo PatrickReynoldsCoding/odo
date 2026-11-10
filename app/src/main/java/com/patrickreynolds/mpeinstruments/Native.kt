@@ -116,9 +116,9 @@ object Native {
     external fun nativeTakePreset(text: ByteArray): ByteArray
     /** Play it: mode 0 listen, 1 play along. "" if every note plays; else why not ("!" first: it does not play). */
     external fun nativeTakePlay(text: ByteArray, mode: Int, values: DoubleArray, width: Float, height: Float,
-                                center0: Float, center1: Float, speed: Double, loop: Int): ByteArray
+                                centers: FloatArray, speed: Double, loop: Int): ByteArray
     external fun nativeTakeStop()
-    external fun nativeTakeRelayout(values: DoubleArray, width: Float, height: Float, center0: Float, center1: Float)
+    external fun nativeTakeRelayout(values: DoubleArray, width: Float, height: Float, centers: FloatArray)
     external fun nativeTakeSpeed(speed: Double)
     /** Play section k round and round; -1: all of it. */
     external fun nativeTakeLoop(section: Int)

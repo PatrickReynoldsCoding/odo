@@ -108,7 +108,7 @@ and reads a newer minor, leaving out lines it does not know (with a warning each
 | `settings` | A JSON object on one line: setting id to value, as a preset's `settings`. A recorded take has them all; a score names those it needs. |
 | `sound` | A part's sound (instrument package id). One line per part, in order. |
 | `surface` | The surface's width and height in dp when it was played. |
-| `centers` | Each part's instrument middle (a MIDI note) when it was played. |
+| `centers` | Each part's instrument middle (a MIDI note) when it was played: one to four (a part not given: as the one before). Written with two unless a third or fourth part has its own. |
 | `preset` | (1.1) The rest of the set-up, as a preset: a [preset file](PRESET_FORMAT.md)'s JSON on one line, without its `name` and `madeBy`, and without each side's `controller` and `settings` (those are the `controller` and `settings` lines). Its `sides` are the take's sides in order; each side's `parts` give each part's sound, version, level, effects and arp. `split`, `layered` and `effects` as in a preset. Once, before or after the `side` lines. |
 | `volume` | (1.1) The master volume when it was played: 1 the usual level, 0 to 2. |
 

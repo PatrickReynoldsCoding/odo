@@ -465,7 +465,7 @@ bool Layout::probe(float x, float y, float force, Note* out) {
     return s.heard;
 }
 
-bool Layout::scan(const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[2],
+bool Layout::scan(const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[kCenters],
                   std::string* error) {
     sim_ = std::make_unique<Sim>();
     cells_.clear();
@@ -489,8 +489,7 @@ bool Layout::scan(const Package& pkg, const std::vector<double>& values, float w
     twoFingerBend_ = pkg.manifest["bend"].str() == "two fingers out";
     s.clock = 1000;
     s.host->init(width, height, 0);
-    s.host->instrument(0, centers[0]);
-    s.host->instrument(1, centers[1]);
+    for (int j = 0; j < kCenters; j++) s.host->instrument(j, centers[j]);
     s.host->tick();
 
     // Touch it all over, a few dp apart.
@@ -975,7 +974,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
     return rep.errors.empty();
 }
 
-bool render(Take& t, const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[2],
+bool render(Take& t, const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[kCenters],
             std::string* error) {
     double clock = 0;
     ControllerHost host(nullptr);
@@ -992,8 +991,7 @@ bool render(Take& t, const Package& pkg, const std::vector<double>& values, floa
     std::vector<double> v = settingsFor(t, 0, pkg.manifest, values);
     for (size_t i = 0; i < v.size(); i++) host.setting(int(i), v[i]);
     host.init(width, height, 2);             // no one sees it: it need not draw
-    host.instrument(0, centers[0]);
-    host.instrument(1, centers[1]);
+    for (int j = 0; j < kCenters; j++) host.instrument(j, centers[j]);
     // Its touches and settings, in time, with a frame every 1/120 s between.
     const double frame = 1000.0 / 120;
     double nextTick = 0;
@@ -1022,7 +1020,7 @@ bool render(Take& t, const Package& pkg, const std::vector<double>& values, floa
     return true;
 }
 
-bool prepare(Take& t, const Package& pkg, std::vector<double> values, float width, float height, const float centers[2],
+bool prepare(Take& t, const Package& pkg, std::vector<double> values, float width, float height, const float centers[kCenters],
              Report* report) {
     Report local;
     Report& rep = report ? *report : local;
@@ -1037,7 +1035,7 @@ bool prepare(Take& t, const Package& pkg, std::vector<double> values, float widt
     if (!side.controller.empty() && side.controller != pkg.id()) side.settings.clear();
     side.controller = pkg.id();
     side.controllerVersion = pkg.version();
-    float c[2] = {centers[0], centers[1]};
+    float c[kCenters] = {centers[0], centers[1], centers[2], centers[3]};
     // The middles of the instruments playing now (not the take's): the layout must be the one on screen.
     std::vector<double> v = settingsFor(t, 0, pkg.manifest, std::move(values));
     Layout layout;
@@ -1173,13 +1171,13 @@ std::vector<Touch> fromNotes(const Take& t, Layout& layout) {
 
 }  // namespace
 
-bool relayout(Take& t, const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[2],
+bool relayout(Take& t, const Package& pkg, const std::vector<double>& values, float width, float height, const float centers[kCenters],
               Report* report) {
     Report local;
     Report& rep = report ? *report : local;
     Layout layout;
     std::string err;
-    float c[2] = {centers[0], centers[1]};
+    float c[kCenters] = {centers[0], centers[1], centers[2], centers[3]};
     if (!layout.scan(pkg, values, width, height, c, &err)) { rep.errors.push_back(err); return false; }
     std::vector<Touch> fresh;
     Score sc;

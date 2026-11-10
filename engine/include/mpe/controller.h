@@ -62,7 +62,7 @@ public:
     float width() const { return width_; }
     float height() const { return height_; }
     const std::vector<double>& values() const { return values_; }
-    float centerNote(int part) const { return center_[part & 1]; }
+    float centerNote(int part) const { return center_[part & 3]; }
     const Package& package() const { return pkg_; }
 
     // Taps: told of every touch it is given, every note it plays (kind 0 on, 1 change, 2 off,
@@ -114,7 +114,7 @@ private:
     Taps taps_;
     Package pkg_;
     float width_ = 0, height_ = 0;
-    float center_[2] = {60, 60};
+    float center_[4] = {60, 60, 60, 60};
     std::vector<double> values_;
 };
 

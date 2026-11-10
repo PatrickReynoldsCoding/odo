@@ -51,7 +51,7 @@ struct Options {
     std::string controller, library = ODO_CONTROLLERS, out, sounds = ODO_SOUNDS;
     float w = 0, h = 0, tail = 3;
     bool centersGiven = false;
-    float centers[2] = {60, 72};
+    float centers[kCenters] = {60, 72, 72, 72};
     std::vector<std::pair<std::string, double>> settings;
 };
 
@@ -112,14 +112,15 @@ bool load(const std::string& path, const Options& o, Take& t, Report& rep, std::
         }
     }
     // Each part's middle: from the command line, else from its sound (as odo does), else 60 and 72.
-    float centers[2] = {o.centers[0], o.centers[1]};
+    float centers[kCenters] = {o.centers[0], o.centers[1], o.centers[2], o.centers[3]};
     if (!o.centersGiven && !o.sounds.empty() && !t.sides.empty())
-        for (size_t j = 0; j < 2 && j < t.sides[0].sounds.size(); j++) {
+        for (size_t j = 0; j < size_t(kCenters) && j < t.sides[0].sounds.size(); j++) {
             std::unique_ptr<Package> snd = soundPackage(o, t.sides[0].sounds[j]);
             if (snd) centers[j] = centerNote(*snd);
         }
-    // One sound: both parts play it (as odo tells a controller).
-    if (!o.centersGiven && !t.sides.empty() && t.sides[0].sounds.size() == 1) centers[1] = centers[0];
+    // Parts past the sounds named play the last one (as odo tells a controller).
+    if (!o.centersGiven && !t.sides.empty() && !t.sides[0].sounds.empty())
+        for (size_t j = t.sides[0].sounds.size(); j < size_t(kCenters); j++) centers[j] = centers[j - 1];
     float w = o.w, h = o.h;
     if (w <= 0 && !t.sides.empty() && t.sides[0].width > 0) { w = t.sides[0].width; h = t.sides[0].height; }
     if (w <= 0) { w = 900; h = 500; }
@@ -385,6 +386,7 @@ int main(int argc, char** argv) {
         } else if (a == "--center" && more) {
             int n = std::sscanf(argv[++i], "%f,%f", &o.centers[0], &o.centers[1]);
             if (n == 1) o.centers[1] = o.centers[0] + 12;
+            o.centers[2] = o.centers[3] = o.centers[1];
             if (n < 1) return usage();
             o.centersGiven = true;
         } else if (a == "--setting" && more) {

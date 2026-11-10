@@ -127,7 +127,7 @@ void ControllerHost::init(float width, float height, int flags) {
 }
 
 void ControllerHost::instrument(int part, float centerNote) {
-    center_[part & 1] = centerNote;
+    center_[part & 3] = centerNote;
     if (!w_ || !w_->fInstrument) return;
     report(error_, m3_CallV(w_->fInstrument, int32_t(part), centerNote), "instrument");
 }
