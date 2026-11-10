@@ -1315,6 +1315,84 @@ struct App {
         if (mpe::take::relayout(t, pkg, sd.settings, sd.w, sd.h, centers)) player.retouch(std::move(t.touches));
     }
 
+    // ---- each sound's effects (the Effects panel; Android's, in the same words) ------------------
+
+    static constexpr double kReleaseMax = 8;   // s, as Android's RELEASE_MAX
+    struct DelayTime { const char* name; double beats; };
+    static constexpr DelayTime kDelayTimes[6] = {{"1/16", 0.25}, {"1/8", 0.5}, {"1/8.", 0.75}, {"1/4", 1}, {"1/4.", 1.5}, {"1/2", 2}};
+
+    const mpe::Package& soundPkg(int j) const { return *lib.instruments[size_t(j ? sound2Of(active) : sides[active].sound)].pkg; }
+    // Part j of the side in use, as it plays now: as the preset on gave it, or its sound's own.
+    mpe::preset::Part shownPart(int j) const {
+        const mpe::Package& pkg = soundPkg(j);
+        const std::vector<mpe::preset::Part>& given = sides[active].parts;
+        if (size_t(j) < given.size() && given[size_t(j)].full && given[size_t(j)].sound == pkg.id()) return given[size_t(j)];
+        const mpe::Json& s = pkg.manifest["sound"];
+        mpe::preset::Part d;
+        d.sound = pkg.id(); d.full = true;
+        d.reverb = s["reverb"].num(0.15); d.delay = s["delay"].num(0); d.brightness = s["brightness"].num(1);
+        d.drive = s["drive"].num(0); d.pressureCurve = s["pressureCurve"].num(1); d.release = s["release"].num(0);
+        d.width = s["width"].num(0);
+        return d;
+    }
+    // The room and the delay all the sounds share, as they are now.
+    mpe::preset::Effects shownEffects() const {
+        if (hasEffects) return effects;
+        const mpe::Json& s = soundPkg(0).manifest["sound"];
+        mpe::preset::Effects e;
+        e.reverbSize = s["reverbSize"].num(0.5); e.reverbDamp = s["reverbDamp"].num(0.4);
+        return e;
+    }
+    mpe::preset::Effects& fxShared() { if (!hasEffects) { effects = shownEffects(); hasEffects = true; } return effects; }
+    // A slider moved: code j * 16 + field for a sound's (0 brightness .. 7 level), 8.. the shared ones.
+    void setFx(int code, double t) {
+        if (code >= 8) {
+            mpe::preset::Effects& e = fxShared();
+            if (code == 8) e.reverbSize = t;
+            else if (code == 9) e.reverbDamp = t;
+            else if (code == 10) e.delayFeedback = t * 0.9;
+            applySounds();
+            return;
+        }
+        const int j = code / 16, f = code % 16;
+        Side& sd = cur();
+        if (sd.parts.size() <= size_t(j)) sd.parts.resize(size_t(j) + 1);
+        mpe::preset::Part q = shownPart(j);
+        switch (f) {
+            case 0: q.brightness = std::fabs(t * 1.5 - 1) < 0.02 ? 1 : t * 1.5; break;
+            case 1: q.width = t; break;
+            case 2: q.drive = t; break;
+            case 3: q.pressureCurve = std::pow(3.0, t * 2 - 1); break;
+            case 4: { double r = t * t * kReleaseMax; q.release = r < 0.02 ? 0 : r; break; }
+            case 5: q.reverb = t; break;
+            case 6: q.delay = t; break;
+            case 7: q.volume = t * 1.5; break;
+        }
+        sd.parts[size_t(j)] = q;
+        applySounds();
+    }
+    // As the pack means it: the sound's own effects again.
+    void resetFx(int j) {
+        Side& sd = cur();
+        if (size_t(j) < sd.parts.size()) sd.parts[size_t(j)].full = false;
+        applySounds();
+        saveConfig();
+    }
+    // A word or two for the rail, as Android's: "Verb + Delay", "Dry"; and the release.
+    std::string effectsSummary() const {
+        const mpe::preset::Part q = shownPart(0);
+        std::vector<std::string> on;
+        if (q.reverb > 0.01) on.push_back("Verb");
+        if (q.delay > 0.01) on.push_back("Delay");
+        if (q.drive > 0.01) on.push_back("Drive");
+        if (q.brightness < 0.999) on.push_back("Tone");
+        std::string s = on.empty() ? "Dry" : on.size() <= 2 ? on[0] + (on.size() > 1 ? " + " + on[1] : "") : std::to_string(on.size()) + " on";
+        char rel[32];
+        if (q.release < 0.01) std::snprintf(rel, sizeof rel, "off");
+        else std::snprintf(rel, sizeof rel, q.release < 1 ? "%.2f s" : "%.1f s", q.release);
+        return s + " \xC2\xB7 release " + rel;
+    }
+
     std::string freeTakeName() const {
         for (int n = 1;; n++) {
             std::string name = "Take " + std::to_string(n);
@@ -1468,7 +1546,7 @@ struct App {
     static constexpr float kBottom = 84;           // the lines at the bottom: version and update, latency, load
     static constexpr float kPad = 16, kPanelHead = 58;
 
-    enum Key { kNone = -100, kPresetKey = -1, kSplitKey = -2, kControllerKey = -3, kSoundKey = -4, kSound2Key = -5, kAppKey = -6, kGroupKey = -7, kTakesKey = -8 };
+    enum Key { kNone = -100, kPresetKey = -1, kSplitKey = -2, kControllerKey = -3, kSoundKey = -4, kSound2Key = -5, kAppKey = -6, kGroupKey = -7, kTakesKey = -8, kEffectsKey = -9 };
     int panelKey = kNone;
     std::string panelGroup;                        // kGroupKey: the group it shows
     float panelScroll = 0, settingsScroll = 0;
@@ -1480,7 +1558,7 @@ struct App {
     // ---- the rail's boxes: drawing and tapping use this one layout ----
 
     struct Box {
-        enum Kind { Tile, Part, Map, Cell, Eyebrow, Group, App, Takes } kind;
+        enum Kind { Tile, Part, Map, Cell, Eyebrow, Group, App, Takes, Effects } kind;
         int key;                                   // Tile: its panel; Part: 0 or 1; Cell: the side
         std::string text;                          // Eyebrow: its words; Group: its name
         float x, y, w, h;                          // y from the top of the scrolled part, unscrolled
@@ -1519,6 +1597,7 @@ struct App {
             b.push_back({Box::Eyebrow, kNone, head, x, y, w, 26}); y += 26;
             for (const auto& g : mpe::rail::groups(sd.host->manifest(), sd.settings)) { b.push_back({Box::Group, kGroupKey, g.name, x, y, w, 50}); y += 52; }
         }
+        if (!lib.instruments.empty()) { b.push_back({Box::Effects, kEffectsKey, "", x, y, w, 50}); y += 52; }
         b.push_back({Box::Eyebrow, kNone, "APP", x, y, w, 26}); y += 26;
         b.push_back({Box::App, kAppKey, "", x, y, w, 50}); y += 52;
         b.push_back({Box::Takes, kTakesKey, "", x, y, w, 50});
@@ -1556,7 +1635,7 @@ struct App {
     // ---- the panel beside the rail ----
 
     enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
-               aRecord, aTake, aListen, aAlong, aSpeed, aFingers, aLoop, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
+               aRecord, aTake, aListen, aAlong, aSpeed, aFingers, aLoop, aFx, aFxReset, aDelayTime, aPingPong, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
                aTakeUse, aTakeKeep };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
@@ -1714,6 +1793,52 @@ struct App {
             for (size_t k = filterChips; k < p.items.size(); k++) if (p.items[k].kind == PItem::Chip) p.items[k].on = p.items[k].arg2 == chosen;
             if (!any) note(search.empty() ? std::string("None here.") : "No sound matches \xE2\x80\x9C" + search + "\xE2\x80\x9D.");
             if (soundFilter) note(soundFilter == 1 ? "Sustained: a held note keeps sounding." : "Fading: a held note dies away on its own.");
+        } else if (panelKey == kEffectsKey) {
+            // Each sound's tone, drive, touch, release, sends and level; the shared reverb and delay
+            // (Android's Effects, in the same words).
+            p.title = "Effects"; p.sub = "Kept in presets";
+            const int n = std::min(partsOf(active), 2);
+            auto slider = [&](const std::string& label, const std::string& value, double frac, int code) {
+                p.items.push_back({PItem::Label, label, value, x, y, in, 40}); y += 40;
+                PItem s{PItem::Slider, "", "", x + 9, y, in - 18, 30};
+                s.act = aFx; s.arg = code; s.frac = std::clamp(frac, 0.0, 1.0);
+                p.items.push_back(s); y += 40;
+            };
+            auto pct = [](double v) { return std::to_string(int(std::lround(v * 100))) + "%"; };
+            for (int j = 0; j < n; j++) {
+                const mpe::preset::Part q = shownPart(j);
+                if (n > 1) heading(upper(soundPkg(j).name()));
+                const double b = q.brightness;
+                slider("Brightness", b > 1.01 ? "open, air " + pct(b - 1) : b >= 0.99 ? "open" : pct(b), b / 1.5, j * 16 + 0);
+                slider("Width", q.width < 0.01 ? "mono" : pct(q.width), q.width, j * 16 + 1);
+                slider("Drive", q.drive < 0.01 ? "clean" : pct(q.drive), q.drive, j * 16 + 2);
+                const double pos = std::clamp(std::log(q.pressureCurve) / std::log(3.0), -1.0, 1.0);
+                slider("Touch", pos < -0.15 ? "light" : pos > 0.15 ? "firm" : "even", (pos + 1) / 2, j * 16 + 3);
+                char rel[32];
+                if (q.release < 0.01) std::snprintf(rel, sizeof rel, "Off");
+                else std::snprintf(rel, sizeof rel, q.release < 1 ? "%.2f s" : "%.1f s", q.release);
+                slider("Release", rel, std::sqrt(q.release / kReleaseMax), j * 16 + 4);
+                slider("Reverb", pct(q.reverb), q.reverb, j * 16 + 5);
+                slider("Delay", pct(q.delay), q.delay, j * 16 + 6);
+                slider("Level", pct(q.volume), q.volume / 1.5, j * 16 + 7);
+                PItem r{PItem::Row, "As the pack means it (" + soundPkg(j).name() + ")", "", x, y, in, 40};
+                r.act = aFxReset; r.arg = j; r.rule = true;
+                p.items.push_back(r); y += 40;
+            }
+            const mpe::preset::Effects e = shownEffects();
+            heading(n > 1 ? "REVERB (ALL THE SOUNDS)" : "REVERB");
+            slider("Size", pct(e.reverbSize), e.reverbSize, 8);
+            slider("Damping", pct(e.reverbDamp), e.reverbDamp, 9);
+            heading(n > 1 ? "DELAY (ALL THE SOUNDS)" : "DELAY");
+            note("Time, in beats of the tempo (" + std::to_string(int(std::lround(e.bpm))) + " bpm)");
+            int dt = -1;
+            std::vector<std::string> times;
+            for (int k = 0; k < 6; k++) { times.push_back(kDelayTimes[k].name); if (std::fabs(kDelayTimes[k].beats - e.delayBeats) < 1e-6) dt = k; }
+            chips(times, dt, aDelayTime, 0);
+            slider("Feedback", pct(e.delayFeedback), e.delayFeedback / 0.9, 10);
+            PItem pp{PItem::Switch, "Ping-pong", "Echoes bounce between left and right", x, y, in, 48};
+            pp.act = aPingPong; pp.on = e.delayPingPong; pp.rule = true;
+            p.items.push_back(pp); y += 50;
         } else if (panelKey == kAppKey) {
             p.title = "App"; p.sub = "For all of odo, not kept in presets";
             p.items.push_back({PItem::Label, "Volume", std::to_string(int(std::lround(masterVolume * 100))) + "%", x, y, in, 40}); y += 40;
@@ -1913,6 +2038,9 @@ struct App {
                 case aLoop: takeLoop = it.arg2 - 1; if (player.loaded()) player.loopSection(takeLoop, nowMs(), takeSink()); break;
                 case aTakeDelete: if (confirmTakeDelete) deleteTake(); else confirmTakeDelete = true; break;
                 case aTakeOpen: askToOpenTake(); break;
+                case aFxReset: resetFx(it.arg); break;
+                case aDelayTime: fxShared().delayBeats = kDelayTimes[std::clamp(it.arg2, 0, 5)].beats; applySounds(); saveConfig(); break;
+                case aPingPong: fxShared().delayPingPong = !shownEffects().delayPingPong; applySounds(); saveConfig(); break;
                 case aScalaOpen: askToOpenScala(size_t(it.arg)); break;
                 case aTakeShare: askToShareTake(); break;
                 case aTakeUse: confirmTakeDelete = false; useTakeSettings(false); break;
@@ -1926,10 +2054,11 @@ struct App {
     }
 
     // A slider in the panel under x: its setting at that place.
-    struct Slide { int setting = -1; float x = 0, w = 0; bool master = false; } slide;
+    struct Slide { int setting = -1; float x = 0, w = 0; bool master = false; int fx = -1; } slide;
     void panelSlide(float x, bool save) {
-        if ((slide.setting < 0 && !slide.master) || slide.w <= 0) return;
+        if ((slide.setting < 0 && !slide.master && slide.fx < 0) || slide.w <= 0) return;
         double t = std::clamp(double(x - slide.x) / double(slide.w), 0.0, 1.0);
+        if (slide.fx >= 0) { setFx(slide.fx, t); return; }
         if (slide.master) { setMasterVolume(float(std::round(t * 40) / 20), save); return; }   // 5% steps
         setSetting(size_t(slide.setting), mpe::rail::fromFraction(settingOf(size_t(slide.setting)), t), save);
     }
@@ -1962,6 +2091,7 @@ struct App {
                 case Box::Tile: if (b.key != kSoundKey) openPanel(b.key); return;
                 case Box::Group: openGroup(b.text); return;
                 case Box::App: openPanel(kAppKey); return;
+                case Box::Effects: openPanel(kEffectsKey); return;
                 case Box::Takes: if (panelKey != kTakesKey) scanTakes(); openPanel(kTakesKey); return;
                 default: break;
             }
@@ -1995,7 +2125,7 @@ struct App {
                 for (const PItem& it : p.items) {
                     float iy = p.top + it.y - panelScroll;
                     if (it.kind != PItem::Slider || x < it.x - 10 || x >= it.x + it.w + 10 || y < iy - 6 || y >= iy + it.h + 6) continue;
-                    slide = Slide{it.arg, it.x, it.w, it.act == aVolume};
+                    slide = it.act == aFx ? Slide{-1, it.x, it.w, false, it.arg} : Slide{it.arg, it.x, it.w, it.act == aVolume};
                     press.sliding = press.dragged = true;
                     panelSlide(x, false);
                     break;
@@ -2290,6 +2420,15 @@ struct App {
                     draw::text(renderer, b.x + 12, y + 21, 14, nc, "App", 0, true);
                     std::string s = "Volume " + std::to_string(int(std::lround(masterVolume * 100))) + "% \xC2\xB7 " + std::string(eink ? "E-ink" : "Dark") + (gestures::supported() ? std::string(" \xC2\xB7 gestures ") + (blockGestures ? "blocked" : "allowed") : "");
                     draw::text(renderer, b.x + 12, y + 38, 12, sc, draw::fit(s, 12, b.w - 40));
+                    chev(b.x + b.w - 12, y + b.h / 2, sc);
+                    break;
+                }
+                case Box::Effects: {
+                    bool open = panelKey == kEffectsKey;
+                    if (open) draw::fillRect(renderer, b.x, y, b.w, b.h, p.eink ? text : key, 10);
+                    draw::Color nc = open ? (p.eink ? bg : accent) : text, sc = open && p.eink ? bg : dim;
+                    draw::text(renderer, b.x + 12, y + 21, 14, nc, "Effects", 0, true);
+                    draw::text(renderer, b.x + 12, y + 38, 12, sc, draw::fit(effectsSummary(), 12, b.w - 40));
                     chev(b.x + b.w - 12, y + b.h / 2, sc);
                     break;
                 }
