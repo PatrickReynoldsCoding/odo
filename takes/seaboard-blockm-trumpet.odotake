@@ -5,13 +5,13 @@ about: A short excerpt of ROLI's demo, to learn from: ROLI, "Seaboard BLOCK M: A
 about: played on a Seaboard with SWAM Trumpet. Music and performance theirs (all rights reserved).
 about: Transcribed for odo by machine (Basic Pitch) with each note's own pitch curve (bends, scoops,
 about: vibrato) and loudness (pressure) measured from the recording, in free time (one beat a second).
-about: On the touch pad, chromatic: the pad: trumpet.
+about: On the Hex (Wicki-Hayden, chromatic): the keyboard: trumpet. Bends played as on the Hex: two fingers in the key, slid out of it.
 about: A test of how close a touch screen gets to the Seaboard: listen against the video.
 tempo: 60
 meter: 4/4
 key: C major
-controller: patrickreynolds/touchpad
-settings: {"scale": 0, "vibrato": 0, "glide": 1, "size": 41, "shift": -9}
+controller: patrickreynolds/hex
+settings: {"hexLayout": 0, "tuning": 0, "chromatic": 1, "scale": 8, "insideDyn": 1, "dynLow": 0, "dynHigh": 100, "insideTone": 0, "vibrato": 0, "slide": 0, "slideOnly": 0, "press": 1, "latch": 0, "cols": 6, "octave": 0}
 sound: patrickreynolds/trumpet
 volume: 1
 preset: {"effects": {"bpm": 60, "reverbSize": 0.62, "reverbDamp": 0.45, "delayBeats": 0.75, "delayFeedback": 0.2, "delayPingPong": false}, "sides": [{"parts": [{"sound": "patrickreynolds/trumpet", "volume": 1, "brightness": 1, "drive": 0, "pressureCurve": 1, "reverb": 0.3, "delay": 0, "release": 0, "width": 0.5}]}]}

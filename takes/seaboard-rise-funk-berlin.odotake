@@ -5,13 +5,13 @@ about: A short excerpt of ROLI's demo, to learn from: ROLI, "Seaboard RISE x SWA
 about: played on a Seaboard with a split: Cypher2 "Mean Hard-Sync Funk 5D" | Cypher2 "Berlin Progression". Music and performance theirs (all rights reserved).
 about: Transcribed for odo by machine (Basic Pitch) with each note's own pitch curve (bends, scoops,
 about: vibrato) and loudness (pressure) measured from the recording, in free time (one beat a second).
-about: On the touch pad, chromatic: left pad: sync-funk; right pad: berlin.
+about: On the Hex (Wicki-Hayden, chromatic): left keyboard: sync-funk; right keyboard: berlin. Bends played as on the Hex: two fingers in the key, slid out of it.
 about: A test of how close a touch screen gets to the Seaboard: listen against the video.
 tempo: 60
 meter: 4/4
 key: C major
-controller: patrickreynolds/touchpad
-settings: {"scale": 0, "vibrato": 0, "glide": 1, "split": true, "splitAt": 0.5, "size": 49, "rightSize": 47, "shift": 2, "shift2": -21}
+controller: patrickreynolds/hex
+settings: {"hexLayout": 0, "tuning": 0, "chromatic": 1, "scale": 8, "insideDyn": 1, "dynLow": 0, "dynHigh": 100, "insideTone": 0, "vibrato": 0, "slide": 0, "slideOnly": 0, "press": 1, "latch": 0, "split": true, "splitSize": 50, "cols": 6, "octave": -1, "topOctave": 0}
 sound: patrickreynolds/sync-funk
 sound: patrickreynolds/berlin
 volume: 1
