@@ -10,7 +10,7 @@ use, with ghost fingers that show a newcomer how to play it. The file around the
 One UTF-8 text file, `<name>.odotake`:
 
 ```
-odo-take/1
+odo-take/1.1
 name: <the tune's name>
 by: <who wrote the tune (and when)>; written for odo by <you>
 about: <one or two lines: what it teaches>
@@ -25,6 +25,8 @@ score
 <the score: below>
 end
 ```
+
+A take may also carry its sound's effects, the room and the volume: see [Effects](#effects-the-preset-line).
 
 Then run `tools/take check FILE` and fix what it says until it says
 `all N notes play as written.` Check it at a phone's size and a computer's too:
@@ -42,6 +44,40 @@ Rules:
 - **The settings it needs**: a tune with notes outside C major needs the Grid's
   `{"chromatic": 1}`; sliding from note to note needs `{"slide": 1}`. Without them those notes
   are not there, and `check` says so.
+
+## Effects: the `preset` line
+
+A take is a take and a preset: Listen puts its whole set-up on before it plays, as loading a
+preset does. A score names only what it needs: the `controller`, the `settings` it needs and a
+`sound`, and each sound then plays with its own effects (as the pack means it). To set the effects
+too, add a `preset` line (`odo-take/1.1`): a [preset file](PRESET_FORMAT.md)'s JSON, on one line.
+Leave out `format`, `name`, and each side's `controller` and `settings` (the take's own lines give
+those); give what you want to set, and the rest takes a preset's defaults:
+
+```
+volume: 1
+preset: {"effects": {"reverbSize": 0.7, "reverbDamp": 0.35}, "sides": [{"parts": [{"sound": "patrickreynolds/piano", "volume": 1, "brightness": 0.9, "reverb": 0.35, "release": 0.6}]}]}
+```
+
+| Key | The app's words | Meaning |
+|---|---|---|
+| `effects.reverbSize`, `effects.reverbDamp` | Reverb: Size, Damping | The room all the sounds share, 0 to 1. A small room 0.25, a hall 0.7 to 0.85; damping higher for a darker room. |
+| `effects.delayBeats`, `effects.delayFeedback`, `effects.delayPingPong` | Delay | The echo: its time in beats (at `effects.bpm`), how much comes back (0 to 0.9), and whether it goes left and right. |
+| `effects.bpm` | | The tempo the delay and arps follow. Set it to the score's `tempo`. |
+| `parts[].volume` | Level | 0 to 1.5; 1 as the pack means it. |
+| `parts[].brightness` | Brightness | 0 to 1: 1 open, lower is darker. |
+| `parts[].drive` | Drive | 0 to 1: 0 clean. |
+| `parts[].pressureCurve` | Touch | Below 1 sensitive (a light touch is loud), above 1 firm. |
+| `parts[].release` | Release | Seconds the note plays on after the finger lifts; 0 the instrument's own. A pedal held down, for a piano. |
+| `parts[].reverb`, `parts[].delay` | the sends | How much of this part goes into the reverb and the delay, 0 to 1. |
+| `parts[].transpose` | | Semitones. Leave it at 0: `check` hears the notes before it. |
+| `parts[].arp` | Arp | As a preset's. Off for a score. |
+| `volume:` (its own line) | Volume | The master volume, 1 the usual level, 0 to 2. |
+
+A part with only `sound` plays with that sound's own effects; one with any other key is set in
+full (what it does not name takes the defaults above, not the pack's), so name all you care about.
+Each part's `sound` should be the take's `sound` line for it. Without a `preset` line the sounds
+play as the pack means them. `tools/take check` reads the line and warns if it is not one.
 
 ## The score
 
@@ -148,7 +184,7 @@ those movements. `check` says, note by note, if it played another note than the 
 C major, all of it in the Grid's C major as it starts:
 
 ```
-odo-take/1
+odo-take/1.1
 name: Twinkle, Twinkle
 by: Traditional French (18th century); written for odo by Claude
 about: Six notes, two of each, a line at a time.

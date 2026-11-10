@@ -402,8 +402,10 @@ static mpe::take::Player::Sink takeSink() {
 }
 static std::string takeQuote(const std::string& s) { mpe::Json j; j.type = mpe::Json::String; j.s = s; return mpe::preset::toJson(j); }
 
-// Start recording what the controller on screen plays. sounds: its parts' sounds (the app's ids), one a line.
-FN(jboolean, nativeTakeRecord)(JNIEnv* env, jobject, jbyteArray sounds) {
+// Start recording what the controller on screen plays. sounds: its parts' sounds (the app's ids), one a
+// line; setup: what plays now as a preset file's text (kept as the take's preset; "": none); volume:
+// the master volume (1 the usual level; < 0: not kept).
+FN(jboolean, nativeTakeRecord)(JNIEnv* env, jobject, jbyteArray sounds, jbyteArray setup, jdouble volume) {
     if (!ctl()) return false;
     if (player().playing()) player().stop(takeSink());
     std::vector<std::string> ids;
@@ -415,7 +417,9 @@ FN(jboolean, nativeTakeRecord)(JNIEnv* env, jobject, jbyteArray sounds) {
         if (!id.empty()) ids.push_back(soundForFile(id));   // the package's id, as a preset file has it
         a = b + 1;
     }
-    recorder().start();
+    mpe::preset::Preset p;
+    bool hasSetup = mpe::preset::parse(bytesIn(env, setup), p);
+    recorder().start(hasSetup ? &p : nullptr, volume);
     recorder().attach(*ctl(), 0, ids);
     return true;
 }
@@ -435,7 +439,8 @@ FN(jbyteArray, nativeTakeFileName)(JNIEnv* env, jobject, jbyteArray name) {
     return bytesOut(env, mpe::take::fileName(t));
 }
 // What a take file is, as JSON: {"name", "controller" ("pkg:" and its id, or ""), "written",
-// "length" (ms), "sections": [...], "settings": {id: value}, "sounds": [the app's ids]}; or {"error": why}.
+// "length" (ms), "sections": [...], "settings": {id: value}, "sounds": [the app's ids], "volume"
+// (the master volume, 1 the usual level; -1: not given)}; or {"error": why}.
 FN(jbyteArray, nativeTakeInfo)(JNIEnv* env, jobject, jbyteArray text) {
     mpe::take::Take t;
     std::string err;
@@ -463,7 +468,16 @@ FN(jbyteArray, nativeTakeInfo)(JNIEnv* env, jobject, jbyteArray text) {
     o += "},\"sounds\":[";
     if (!t.sides.empty())
         for (size_t i = 0; i < t.sides[0].sounds.size(); i++) o += (i ? "," : "") + takeQuote(soundForApp(t.sides[0].sounds[i]));
-    return bytesOut(env, o + "]}");
+    mpe::Json vol; vol.type = mpe::Json::Number; vol.n = t.volume;
+    return bytesOut(env, o + "],\"volume\":" + mpe::preset::toJson(vol) + "}");
+}
+// A take's whole set-up (mpe::take::presetOf) as a preset file's text, as openPresetFile takes it;
+// or "!" and why it can't be read.
+FN(jbyteArray, nativeTakePreset)(JNIEnv* env, jobject, jbyteArray text) {
+    mpe::take::Take t;
+    std::string err;
+    if (!mpe::take::parse(bytesIn(env, text), t, &err)) return bytesOut(env, "!" + err);
+    return bytesOut(env, mpe::preset::write(mpe::take::presetOf(t)));
 }
 // Play a take on the controller on screen (its settings already put on it): mode 0 listen, 1 play
 // along. A take written by hand is expanded first on the controller as set (values), at this size

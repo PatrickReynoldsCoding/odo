@@ -604,6 +604,8 @@ private fun TakesPanel() {
         PLabel("Loop", if (t.loop < 0 || t.loop >= on.sections.size) "All of it" else on.sections[t.loop], rule = true)
         PChips(listOf("All of it") + on.sections, t.loop + 1) { t.changeLoop(it - 1); confirmDelete = false }
     }
+    PRow("Use its settings") { t.useSettings(); confirmDelete = false }
+    PRow("Keep its settings as a new preset") { t.keepSettings(); confirmDelete = false }
     PRow("Share “${on.name}” as a file…") { t.share(context, on); confirmDelete = false }
     PRow((if (confirmDelete) "Tap again to delete “" else "Delete “") + on.name + "”", danger = confirmDelete) {
         if (confirmDelete) { t.delete(on); confirmDelete = false } else confirmDelete = true

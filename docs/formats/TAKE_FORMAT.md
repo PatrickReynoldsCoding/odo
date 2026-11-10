@@ -19,10 +19,15 @@ The rail's **App** group has **Takes**, after **App**. Its panel, the same in bo
 |---|---|
 | RECORD | **Record**; while recording, **Stop recording · 0:12**. Recording starts at the first finger down. Stopped, it is kept as "Take 1", "Take 2"... |
 | YOURS | Each take: its name, and "0:38 · Grid · recorded" (or "written by hand"). Tap one to choose it. **Open a take file…** |
-| THIS TAKE | **Listen** (it plays, with ghost fingers) or **Play along** (only the ghost fingers: you play). Tapped again: **Stop**. **Speed**: 50%, 75%, 100%. **Loop**: "All of it", or one section round and round. **Share "…" as a file…**, **Delete "…"** (tap twice). |
+| THIS TAKE | **Listen** (it plays, with ghost fingers) or **Play along** (only the ghost fingers: you play). Tapped again: **Stop**. **Speed**: 50%, 75%, 100%. **Loop**: "All of it", or one section round and round. **Use its settings** (play with how it was set up, without playing it). **Keep its settings as a new preset** (one of yours, named as the take, on view). **Share "…" as a file…**, **Delete "…"** (tap twice). |
 
-Listen and Play along first put the take's controller, its settings and its sound on the side it
-was played on, as a preset would. The rail's Takes row says what is happening ("Recording 0:12",
+A take is a take and a preset: it keeps everything a preset keeps (each side's controller and all
+its settings, each part's sound and its version, the part's level, tone, drive, touch, release,
+reverb and delay sends and arp, the shared reverb and delay, the tempo, the split, layering) and
+the master volume. Not the phone's tilt and breath, which belong to the device, as for a preset.
+Listen and Play along first put all of it on, as loading a preset does (not kept as a preset of
+yours: no preset is on view after it), and so does **Use its settings**. A sound or controller
+that is not here is said, as when a preset file is opened. The rail's Takes row says what is happening ("Recording 0:12",
 "Listening: Greensleeves").
 
 Takes are kept in `~/.local/share/odo/takes` on a computer and in the app's own folder on
@@ -41,9 +46,11 @@ UTF-8 text, one thing to a line, at most 32 MB. Extension `.odotake`, MIME type
 `text/vnd.odo.take`. A line starting with `#` is a comment; blank lines are ignored.
 
 ```
-odo-take/1
+odo-take/1.1
 name: Take 3
-madeBy: odo 0.0.31 (computer)
+madeBy: odo 0.0.32 (computer)
+volume: 1
+preset: {"format":"odo-preset/1.1","split":0,"layered":false,"effects":{"bpm":110,"reverbSize":0.5,"reverbDamp":0.4,"delayBeats":0.75,"delayFeedback":0.35,"delayPingPong":true},"sides":[{"parts":[{"sound":"patrickreynolds/cello","version":"1.0.0","transpose":0,"volume":1,"brightness":1,"drive":0,"pressureCurve":1,"reverb":0.3,"delay":0,"release":0,"arp":{"on":false,"order":0,"rate":4,"gate":0.6,"octaves":1,"latch":false}}]}]}
 controller: patrickreynolds/grid 2.8.0
 settings: {"cols": 3, "layout": 0, "chromatic": 1, "slide": 1}
 sound: patrickreynolds/cello
@@ -68,6 +75,11 @@ n 412.5 1 off
 `odo-take/<major>[.<minor>]`. A reader refuses a newer major ("This take was made by a newer odo")
 and reads a newer minor, leaving out lines it does not know (with a warning each).
 
+- `odo-take/1`: the set-up is the controller, its settings and the sounds. Played, each sound
+  plays with its own effects.
+- `odo-take/1.1`: adds `preset` and `volume`. An odo that reads only 1 plays a 1.1 take as a 1 take
+  (it warns of the two lines and leaves them out).
+
 ### The header: `key: value`
 
 | Key | Meaning |
@@ -84,6 +96,15 @@ and reads a newer minor, leaving out lines it does not know (with a warning each
 | `sound` | A part's sound (instrument package id). One line per part, in order. |
 | `surface` | The surface's width and height in dp when it was played. |
 | `centers` | Each part's instrument middle (a MIDI note) when it was played. |
+| `preset` | (1.1) The rest of the set-up, as a preset: a [preset file](PRESET_FORMAT.md)'s JSON on one line, without its `name` and `madeBy`, and without each side's `controller` and `settings` (those are the `controller` and `settings` lines). Its `sides` are the take's sides in order; each side's `parts` give each part's sound, version, level, effects and arp. `split`, `layered` and `effects` as in a preset. Once, before or after the `side` lines. |
+| `volume` | (1.1) The master volume when it was played: 1 the usual level, 0 to 2. |
+
+The take's whole set-up (`mpe::take::presetOf`) is its `preset`, with each side's `controller`,
+`settings` and `sound` lines over it: the controller and settings named there, and a `sound` line
+taking the place of that part's sound (and its version, if it differs). A take without a `preset`
+line has that alone: its controller, the settings it names, and its sounds, each with its own
+effects. In a `preset` line `format` and `sides` may be left out (a score that gives only the
+effects); what it leaves out takes a preset's defaults.
 
 ### What happened: one line each
 
@@ -142,6 +163,8 @@ those, and its score is only kept.
   them, every note change. A change or a volume that says nothing new (the same numbers as before)
   is left out: it would send no MIDI, and a controller may send one every frame.
 - The settings at the start go in the header; a change later is an `s` line.
+- What plays when Record is tapped, as a preset (the one on view, or what plays now, as Share
+  would send it), goes in the `preset` line, and the master volume in `volume`.
 - Fingers still down at Stop are lifted, and notes still sounding let go of, at the end.
 - On a computer every side of a split window is recorded, each its own `side`. Odo on Android has
   one side.

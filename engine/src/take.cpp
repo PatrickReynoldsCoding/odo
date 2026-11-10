@@ -215,6 +215,29 @@ bool parse(const std::string& text, Take& out, std::string* error, std::vector<s
                     if (kv.second.type == Json::Number || kv.second.type == Json::Bool) sd().settings.push_back({kv.first, kv.second.num()});
             }
             else if (key == "sound") { if (!v.empty()) sd().sounds.push_back(w[0]); }
+            else if (key == "preset") {
+                // A preset (PRESET_FORMAT.md) on one line; its "format", "name" and sides may be left
+                // out (a score may give only the effects, or a part's).
+                std::string perr;
+                Json j = Json::parse(v, &perr);
+                if (j.type != Json::Object) { warn(i, "preset: a JSON object on one line, as a preset file has it"); continue; }
+                auto has = [&](const char* k) { for (const auto& kv : j.o) if (kv.first == k) return true; return false; };
+                auto put = [&](const char* k, Json x) {
+                    for (auto& kv : j.o) if (kv.first == k) { kv.second = std::move(x); return; }
+                    j.o.emplace_back(k, std::move(x));
+                };
+                if (!has("format")) { Json f; f.type = Json::String; f.s = preset::kFormat; put("format", f); }
+                if (j["sides"].type != Json::Array || j["sides"].size() == 0) {
+                    Json one; one.type = Json::Object;
+                    Json a; a.type = Json::Array; a.a.push_back(one);
+                    put("sides", a);
+                }
+                preset::Preset p;
+                std::string perr2;
+                if (preset::parse(preset::toJson(j), p, &perr2)) { t.preset = std::move(p); t.hasPreset = true; }
+                else warn(i, "preset: " + perr2);
+            }
+            else if (key == "volume") { if (number(v, d) && d >= 0 && d <= 2) t.volume = d; else warn(i, "volume: the master volume, 0 to 2 (1: the usual level)"); }
             else if (key == "surface") {
                 double a = 0, b = 0;
                 if (w.size() == 2 && number(w[0], a) && number(w[1], b) && a > 0 && b > 0) { sd().width = float(a); sd().height = float(b); }
@@ -316,6 +339,23 @@ std::string write(const Take& t) {
     if (t.meterBeats != 4 || t.meterUnit != 4 || t.tempo > 0) field("meter", std::to_string(t.meterBeats) + "/" + std::to_string(t.meterUnit));
     field("key", oneLine(t.key));
     if (t.speed != 1) field("speed", dnum(t.speed));
+    if (t.volume >= 0) field("volume", dnum(t.volume));
+    if (t.hasPreset) {
+        // As a preset file has it, on one line, less what the take's own lines say: its name, who
+        // made it, and each side's controller and settings.
+        Json j = Json::parse(preset::write(t.preset));
+        std::vector<std::pair<std::string, Json>> kept;
+        for (auto& kv : j.o) if (kv.first != "name" && kv.first != "madeBy") kept.push_back(std::move(kv));
+        j.o = std::move(kept);
+        for (auto& kv : j.o)
+            if (kv.first == "sides")
+                for (Json& sd : kv.second.a) {
+                    std::vector<std::pair<std::string, Json>> rest;
+                    for (auto& f : sd.o) if (f.first != "controller" && f.first != "settings") rest.push_back(std::move(f));
+                    sd.o = std::move(rest);
+                }
+        field("preset", preset::toJson(j));
+    }
     for (size_t k = 0; k < t.sides.size(); k++) {
         const Side& s = t.sides[k];
         if (t.sides.size() > 1) field("side", std::to_string(k));
@@ -382,6 +422,31 @@ std::string fileName(const Take& t) {
     return n + kExtension;
 }
 
+preset::Preset presetOf(const Take& t) {
+    preset::Preset p = t.hasPreset ? t.preset : preset::Preset();
+    p.name = t.name.empty() ? "Take" : t.name;
+    if (p.madeBy.empty()) p.madeBy = t.madeBy;
+    p.sides.resize(std::max<size_t>({p.sides.size(), t.sides.size(), 1}));
+    if (p.sides.size() > size_t(preset::kMaxSides)) p.sides.resize(size_t(preset::kMaxSides));
+    for (size_t k = 0; k < t.sides.size() && k < p.sides.size(); k++) {
+        const Side& s = t.sides[k];
+        preset::Side& ps = p.sides[k];
+        if (!s.controller.empty()) ps.controller = s.controller;
+        if (ps.settings.type != Json::Object) { ps.settings = Json(); ps.settings.type = Json::Object; }
+        for (const auto& kv : s.settings) {
+            Json v; v.type = Json::Number; v.n = kv.second;
+            bool found = false;
+            for (auto& o : ps.settings.o) if (o.first == kv.first) { o.second = v; found = true; }
+            if (!found) ps.settings.o.emplace_back(kv.first, v);
+        }
+        for (size_t j = 0; j < s.sounds.size() && j < size_t(preset::kMaxParts); j++) {
+            if (ps.parts.size() <= j) ps.parts.resize(j + 1);
+            if (ps.parts[j].sound != s.sounds[j]) { ps.parts[j].sound = s.sounds[j]; ps.parts[j].version.clear(); }
+        }
+    }
+    return p;
+}
+
 std::vector<double> settingsFor(const Take& t, int side, const Json& manifest, std::vector<double> values) {
     const Json& st = manifest["settings"];
     if (values.size() < st.size()) {
@@ -432,10 +497,12 @@ int64_t wallNs() {
 Recorder::Recorder() = default;
 Recorder::~Recorder() { if (s_) s_->on = false; }
 
-void Recorder::start() {
+void Recorder::start(const preset::Preset* setup, double volume) {
     if (s_) s_->on = false;              // hosts still tapped for the last take tell that one, which is over
     s_ = std::make_shared<State>();
     s_->on = true;
+    if (setup) { s_->take.preset = *setup; s_->take.hasPreset = true; }
+    s_->take.volume = volume;
 }
 
 bool Recorder::recording() const { return s_ && s_->on; }

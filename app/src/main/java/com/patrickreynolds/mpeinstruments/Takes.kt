@@ -29,7 +29,7 @@ object Takes {
     private const val MAX_BYTES = 32 shl 20
 
     class Take(val file: File, val name: String, val controller: String, val written: Boolean, val length: Double,
-               val sections: List<String>, val settings: JSONObject, val sounds: List<String>)
+               val sections: List<String>, val settings: JSONObject, val sounds: List<String>, val volume: Double)
 
     var list by mutableStateOf<List<Take>>(emptyList())
         private set
@@ -69,7 +69,8 @@ object Takes {
                 else Take(f, o.optString("name").ifEmpty { f.nameWithoutExtension }, o.optString("controller"), o.optBoolean("written"),
                           o.optDouble("length", 0.0), o.optJSONArray("sections")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList(),
                           o.optJSONObject("settings") ?: JSONObject(),
-                          o.optJSONArray("sounds")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList())
+                          o.optJSONArray("sounds")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList(),
+                          o.optDouble("volume", -1.0))
             }.getOrNull()
         }.sortedBy { it.name }
         if (current() == null) chosen = null
@@ -118,35 +119,64 @@ object Takes {
         stop()
         if (AppState.controller !is PackageController) { note = "Takes are recorded from a controller on the screen."; return }
         val sounds = (0 until AppState.partCount).mapNotNull { AppState.instrument(it)?.id }.joinToString("\n")
-        if (!Native.nativeTakeRecord(sounds.toByteArray(Charsets.UTF_8))) { note = "Open a controller to record from."; return }
+        // What plays now, as a preset, and the volume: kept in the take, so it plays back as it was played.
+        val setup = AppState.currentPresetFileText()
+        if (!Native.nativeTakeRecord(sounds.toByteArray(Charsets.UTF_8), setup.toByteArray(Charsets.UTF_8), AppState.volume / 0.8))
+            { note = "Open a controller to record from."; return }
         recording = 0.0
         note = ""
     }
 
-    /** Listen (mode 0) or play along (1): the controller, its settings and the sound as the take has
-     *  them, then the take into the controller. The same again stops it. */
+    /**
+     * The take's whole set-up on (mpe::take::presetOf: its controller, settings, sounds, their effects
+     * and levels, the reverb and delay, the arps; and the volume), as loading a preset does: [keep],
+     * as a new preset of yours; or not, only playing with it. What happened ("[said] “…”" and what
+     * was left out), or null (and the note says why) if it can't be.
+     */
+    private fun apply(t: Take, keep: Boolean, said: String): String? {
+        if (t.controller.isNotEmpty() && Controllers.all.none { it.id == t.controller }) {
+            note = "It was played on ${t.controller.removePrefix("pkg:")}, which is not here."; return null
+        }
+        val text = String(Native.nativeTakePreset(t.file.readBytes()), Charsets.UTF_8)
+        if (text.startsWith("!")) { note = text.drop(1); return null }
+        val r = AppState.presetFromFile(text, keep, said)
+        if (t.volume >= 0) AppState.changeVolume((t.volume.coerceIn(0.0, 2.0) * 0.8).toFloat())
+        return r
+    }
+
+    /** Use its settings: play with the take's set-up, without playing it. */
+    fun useSettings() {
+        val t = current() ?: return
+        stop()
+        apply(t, keep = false, said = "Playing with the settings of")?.let { note = it }
+    }
+
+    /** Keep its settings as a new preset: the take's set-up as one of yours, on view. */
+    fun keepSettings() {
+        val t = current() ?: return
+        stop()
+        apply(t, keep = true, said = "Kept as a new preset:")?.let { note = it }
+    }
+
+    /** Listen (mode 0) or play along (1): the take's whole set-up, as a preset would put it, then the
+     *  take into the controller. The same again stops it. */
     fun play(mode: Int) {
         val t = current() ?: return
         if (playing == mode + 1) { stop(); return }
         stop()
         if (recording >= 0) toggleRecord()
-        if (t.controller.isNotEmpty() && AppState.controller.id != t.controller) {
-            val c = Controllers.all.firstOrNull { it.id == t.controller }
-            if (c == null) { note = "It was played on ${t.controller.removePrefix("pkg:")}, which is not here."; return }
-            AppState.switchController(c)
+        val switched = t.controller.isNotEmpty() && AppState.controller.id != t.controller
+        val said = apply(t, keep = false, said = "") ?: return
+        if (switched) {
             note = "Its controller is on the screen now: tap ${if (mode == 0) "Listen" else "Play along"} again."
             return                               // its surface opens and loads it first
         }
+        val left = said.substringAfter(". ", "")  // what of its set-up is not here
         val c = AppState.controller as? PackageController ?: run { note = "Takes play on a controller on the screen."; return }
-        for (k in c.settings.indices) {
-            val id = c.settings[k].optString("id")
-            if (t.settings.has(id)) c.change(k, t.settings.optDouble(id, c.values[k]))
-        }
-        t.sounds.firstOrNull()?.let { s -> if (AppState.perf.part(0).instrument != s && AppState.instruments.any { it.id == s }) AppState.chooseInstrument(0, s) }
         val centers = (0 until 2).map { AppState.instrument(if (AppState.partCount > 1) it else 0)?.centerNote ?: 60f }
         val r = String(Native.nativeTakePlay(t.file.readBytes(), mode, c.values.toDoubleArray(), surfaceW, surfaceH, centers[0], centers[1],
                                              speed, loop), Charsets.UTF_8)
-        note = r.removePrefix("!")
+        note = listOf(left, r.removePrefix("!")).filter { it.isNotEmpty() }.joinToString(". ")
         if (!r.startsWith("!")) playing = mode + 1
     }
 

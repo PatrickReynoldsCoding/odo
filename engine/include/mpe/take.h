@@ -3,7 +3,9 @@
 // docs/formats/TAKE_FORMAT.md; how to write a piece by hand, docs/formats/TAKE_AUTHORING.md.
 //
 // A take holds, for each side (a controller on part of the screen):
-//   - the set-up: the controller, its settings, the sounds, the surface's size;
+//   - the set-up: the controller, its settings, the sounds, the surface's size; and the rest of
+//     a preset (each part's effects and level, the reverb and delay, the arp, the split) and the
+//     master volume, so it plays as it did;
 //   - the touches, at full rate, in coordinates of the surface (0..1 across and down);
 //   - the notes the controller played from them (pitch with its bends, pressure, slide);
 //   - sections, and words to show (for teaching).
@@ -24,10 +26,12 @@
 #include <vector>
 #include "mpe/controller.h"
 #include "mpe/package.h"
+#include "mpe/preset.h"
 
 namespace mpe::take {
 
-constexpr const char* kFormat = "odo-take/1";    // "odo-take/<major>[.<minor>]": a newer major is refused
+constexpr const char* kFormat = "odo-take/1.1";  // "odo-take/<major>[.<minor>]": a newer major is refused
+                                                  // 1.1: the "preset" and "volume" lines
 constexpr const char* kExtension = ".odotake";
 constexpr const char* kMimeType = "text/vnd.odo.take";
 constexpr size_t kMaxBytes = 32u << 20;           // about 15 minutes of ten fingers
@@ -68,6 +72,14 @@ struct Take {
     std::vector<Setting> settings;
     std::vector<Section> sections;
     std::vector<Say> says;
+    // The rest of the set-up, as a preset (PRESET_FORMAT.md): each side's parts (the sound, its
+    // version, its effects, level and arp), the shared effects, the split, layering. Each side's
+    // controller and settings are the Side's (the "controller" and "settings" lines), not here:
+    // presetOf() puts the two together. Not given (a take of before 1.1, or a score that names
+    // only what it needs): hasPreset false.
+    bool hasPreset = false;
+    preset::Preset preset;
+    double volume = -1;                  // the master volume (1: the usual level, to 2); < 0: not given
     std::string score;                   // the score's text (a take written by hand), or ""
     int scoreLine = 0;                   // the file line its first line is on, for messages
 
@@ -82,6 +94,10 @@ bool parse(const std::string& text, Take& out, std::string* error = nullptr, std
 std::string write(const Take& t);
 // A file name for it: the name, without characters a file system minds, plus kExtension.
 std::string fileName(const Take& t);
+// The take's whole set-up as a preset, named as the take: its preset (if it has one), with each
+// side's controller, settings and sounds from the take's own lines over it. What an app applies
+// before playing it (as loading a preset does), and what "Keep its settings as a new preset" keeps.
+preset::Preset presetOf(const Take& t);
 
 // ---- recording -----------------------------------------------------------------------------------
 
@@ -103,7 +119,9 @@ class Recorder {
 public:
     Recorder();
     ~Recorder();
-    void start();
+    // setup: what plays now, as a preset (each side's controller and settings are taken from the
+    // hosts; the rest is kept as the take's preset); volume: the master volume (< 0: not kept).
+    void start(const preset::Preset* setup = nullptr, double volume = -1);
     // A side to record, with what is playing on it now: its sounds (the instrument package ids).
     void attach(ControllerHost& host, int side, const std::vector<std::string>& sounds = {});
     bool recording() const;

@@ -458,6 +458,101 @@ static void looping() {
     CHECK(quiet && !p.playing(), "stopped, nothing sounds");
 }
 
+// A take keeps a whole preset (1.1): recorded with what plays now, it saves and loads the same;
+// a take of before 1.1 still loads, without one; a score may give only what it needs.
+static void presets() {
+    preset::Preset set;
+    set.name = "Piano in a hall";
+    set.split = 2;
+    set.layered = true;
+    set.hasEffects = true;
+    set.effects.bpm = 72; set.effects.reverbSize = 0.83; set.effects.reverbDamp = 0.25;
+    set.effects.delayBeats = 0.5; set.effects.delayFeedback = 0.2; set.effects.delayPingPong = false;
+    for (int k = 0; k < 2; k++) {
+        preset::Side sd;
+        sd.controller = "patrickreynolds/grid";
+        sd.settings.type = Json::Object;
+        preset::Part q;
+        q.sound = k ? "patrickreynolds/cello" : "patrickreynolds/piano";
+        q.version = "1.0.0";
+        q.full = true;
+        q.transpose = -12; q.volume = 0.7; q.brightness = 0.8; q.drive = 0.1; q.pressureCurve = 1.5; q.reverb = 0.45;
+        q.delay = 0.05; q.release = 1.25;
+        q.arp.on = true; q.arp.order = 2; q.arp.rate = 3; q.arp.gate = 0.4; q.arp.octaves = 2; q.arp.latch = true;
+        sd.parts.push_back(q);
+        set.sides.push_back(sd);
+    }
+    auto grid = controller("grid");
+    Take take;
+    if (grid) {
+        Live live(*grid);
+        Live right(*grid);
+        Recorder rec;
+        rec.start(&set, 1.35);
+        rec.attach(live.host, 0, {"patrickreynolds/piano"});
+        rec.attach(right.host, 1, {"patrickreynolds/cello"});
+        live.until(1100);
+        live.host.touch(1, ControllerHost::Down, 300, 250, 0, 0.6f);
+        live.until(1300);
+        live.host.touch(1, ControllerHost::Up, 300, 250, 0, 0);
+        live.until(1400);
+        take = rec.stop();
+        take.name = "With a preset";
+    }
+    CHECK(take.hasPreset && take.volume == 1.35, "a recording keeps what plays now as its preset, and the volume");
+    std::string text = write(take);
+    CHECK(text.rfind("odo-take/1.1\n", 0) == 0 && text.find("\npreset: {") != std::string::npos && text.find("\nvolume: 1.35\n") != std::string::npos,
+          "it is written as odo-take/1.1, with a preset line and a volume line");
+    Take back;
+    std::string err;
+    std::vector<std::string> warnings;
+    CHECK(parse(text, back, &err, &warnings) && warnings.empty(), "it reads back (%s, %zu warnings)", err.c_str(), warnings.size());
+    CHECK(write(back) == text, "and writes out the same text");
+    preset::Preset a = presetOf(take), b = presetOf(back);
+    a.madeBy = b.madeBy = "";
+    CHECK(preset::write(a) == preset::write(b), "the preset saved is the preset loaded");
+    bool same = b.split == 2 && b.layered && b.hasEffects && b.effects.reverbSize == 0.83 && b.effects.bpm == 72 && !b.effects.delayPingPong &&
+                b.sides.size() == 2 && b.sides[1].parts.size() == 1;
+    if (same) {
+        const preset::Part& q = b.sides[1].parts[0];
+        same = q.full && q.sound == "patrickreynolds/cello" && q.version == "1.0.0" && q.transpose == -12 && q.volume == 0.7 &&
+               q.brightness == 0.8 && q.drive == 0.1 && q.pressureCurve == 1.5 && q.reverb == 0.45 && q.delay == 0.05 &&
+               q.release == 1.25 && q.arp.on && q.arp.order == 2 && q.arp.rate == 3 && q.arp.gate == 0.4 && q.arp.octaves == 2 && q.arp.latch;
+    }
+    CHECK(same, "with everything: the split, layering, the reverb and delay, each part's sound, version, effects, level and arp");
+    CHECK(b.name == "With a preset" && b.sides[0].controller == "patrickreynolds/grid" && grid &&
+          b.sides[0].settings.size() == grid->manifest["settings"].size(), "its controller and all its settings come from the take's own lines");
+    // Nothing twice: the preset line leaves out each side's controller and settings.
+    size_t at = text.find("\npreset: ");
+    std::string line = text.substr(at, text.find('\n', at + 1) - at);
+    CHECK(line.find("\"settings\"") == std::string::npos && line.find("\"controller\"") == std::string::npos && line.find("\"name\"") == std::string::npos,
+          "the preset line leaves out what the take's own lines say");
+
+    // Before 1.1: no preset; its set-up is the controller, settings and sound it names, as before.
+    Take old;
+    CHECK(parse("odo-take/1\nname: Old\ncontroller: patrickreynolds/grid 2.8.0\nsettings: {\"slide\": 0}\nsound: patrickreynolds/cello\n"
+                "t 0 1 down 0.5 0.5 0.5\nn 0 1 on 0 60 0.5 0.5 0.5\nt 100 1 up 0.5 0.5 0\nn 100 1 off\n", old, &err),
+          "a take of odo-take/1 still loads (%s)", err.c_str());
+    preset::Preset op = presetOf(old);
+    CHECK(!old.hasPreset && old.volume < 0 && op.sides.size() == 1 && op.sides[0].controller == "patrickreynolds/grid" &&
+          op.sides[0].settings.size() == 1 && op.sides[0].parts.size() == 1 && !op.sides[0].parts[0].full && !op.hasEffects,
+          "without a preset: its preset is its controller, the settings it names and its sound (with the sound's own effects)");
+
+    // Written by hand: only the effects and a part's, the rest from its own lines.
+    Take hand;
+    warnings.clear();
+    CHECK(parse("odo-take/1.1\nname: Hand\ncontroller: patrickreynolds/hex\nsettings: {\"layout\": 0}\nsound: patrickreynolds/piano\n"
+                "preset: {\"effects\": {\"reverbSize\": 0.9}, \"sides\": [{\"parts\": [{\"sound\": \"patrickreynolds/piano\", \"reverb\": 0.5, \"release\": 2}]}]}\n"
+                "score\ntempo 60\nC4:1\nend\n", hand, &err, &warnings) && warnings.empty(), "a score may give only part of a preset (%s)", err.c_str());
+    preset::Preset hp = presetOf(hand);
+    CHECK(hand.hasPreset && hp.hasEffects && hp.effects.reverbSize == 0.9 && hp.effects.bpm == preset::Effects().bpm &&
+          hp.sides[0].controller == "patrickreynolds/hex" && hp.sides[0].parts[0].full && hp.sides[0].parts[0].reverb == 0.5 &&
+          hp.sides[0].parts[0].release == 2 && hp.sides[0].parts[0].volume == 1, "what it leaves out takes a preset's defaults");
+    warnings.clear();
+    parse("odo-take/1.1\nname: Bad\npreset: [1]\nvolume: 9\nscore\nC4:1\nend\n", hand, &err, &warnings);
+    CHECK(warnings.size() == 2, "a preset that is not one, or a volume out of range, is left out with a warning (%zu)", warnings.size());
+}
+
 int main() {
     fileRoundTrip();
     recordAndPlay();
@@ -465,5 +560,6 @@ int main() {
     authored();
     examples();
     looping();
+    presets();
     return finish();
 }

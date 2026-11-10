@@ -337,7 +337,9 @@ object AppState {
         saver.postDelayed(savePresetsNow, 400)
     }
 
-    fun load(p: Preset) {
+    /** [p] on, as loading a preset does. [onView] false: what plays is changed, but no preset is on
+     *  view (a take's settings, which are not one of yours). */
+    fun load(p: Preset, onView: Boolean = true) {
         loading = true
         val c = p.controller?.let { Controllers.byId(it) } ?: controller
         if (c !== controller) { controller.stop(); controller = c; side = 0; prefs.edit().putString("controller", c.id).apply() }
@@ -347,7 +349,7 @@ object AppState {
         perf = p.perf
         applyEngine(old)
         save()
-        presetName = p.name
+        presetName = if (onView) p.name else ""
         presetEdited = false
         prefs.edit().putString("preset", presetName).apply()
         controllerChanged(c, engine = false)        // saved as the controller's; loading, so not into a preset
@@ -478,7 +480,17 @@ object AppState {
      * only: a computer's split is its sides, which odo on Android has not. A controller or sound
      * this phone has not: what plays now plays instead. What happened, in a sentence or two.
      */
-    fun openPresetFile(text: String): String {
+    fun openPresetFile(text: String): String = presetFromFile(text, keep = true, said = "Opened")
+
+    /** What plays now, as a preset file's text: what a take keeps of how it was played. */
+    fun currentPresetFileText(): String = presetFileText(current(presetName.ifEmpty { soundName() }))
+
+    /**
+     * A preset file's [text] on: [keep], as a new preset of yours (on view), as opening a file
+     * does; or not, only playing with it (a take's settings). "[said] “its name”", and what was
+     * left out, in a sentence or two.
+     */
+    fun presetFromFile(text: String, keep: Boolean, said: String): String {
         val out = String(Native.nativePresetRead(text.toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
         if (out.startsWith("!")) return out.drop(1)
         val f = runCatching { JSONObject(out) }.getOrNull() ?: return "This file is not an odo preset."
@@ -527,11 +539,13 @@ object AppState {
             delayPingPong = fx?.optBoolean("delayPingPong") ?: perf.delayPingPong)
         if (sides.length() > 1) notes += "It splits the screen into ${sides.length()} sides, which odo on a phone doesn't: here is the first"
 
-        val p = Preset(freeName(f.optString("name")), made, controller = ctl, settings = s?.toString())
-        userPresets = userPresets + p
-        savePresets()
-        load(p)
-        return (listOf("Opened “${p.name}”") + notes).joinToString(". ")
+        val p = Preset(if (keep) freeName(f.optString("name")) else f.optString("name"), made, controller = ctl, settings = s?.toString())
+        if (keep) {
+            userPresets = userPresets + p
+            savePresets()
+        }
+        load(p, onView = keep)
+        return (listOf("$said “${p.name}”") + notes).joinToString(". ")
     }
 
     /**

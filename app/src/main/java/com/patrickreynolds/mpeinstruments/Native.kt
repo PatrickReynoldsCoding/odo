@@ -102,15 +102,18 @@ object Native {
 
     // Takes (docs/formats/TAKE_FORMAT.md): recorded from, and played into, the controller on screen
     // (mpe::take). UI thread only, as the controller. Text as UTF-8 bytes.
-    /** Start recording what it plays; sounds: its parts' sounds, one a line. False if no controller is loaded. */
-    external fun nativeTakeRecord(sounds: ByteArray): Boolean
+    /** Start recording what it plays; sounds: its parts' sounds, one a line; setup: what plays now as a
+     *  preset file's text (the take keeps it); volume: the master volume (1 the usual level). False if no controller is loaded. */
+    external fun nativeTakeRecord(sounds: ByteArray, setup: ByteArray, volume: Double): Boolean
     /** ms since the first finger while recording, 0 before it; -1 when not recording. */
     external fun nativeTakeRecording(): Double
     /** Stop: the take's file text with this name, or empty if nothing was played. */
     external fun nativeTakeStopRecording(name: ByteArray, madeBy: ByteArray): ByteArray
     external fun nativeTakeFileName(name: ByteArray): ByteArray
-    /** A take file, as JSON: name, controller ("pkg:..."), written, length (ms), sections, settings, sounds; or {"error"}. */
+    /** A take file, as JSON: name, controller ("pkg:..."), written, length (ms), sections, settings, sounds, volume; or {"error"}. */
     external fun nativeTakeInfo(text: ByteArray): ByteArray
+    /** A take's whole set-up as a preset file's text (for AppState.presetFromFile); "!" and why, if it can't be read. */
+    external fun nativeTakePreset(text: ByteArray): ByteArray
     /** Play it: mode 0 listen, 1 play along. "" if every note plays; else why not ("!" first: it does not play). */
     external fun nativeTakePlay(text: ByteArray, mode: Int, values: DoubleArray, width: Float, height: Float,
                                 center0: Float, center1: Float, speed: Double, loop: Int): ByteArray

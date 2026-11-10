@@ -59,8 +59,14 @@ Values out of range are clamped. A value of the wrong type takes the default.
 
 - **odo for Android** plays one side. When it opens a file with more sides, it takes the first one
   and says the rest were left out. It writes every part with all its settings, and the effects.
-- **odo for computers** plays every side. It has no part settings or effects of its own: it keeps
-  those it was given (so a phone's preset sent there and back stays the same, as long as the
-  sounds are not changed) and writes the rest as the sound alone.
+- **odo for computers** plays every side. It has no controls for part settings or effects of its
+  own, but it plays those it was given: each part's level, transpose, tone, drive, touch, reverb
+  and delay sends, release and arp, while that part's sound is the one the preset named (another
+  sound chosen plays with its own), and the preset's reverb room, delay and tempo. It keeps them
+  (so a phone's preset sent there and back stays the same, as long as the sounds are not changed)
+  and writes the rest as the sound alone. Layering it keeps and gives back, but does not play.
+- **A take** (TAKE_FORMAT.md, `odo-take/1.1`) keeps a preset of what played when it was recorded,
+  in its `preset` line, and **Keep its settings as a new preset** in the Takes panel makes it one
+  of yours.
 - **Not in a preset:** the volume, the look, gestures, loops, the gyro and breath, and the MIDI
   device. These belong to the device.

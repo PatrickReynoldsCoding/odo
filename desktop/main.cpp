@@ -232,7 +232,14 @@ struct App {
         float x = 0, y = 0, w = 0, h = 0;   // its place in the window
         float initW = 0, initH = 0;     // the size its controller was started with
         int engineIndex = -1;           // the instrument its part plays now
+        // How its parts play, as the preset (or take) on gave them (each part's level, effects,
+        // arp): a part plays so while its sound is the one named; otherwise with its sound's own.
+        std::vector<mpe::preset::Part> parts;
     };
+    // The shared effects (reverb room, delay, tempo) and layering the preset on gave; hasEffects
+    // false: each sound's own room.
+    bool layered = false, hasEffects = false;
+    mpe::preset::Effects effects;
     Side sides[kSides];
     int split = 0, active = 0;          // the split, and the side the rail changes
     int count() const { return kSplits[split].sides; }
@@ -262,7 +269,10 @@ struct App {
             if (!s[k]["controller"].str().empty()) savedController[k] = s[k]["controller"].str();
             if (!s[k]["sound"].str().empty()) savedSound[k] = s[k]["sound"].str();
             if (!s[k]["sound2"].str().empty()) savedSound2[k] = s[k]["sound2"].str();
+            for (size_t j = 0; j < s[k]["parts"].size(); j++) sides[k].parts.push_back(mpe::preset::partFrom(s[k]["parts"][j]));
         }
+        layered = j["layered"].boolean();
+        if (j["effects"].type == mpe::Json::Object) { hasEffects = true; effects = mpe::preset::effectsFrom(j["effects"]); }
         savedSplit = std::clamp(int(j["split"].num(0)), 0, kSplitCount - 1);
         savedActive = std::clamp(int(j["active"].num(0)), 0, kSides - 1);
         railHidden = j["railHidden"].boolean();
@@ -320,10 +330,20 @@ struct App {
         f.precision(17);     // every digit: a strike zone map is a seven-digit number
         f << "{\n  \"controller\": " << quoted(controllerId(0)) << ",\n  \"sound\": " << quoted(soundId(0))
           << ",\n  \"split\": " << split << ",\n  \"active\": " << active << ",\n  \"sides\": [";
-        for (int k = 0; k < kSides; k++)
+        for (int k = 0; k < kSides; k++) {
             f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k))
-              << ", \"sound2\": " << quoted(sound2Id(k)) << "}";
-        f << "],\n  \"railHidden\": " << (railHidden ? "true" : "false")
+              << ", \"sound2\": " << quoted(sound2Id(k));
+            if (!sides[k].parts.empty()) {
+                f << ", \"parts\": [";
+                for (size_t j = 0; j < sides[k].parts.size(); j++) f << (j ? ", " : "") << mpe::preset::toJson(mpe::preset::partJson(sides[k].parts[j]));
+                f << "]";
+            }
+            f << "}";
+        }
+        f << "]";
+        if (layered) f << ",\n  \"layered\": true";
+        if (hasEffects) f << ",\n  \"effects\": " << mpe::preset::toJson(mpe::preset::effectsJson(effects));
+        f << ",\n  \"railHidden\": " << (railHidden ? "true" : "false")
           << ",\n  \"eink\": " << (eink ? "true" : "false")
           << ",\n  \"blockGestures\": " << (blockGestures ? "true" : "false")
           << ",\n  \"volume\": " << masterVolume
@@ -468,12 +488,9 @@ struct App {
         Preset p;
         p.name = name;
         p.split = split;
-        const Preset* was = nullptr;         // yours of that name: what it carries from a file stays
-        for (const Preset& u : userPresets) if (u.name == name) was = &u;
-        if (was) { p.layered = was->layered; p.hasEffects = was->hasEffects; p.effects = was->effects; }
+        p.layered = layered; p.hasEffects = hasEffects; p.effects = effects;   // as the preset on gave them
         for (int k = 0; k < count(); k++) {
-            PresetSide s{controllerId(k), soundId(k), sound2Id(k), {}, {}};
-            if (was && size_t(k) < was->sides.size()) s.parts = was->sides[size_t(k)].parts;
+            PresetSide s{controllerId(k), soundId(k), sound2Id(k), {}, sides[k].parts};
             if (sides[k].host) {
                 const mpe::Json& st = sides[k].host->manifest()["settings"];
                 for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) s.settings[st[i]["id"].str()] = sides[k].settings[i];
@@ -512,13 +529,18 @@ struct App {
         if (p && !matches(*p)) *p = current(p->name);
     }
 
-    void loadPreset(const Preset& p) {
+    // onView false: what plays is changed, but no preset is on view (a take's settings, not one of yours).
+    void loadPreset(const Preset& p, bool onView = true) {
         loadingPreset = true;
         bool keep = persist;
         persist = false;
+        layered = p.layered;
+        hasEffects = p.hasEffects;
+        effects = p.effects;
         for (size_t k = 0; k < p.sides.size() && k < size_t(kSides); k++) {
             const PresetSide& s = p.sides[k];
             Side& sd = sides[k];
+            sd.parts = s.parts;
             if (int c = controllerIndex(s.controller); c >= 0) sd.controller = c;
             if (int n = soundIndex(s.sound); n >= 0) sd.sound = n;
             sd.sound2 = s.sound2.empty() ? -1 : soundIndex(s.sound2);
@@ -531,8 +553,9 @@ struct App {
             if (sd.host) sd.host->stop();
             sd.host.reset();
         }
+        for (size_t k = p.sides.size(); k < size_t(kSides); k++) sides[k].parts.clear();
         setSplit(p.split);
-        presetName = p.name;
+        presetName = onView ? p.name : "";
         confirmDelete = false;
         persist = keep;
         loadingPreset = false;
@@ -633,8 +656,15 @@ struct App {
         mpe::preset::Preset f;
         std::string err;
         if (!mpe::preset::parse(text, f, &err)) { note = err; return false; }
+        usePreset(f, note, true, "Opened");
+        return true;
+    }
+
+    // A preset on: `keep`, as a new preset of yours (on view), as opening a file does; or not, only
+    // playing with it (a take's settings). `note`: "<said> “its name”", and what was left out.
+    void usePreset(const mpe::preset::Preset& f, std::string& note, bool keep, const std::string& said) {
         Preset p;
-        p.name = freeName(f.name);
+        p.name = keep ? freeName(f.name) : f.name;
         p.split = std::clamp(f.split, 0, kSplitCount - 1);
         p.layered = f.layered;
         p.hasEffects = f.hasEffects;
@@ -669,9 +699,9 @@ struct App {
             p.sides.push_back(std::move(s));
         }
         std::string name = p.name;
-        userPresets.push_back(p);
-        loadPreset(p);
-        note = "Opened \xE2\x80\x9C" + name + "\xE2\x80\x9D";
+        if (keep) userPresets.push_back(p);
+        loadPreset(p, keep);
+        note = said + " \xE2\x80\x9C" + name + "\xE2\x80\x9D";
         if (missingCtl) note += missingCtl == 1 ? ". Its controller isn't on this computer: the one in use plays it"
                                                 : ". Its controllers aren't on this computer: the ones in use play it";
         if (missingSound) note += std::string(". ") + std::to_string(missingSound)
@@ -679,7 +709,6 @@ struct App {
         if (olderMissing) note += std::string(". ") + std::to_string(olderMissing)
                                 + (olderMissing == 1 ? " sound's version isn't" : " sounds' versions aren't") + " here: the newest plays instead";
         if (f.sides.size() > sidesNow) note += ". Its sides after the " + std::string(sidesNow == 1 ? "first" : sidesNow == 2 ? "second" : sidesNow == 3 ? "third" : "fourth") + " are left out";
-        return true;
     }
 
     bool openPresetFile(const std::string& path) {
@@ -890,7 +919,8 @@ struct App {
         for (int k = 0; k < count() && !lib.instruments.empty(); k++)
         for (int j = 0; j < partsOf(k); j++) {
             int part = std::min(partBase(k) + j, mpe::kParts - 1);
-            const mpe::Json& s = lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].pkg->manifest["sound"];
+            const mpe::Package& pkg = *lib.instruments[size_t(j ? sound2Of(k) : sides[k].sound)].pkg;
+            const mpe::Json& s = pkg.manifest["sound"];
             mpe::PartConfig& c = p.part[part];
             c.reverb = float(s["reverb"].num(0.15));
             c.delay = float(s["delay"].num(0));
@@ -898,10 +928,38 @@ struct App {
             c.drive = float(s["drive"].num(0));
             c.pressureCurve = float(s["pressureCurve"].num(1));
             c.release = float(s["release"].num(0));
+            // The preset on gave this part how it plays (as odo on Android's parts): while its sound
+            // is the one it named.
+            const std::vector<mpe::preset::Part>& given = sides[k].parts;
+            if (size_t(j) < given.size() && given[size_t(j)].full && given[size_t(j)].sound == pkg.id()) {
+                const mpe::preset::Part& q = given[size_t(j)];
+                c.transpose = q.transpose;
+                c.volume = float(q.volume);
+                c.brightness = float(q.brightness);
+                c.drive = float(q.drive);
+                c.pressureCurve = float(q.pressureCurve);
+                c.reverb = float(q.reverb);
+                c.delay = float(q.delay);
+                c.release = float(q.release);
+                c.arp = q.arp.on;
+                c.order = mpe::ArpOrder(q.arp.order);
+                c.rate = float(q.arp.rate);
+                c.gate = float(q.arp.gate);
+                c.octaves = q.arp.octaves;
+                c.latch = q.arp.latch;
+            }
             if (part == 0) {                     // the room is shared: the first side's
                 p.reverbSize = float(s["reverbSize"].num(0.5));
                 p.reverbDamp = float(s["reverbDamp"].num(0.4));
             }
+        }
+        if (hasEffects) {                        // the preset's room and clock, over the sounds'
+            p.bpm = float(effects.bpm);
+            p.reverbSize = float(effects.reverbSize);
+            p.reverbDamp = float(effects.reverbDamp);
+            p.delayBeats = float(effects.delayBeats);
+            p.delayFeedback = float(effects.delayFeedback);
+            p.delayPingPong = effects.delayPingPong;
         }
         engine->setPerformance(p);
         for (int k = 0; k < count() && !lib.instruments.empty(); k++) {
@@ -1147,40 +1205,58 @@ struct App {
 
     void stopTake() { if (player.playing()) player.stop(takeSink()); }
 
-    // Listen, or play along: the controller, its settings and the sound as the take has them, then
-    // (a take written by hand) its score expanded on this controller at this size, and played.
+    // A take's whole set-up on (mpe::take::presetOf: each side's controller, settings and sounds,
+    // their effects and levels, the reverb and delay, the arps, the split; and the volume), as
+    // loading a preset does: `keep`, as a new preset of yours; or not, only playing with it. False
+    // (and takeNote says why) if it can't be; else `said` is "<said> “…”" and what was left out.
+    bool applyTake(const mpe::take::Take& t, bool keep, const std::string& said, std::string& note) {
+        for (const mpe::take::Side& ts : t.sides)
+            if (!ts.controller.empty() && controllerIndex(ts.controller) < 0) {
+                takeNote = "It was played on " + ts.controller + ", which is not in the library.";
+                return false;
+            }
+        mpe::preset::Preset f = mpe::take::presetOf(t);
+        // A take of before 1.1 says nothing of the split: the one in use, if it has the sides.
+        if (!t.hasPreset) {
+            f.split = split;
+            if (count() < int(t.sides.size())) for (int k = 0; k < kSplitCount; k++) if (kSplits[k].sides >= int(t.sides.size())) { f.split = k; break; }
+        }
+        usePreset(f, note, keep, said);
+        if (t.volume >= 0) setMasterVolume(float(t.volume), true);
+        layoutSides();
+        return true;
+    }
+    bool readTake(mpe::take::Take& t) {
+        if (takeOn < 0 || takeOn >= int(takes.size())) return false;
+        const TakeFile& f = takes[size_t(takeOn)];
+        std::string text, err;
+        if (!readText(f.path, text) || !mpe::take::parse(text, t, &err)) { takeNote = err.empty() ? "Could not read " + f.path : err; return false; }
+        return true;
+    }
+    // Use its settings: play with the take's set-up, without playing it.
+    void useTakeSettings(bool keep = false) {
+        mpe::take::Take t;
+        stopTake();
+        if (!readTake(t)) return;
+        std::string note;
+        if (applyTake(t, keep, keep ? "Kept as a new preset:" : "Playing with the settings of", note)) takeNote = note;
+    }
+
+    // Listen, or play along: the take's whole set-up, as a preset would put it, then (a take
+    // written by hand) its score expanded on this controller at this size, and played.
     void playTake(mpe::take::Player::Mode mode) {
         if (takeOn < 0 || takeOn >= int(takes.size())) return;
         if (player.playing() && player.mode() == mode) { stopTake(); return; }
         stopTake();
         if (recorder.recording()) toggleRecord();
-        const TakeFile& f = takes[size_t(takeOn)];
-        std::string text, err;
         mpe::take::Take t;
-        if (!readText(f.path, text) || !mpe::take::parse(text, t, &err)) { takeNote = err.empty() ? "Could not read " + f.path : err; return; }
-        for (size_t k = 0; k < t.sides.size() && int(k) < count(); k++) {
-            const mpe::take::Side& ts = t.sides[k];
-            int c = controllerIndex(ts.controller);
-            if (!ts.controller.empty() && c < 0) { takeNote = "It was played on " + ts.controller + ", which is not in the library."; return; }
-            if (c >= 0 && c != sides[k].controller) { chooseController(int(k), c); layoutSides(); }
-            Side& sd = sides[k];
-            if (!sd.host) continue;
-            int parts = partsOf(int(k));
-            const mpe::Json& st = sd.host->manifest()["settings"];
-            for (const auto& kv : ts.settings)
-                for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
-                    if (st[i]["id"].str() == kv.first && sd.settings[i] != kv.second) { sd.host->setting(int(i), kv.second); keepSetting(int(k), i, kv.second); }
-            if (partsOf(int(k)) != parts) reroute();
-            if (!ts.sounds.empty()) {
-                int n = soundIndex(ts.sounds[0]);
-                if (n >= 0 && n != sd.sound) chooseSound(int(k), n);
-            }
-        }
-        saveConfig();
+        if (!readTake(t)) return;
+        std::string said;
+        if (!applyTake(t, false, "", said)) return;
+        std::string left = said.find(". ") == std::string::npos ? "" : said.substr(said.find(". ") + 2);   // what of it is not here
         Side& sd = sides[0];
         if (!sd.host) { takeNote = "No controller to play it on."; return; }
         if (!t.performed()) {
-            layoutSides();
             float centers[2] = {60, 72};
             for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
                 centers[j] = centerNote(*lib.instruments[size_t(j && partsOf(0) > 1 ? sound2Of(0) : sd.sound)].pkg);
@@ -1190,6 +1266,7 @@ struct App {
             takeNote = rep.errors.empty() ? "" : std::to_string(rep.errors.size()) + (rep.errors.size() == 1 ? " note is" : " notes are") +
                        " not on the controller as it is set: " + rep.errors[0];
         } else takeNote.clear();
+        if (!left.empty()) takeNote = takeNote.empty() ? left : left + ". " + takeNote;
         player.load(std::move(t));
         player.setSpeed(takeSpeed);
         player.loopSection(takeLoop, nowMs(), takeSink());
@@ -1233,7 +1310,9 @@ struct App {
             return;
         }
         stopTake();
-        recorder.start();
+        // What plays now, as a preset, and the volume: kept in the take, so it plays back as it was played.
+        mpe::preset::Preset setup = toFile(current(presetName.empty() ? freeName(soundsName()) : presetName));
+        recorder.start(&setup, masterVolume);
         for (int k = 0; k < count(); k++) {
             Side& sd = sides[k];
             if (!sd.host) continue;
@@ -1434,7 +1513,8 @@ struct App {
     // ---- the panel beside the rail ----
 
     enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
-               aRecord, aTake, aListen, aAlong, aSpeed, aLoop, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen };
+               aRecord, aTake, aListen, aAlong, aSpeed, aLoop, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
+               aTakeUse, aTakeKeep };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1645,6 +1725,8 @@ struct App {
                     for (const auto& s : f.sections) names.push_back(s);
                     chips(names, takeLoop + 1, aLoop, 0);
                 }
+                action("Use its settings", aTakeUse);
+                action("Keep its settings as a new preset", aTakeKeep);
                 action("Share \xE2\x80\x9C" + f.name + "\xE2\x80\x9D as a file\xE2\x80\xA6", aTakeShare);
                 action(std::string(confirmTakeDelete ? "Tap again to delete \xE2\x80\x9C" : "Delete \xE2\x80\x9C") + f.name + "\xE2\x80\x9D", aTakeDelete);
             }
@@ -1776,6 +1858,8 @@ struct App {
                 case aTakeOpen: askToOpenTake(); break;
                 case aScalaOpen: askToOpenScala(size_t(it.arg)); break;
                 case aTakeShare: askToShareTake(); break;
+                case aTakeUse: confirmTakeDelete = false; useTakeSettings(false); break;
+                case aTakeKeep: confirmTakeDelete = false; useTakeSettings(true); break;
                 default: break;
             }
             if (it.act != aTakeDelete) confirmTakeDelete = false;
@@ -2392,7 +2476,11 @@ int selftest(App& app, const char* out, Selftest t) {
     SDL_GetWindowSize(app.window, &ww, &wh);
     float aw = float(ww) - app.railW(), ah = float(wh);
     if (t.listen) {
-        // A take (--take): it plays by itself, its ghost fingers over the controller.
+        // A take (--take): it plays by itself, its ghost fingers over the controller. Its settings
+        // first (they may name a sound to load), then it plays.
+        app.useTakeSettings();
+        for (int k = 0; k < 500 && !app.soundsReady(); k++) wait(20);
+        wait(100);
         app.playTake(mpe::take::Player::Listen);
         if (!app.player.playing()) { std::fprintf(stderr, "selftest: the take does not play: %s\n", app.takeNote.c_str()); return 1; }
         wait(2500);
