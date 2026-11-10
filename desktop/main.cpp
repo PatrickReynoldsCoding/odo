@@ -1126,8 +1126,11 @@ struct App {
     // or a piece written by hand (TAKE_AUTHORING.md). Played back, Listen plays it with ghost
     // fingers showing how; Play along shows only the fingers, for you to play; slower, or one
     // section round and round. The same panel, words and order as odo on Android's.
-    struct TakeFile { std::string path, name, controller; double length = 0; bool written = false; std::vector<std::string> sections; };
+    struct TakeFile { std::string path, name, controller; double length = 0; bool written = false, builtIn = false; std::vector<std::string> sections; };
     std::string takesDir = home() + "/.local/share/odo/takes";
+    // Takes that come with odo (takes/ beside it, put there by package.sh): to assess them. Never
+    // deleted; ODO_BUILTIN_TAKES=0 package.sh leaves them out.
+    std::string builtInTakesDir = exeDir() + "/takes";
     std::vector<TakeFile> takes;
     int takeOn = -1;                       // the take chosen in the panel
     mpe::take::Recorder recorder;
@@ -1173,14 +1176,19 @@ struct App {
         takeOn = -1;
         std::error_code ec;
         fs::create_directories(takesDir, ec);
-        for (const auto& e : fs::directory_iterator(takesDir, ec)) {
-            if (e.path().extension() != mpe::take::kExtension) continue;
+        std::vector<std::pair<fs::path, bool>> files;
+        for (const auto& e : fs::directory_iterator(takesDir, ec)) files.push_back({e.path(), false});
+        if (fs::is_directory(builtInTakesDir, ec))
+            for (const auto& e : fs::directory_iterator(builtInTakesDir, ec)) files.push_back({e.path(), true});
+        for (const auto& [path, builtIn] : files) {
+            if (path.extension() != mpe::take::kExtension) continue;
             std::string text;
             mpe::take::Take t;
-            if (!readText(e.path().string(), text) || !mpe::take::parse(text, t)) continue;
+            if (!readText(path.string(), text) || !mpe::take::parse(text, t)) continue;
             TakeFile f;
-            f.path = e.path().string();
-            f.name = t.name.empty() ? e.path().stem().string() : t.name;
+            f.builtIn = builtIn;
+            f.path = path.string();
+            f.name = t.name.empty() ? path.stem().string() : t.name;
             f.controller = t.sides.empty() ? "" : t.sides[0].controller;
             f.written = !t.performed();
             f.length = t.length();
@@ -1193,7 +1201,9 @@ struct App {
             } else for (const auto& s : t.sections) f.sections.push_back(s.name);
             takes.push_back(std::move(f));
         }
-        std::sort(takes.begin(), takes.end(), [](const TakeFile& a, const TakeFile& b) { return a.name < b.name; });
+        std::sort(takes.begin(), takes.end(), [](const TakeFile& a, const TakeFile& b) {
+            return a.builtIn != b.builtIn ? !a.builtIn : a.name < b.name;   // yours, then those built in
+        });
         for (size_t i = 0; i < takes.size(); i++) if (takes[i].path == was) takeOn = int(i);
     }
 
@@ -1356,7 +1366,7 @@ struct App {
     }
 
     void deleteTake() {
-        if (takeOn < 0 || takeOn >= int(takes.size())) return;
+        if (takeOn < 0 || takeOn >= int(takes.size()) || takes[size_t(takeOn)].builtIn) return;
         stopTake();
         std::error_code ec;
         fs::remove(takes[size_t(takeOn)].path, ec);
@@ -1732,14 +1742,24 @@ struct App {
             else action("Record", aRecord);
             if (!takeNote.empty()) note(takeNote);
             heading("YOURS");
-            for (size_t i = 0; i < takes.size(); i++) {
-                PItem it{PItem::Row, takes[i].name, takeSub(takes[i]), x, y, in, 50};
-                it.act = aTake; it.arg = int(i); it.on = int(i) == takeOn; it.rule = true;
-                p.items.push_back(it);
-                y += 50;
-            }
-            if (takes.empty()) note("None yet: record one, or open a take file.");
+            auto takeRows = [&](bool builtIn) {
+                int n = 0;
+                for (size_t i = 0; i < takes.size(); i++) {
+                    if (takes[i].builtIn != builtIn) continue;
+                    PItem it{PItem::Row, takes[i].name, takeSub(takes[i]), x, y, in, 50};
+                    it.act = aTake; it.arg = int(i); it.on = int(i) == takeOn; it.rule = true;
+                    p.items.push_back(it);
+                    y += 50;
+                    n++;
+                }
+                return n;
+            };
+            if (takeRows(false) == 0) note("None yet: record one, or open a take file.");
             action("Open a take file\xE2\x80\xA6", aTakeOpen);
+            if (std::any_of(takes.begin(), takes.end(), [](const TakeFile& f) { return f.builtIn; })) {
+                heading("BUILT IN");
+                takeRows(true);
+            }
             if (takeOn >= 0 && takeOn < int(takes.size())) {
                 const TakeFile& f = takes[size_t(takeOn)];
                 heading("THIS TAKE");
@@ -1763,7 +1783,8 @@ struct App {
                 action("Use its settings", aTakeUse);
                 action("Keep its settings as a new preset", aTakeKeep);
                 action("Share \xE2\x80\x9C" + f.name + "\xE2\x80\x9D as a file\xE2\x80\xA6", aTakeShare);
-                action(std::string(confirmTakeDelete ? "Tap again to delete \xE2\x80\x9C" : "Delete \xE2\x80\x9C") + f.name + "\xE2\x80\x9D", aTakeDelete);
+                if (!f.builtIn)
+                    action(std::string(confirmTakeDelete ? "Tap again to delete \xE2\x80\x9C" : "Delete \xE2\x80\x9C") + f.name + "\xE2\x80\x9D", aTakeDelete);
             }
         } else if (panelKey == kGroupKey) {
             if (!sd.host) { panelKey = kNone; return Panel(); }

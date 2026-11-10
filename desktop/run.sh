@@ -17,4 +17,6 @@ ln -sf "$root"/app/src/main/assets/packs/*.json "$lib/packs/"
 for f in "$root"/third_party/mpe-instruments/build/packages/*.odoi "$root"/controllers/build/*.odoc; do
     ln -sf "$f" "$lib/"
 done
+mkdir -p "$build/takes"                    # the built-in takes (Takes -> BUILT IN): this checkout's takes/
+ln -sf "$root"/takes/*.odotake "$build/takes/"
 exec "$build/odo" --library "$lib" "$@"

@@ -29,11 +29,12 @@ object Takes {
     private const val MAX_BYTES = 32 shl 20
 
     class Take(val file: File, val name: String, val controller: String, val written: Boolean, val length: Double,
-               val sections: List<String>, val settings: JSONObject, val sounds: List<String>, val volume: Double)
+               val sections: List<String>, val settings: JSONObject, val sounds: List<String>, val volume: Double,
+               val builtIn: Boolean = false)
 
     var list by mutableStateOf<List<Take>>(emptyList())
         private set
-    /** The take chosen in the panel, by its file's name. */
+    /** The take chosen in the panel, by its file's path. */
     var chosen by mutableStateOf<String?>(null)
     /** What happened last, for the panel. */
     var note by mutableStateOf("")
@@ -52,20 +53,30 @@ object Takes {
     var surfaceH = 0f
 
     private lateinit var dir: File
+    /** Takes that come with the app (assets/takes, copied out at each start): for assessing them; a
+     *  build with -Podo.builtinTakes=false leaves them out (before a store release). */
+    private lateinit var builtInDir: File
     private var appContext: Context? = null
 
     fun init(context: Context) {
         dir = File(context.filesDir, "takes").apply { mkdirs() }
+        builtInDir = File(context.filesDir, "takes-built-in").apply { deleteRecursively(); mkdirs() }
+        runCatching {
+            for (n in context.assets.list("takes") ?: emptyArray())
+                if (n.endsWith(".odotake")) context.assets.open("takes/$n").use { i -> File(builtInDir, n).outputStream().use { i.copyTo(it) } }
+        }
         appContext = context.applicationContext
         look = (prefs?.getInt("ghost_look", 0) ?: 0).coerceIn(0, 3)
         scan()
     }
 
-    fun current(): Take? = list.firstOrNull { it.file.name == chosen }
+    fun current(): Take? = list.firstOrNull { it.file.path == chosen }
 
     fun scan() {
         if (!::dir.isInitialized) return
-        list = (dir.listFiles() ?: emptyArray()).filter { it.name.endsWith(".odotake") }.mapNotNull { f ->
+        val files = (dir.listFiles() ?: emptyArray()).map { it to false } +
+                    (if (::builtInDir.isInitialized) builtInDir.listFiles() ?: emptyArray() else emptyArray()).map { it to true }
+        list = files.filter { it.first.name.endsWith(".odotake") }.mapNotNull { (f, builtIn) ->
             runCatching {
                 val o = JSONObject(String(Native.nativeTakeInfo(f.readBytes()), Charsets.UTF_8))
                 if (o.has("error")) null
@@ -73,7 +84,7 @@ object Takes {
                           o.optDouble("length", 0.0), o.optJSONArray("sections")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList(),
                           o.optJSONObject("settings") ?: JSONObject(),
                           o.optJSONArray("sounds")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList(),
-                          o.optDouble("volume", -1.0))
+                          o.optDouble("volume", -1.0), builtIn)
             }.getOrNull()
         }.sortedBy { it.name }
         if (current() == null) chosen = null
@@ -97,9 +108,9 @@ object Takes {
     }
 
     fun choose(t: Take) {
-        if (t.file.name == chosen) return
+        if (t.file.path == chosen) return
         stop()
-        chosen = t.file.name
+        chosen = t.file.path
         loop = -1
         note = ""
     }
@@ -115,7 +126,7 @@ object Takes {
             val f = freeFile(name)
             runCatching { f.writeText(text) }.onFailure { note = "Could not write ${f.name}."; return }
             scan()
-            chosen = f.name
+            chosen = f.path
             note = "Kept as “$name”."
             return
         }
@@ -238,7 +249,8 @@ object Takes {
     private val prefs get() = appContext?.getSharedPreferences("mpe", Context.MODE_PRIVATE)
 
     fun delete(t: Take) {
-        if (t.file.name == chosen) stop()
+        if (t.builtIn) return                     // comes with the app
+        if (t.file.path == chosen) stop()
         t.file.delete()
         note = "Deleted “${t.name}”."
         chosen = null
@@ -271,7 +283,7 @@ object Takes {
         val f = freeFile(name)
         runCatching { f.writeBytes(bytes) }.onFailure { note = "Could not keep it."; return note }
         scan()
-        chosen = f.name
+        chosen = f.path
         note = "Opened “$name”."
         return note
     }

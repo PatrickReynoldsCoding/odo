@@ -19,6 +19,7 @@ The rail's **App** group has **Takes**, after **App**. Its panel, the same in bo
 |---|---|
 | RECORD | **Record**; while recording, **Stop recording · 0:12**. Recording starts at the first finger down. Stopped, it is kept as "Take 1", "Take 2"... |
 | YOURS | Each take: its name, and "0:38 · Grid · recorded" (or "written by hand"). Tap one to choose it. **Open a take file…** |
+| BUILT IN | The takes that come with odo (the source's `takes/`), the same rows; they cannot be deleted. For assessing them: a store build leaves them out (Android: `gradle -Podo.builtinTakes=false`; computers: `ODO_BUILTIN_TAKES=0 desktop/package.sh`). |
 | THIS TAKE | **Listen** (it plays, with ghost fingers) or **Play along** (only the ghost fingers: you play). Tapped again: **Stop**. **Speed**: 50%, 75%, 100%. **Fingers**: Rings, Dots, Falling, Off (how the ghost fingers look; kept). **Loop**: "All of it", or one section round and round. **Use its settings** (play with how it was set up, without playing it). **Keep its settings as a new preset** (one of yours, named as the take, on view). **Share "…" as a file…**, **Delete "…"** (tap twice). |
 
 A take is a take and a preset: it keeps everything a preset keeps (each side's controller and all

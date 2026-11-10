@@ -23,6 +23,8 @@ mkdir -p "$stage/licenses"
 cp "$root"/ui/fonts/OFL-*.txt "$stage/licenses/"
 strip "$stage/odo"
 cp "$root"/third_party/mpe-instruments/build/packages/*.odoi "$stage/library/"
+# The takes in takes/, built in (Takes -> BUILT IN), to assess them. ODO_BUILTIN_TAKES=0: left out (a store release).
+if [ "${ODO_BUILTIN_TAKES:-1}" != 0 ]; then mkdir -p "$stage/takes"; cp "$root"/takes/*.odotake "$stage/takes/"; fi
 mkdir -p "$stage/library/packs"            # the sound packs: how the sound picker groups them, as on Android
 cp "$root"/app/src/main/assets/packs/*.json "$stage/library/packs/"
 for c in $controllers; do

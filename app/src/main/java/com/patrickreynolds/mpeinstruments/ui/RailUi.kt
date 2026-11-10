@@ -588,9 +588,15 @@ private fun TakesPanel() {
     else PRow("Record") { t.toggleRecord() }
     if (t.note.isNotEmpty()) PNote(t.note)
     PHeading("YOURS")
-    for (take in t.list) PRow(take.name, t.sub(take), on = take.file.name == t.chosen) { t.choose(take); confirmDelete = false }
-    if (t.list.isEmpty()) PNote("None yet: record one, or open a take file.")
+    val yours = t.list.filter { !it.builtIn }
+    for (take in yours) PRow(take.name, t.sub(take), on = take.file.path == t.chosen) { t.choose(take); confirmDelete = false }
+    if (yours.isEmpty()) PNote("None yet: record one, or open a take file.")
     PRow("Open a take file…") { openFile.launch(arrayOf("*/*")); confirmDelete = false }
+    val builtIn = t.list.filter { it.builtIn }
+    if (builtIn.isNotEmpty()) {
+        PHeading("BUILT IN")
+        for (take in builtIn) PRow(take.name, t.sub(take), on = take.file.path == t.chosen) { t.choose(take); confirmDelete = false }
+    }
     val on = t.current() ?: return
     PHeading("THIS TAKE")
     PRow(if (t.playing == 1) "Stop" else "Listen", on = t.playing == 1) { t.play(0); confirmDelete = false }
@@ -609,7 +615,7 @@ private fun TakesPanel() {
     PRow("Use its settings") { t.useSettings(); confirmDelete = false }
     PRow("Keep its settings as a new preset") { t.keepSettings(); confirmDelete = false }
     PRow("Share “${on.name}” as a file…") { t.share(context, on); confirmDelete = false }
-    PRow((if (confirmDelete) "Tap again to delete “" else "Delete “") + on.name + "”", danger = confirmDelete) {
+    if (!on.builtIn) PRow((if (confirmDelete) "Tap again to delete “" else "Delete “") + on.name + "”", danger = confirmDelete) {
         if (confirmDelete) { t.delete(on); confirmDelete = false } else confirmDelete = true
     }
 }

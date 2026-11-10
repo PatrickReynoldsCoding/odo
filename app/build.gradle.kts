@@ -24,8 +24,8 @@ android {
         minSdk = 31          // Android 12: AMidi (29) and the Bluetooth permission model (31)
         targetSdk = 35
         // -Pmpe.versionCode / -Pmpe.versionName: for testing in-app updates with an older-numbered build.
-        versionCode = (findProperty("mpe.versionCode") as String?)?.toInt() ?: 59
-        versionName = (findProperty("mpe.versionName") as String?) ?: "0.34.0"
+        versionCode = (findProperty("mpe.versionCode") as String?)?.toInt() ?: 60
+        versionName = (findProperty("mpe.versionName") as String?) ?: "0.34.1"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }   // phone, and the emulator
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }
@@ -48,6 +48,7 @@ android {
     // The controller packages that come with the app (controllers/, built to WebAssembly): the same
     // .odoc files a computer MESH plays. Built by controllers/build.sh, which needs clang.
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/controllers"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/takes"))
     // odo's fonts (ui/fonts, shared with odo for computers) as res/font, and their licences as assets.
     sourceSets["main"].res.srcDir(layout.buildDirectory.dir("generated/fonts/res"))
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/fonts/assets"))
@@ -74,6 +75,13 @@ val buildControllers by tasks.registering(Exec::class) {
     outputs.dir(src.resolve("build"))
     commandLine(src.resolve("build.sh").path)
 }
+// The takes in takes/ as built-in takes (Takes → BUILT IN), to assess them. For a store release:
+// -Podo.builtinTakes=false leaves them out.
+val builtinTakes = (findProperty("odo.builtinTakes") as String?)?.toBoolean() ?: true
+val takeAssets by tasks.registering(Sync::class) {
+    if (builtinTakes) from(rootProject.file("takes")) { include("*.odotake") }
+    into(layout.buildDirectory.dir("generated/takes/takes"))
+}
 val controllerAssets by tasks.registering(Copy::class) {
     dependsOn(buildControllers)
     from(rootProject.file("controllers/build")) { include("*.odoc") }
@@ -85,4 +93,4 @@ val fontResources by tasks.registering(Sync::class) {
     from(rootProject.file("ui/fonts")) { include("OFL-*.txt"); into("assets/licenses") }
     into(layout.buildDirectory.dir("generated/fonts"))
 }
-tasks.named("preBuild") { dependsOn(controllerAssets, fontResources) }
+tasks.named("preBuild") { dependsOn(controllerAssets, takeAssets, fontResources) }
