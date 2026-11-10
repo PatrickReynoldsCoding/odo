@@ -898,7 +898,9 @@ static void draw_divide(void) {
         mesh_line(x + (float)q * 4, y0 + hh * 0.3f, x + (float)q * 4, y0 + hh * 0.7f, t->flat ? BLACK : mesh_alpha(ink, 0.7f), 2 * PX);
 }
 
+static int nodraw;              /* no one sees it (MESH_NODRAW): draw nothing */
 static void draw(void) {
+    if (nodraw) { dirty = 0; return; }
     const Theme* t = theme();
     float ph = playH();
     mesh_begin();
@@ -938,7 +940,7 @@ static void draw(void) {
 
 /* ---- the interface ------------------------------------------------------------------------------- */
 MESH_EXPORT(init) void init(float width, float height, int flags, double t) {
-    W = width > 1 ? width : 1; H = height > 1 ? height : 1; eink = flags & MESH_EINK; now = t;
+    W = width > 1 ? width : 1; H = height > 1 ? height : 1; eink = flags & MESH_EINK; nodraw = flags & MESH_NODRAW; now = t;
     layout();
     draw();
 }

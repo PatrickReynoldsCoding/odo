@@ -26,7 +26,8 @@ public:
     const Json& manifest() const { return manifest_; }
 
     enum Phase { Down = 0, Move = 1, Up = 2, Cancel = 3 };
-    // Its surface is width x height dp. flags: 1 = e-ink (black on white, no motion).
+    // Its surface is width x height dp. flags: 1 = e-ink (black on white, no motion); 2 = no one
+    // sees it (a take played through it for its notes): it need not draw.
     void init(float width, float height, int flags);
     void instrument(int part, float centerNote);   // the middle of the instrument part `part` plays
     void touch(int id, Phase phase, float x, float y, float size, float force);

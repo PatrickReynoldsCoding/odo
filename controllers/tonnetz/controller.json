@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/tonnetz",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "name": "Tonnetz",
   "description": "A net of notes: a node plays a note, a triangle a chord; slide for smooth chord changes",
   "author": "Patrick Reynolds",

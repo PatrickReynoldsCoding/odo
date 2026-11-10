@@ -181,6 +181,7 @@ static float W = 400, H = 700, SW = 400, SH = 700;
 static int turned;
 static int reset_places;           /* Put the moved controls back: asked, not yet done */
 static int eink;
+static int nodraw;              /* no one sees it (MESH_NODRAW): lay out, but draw nothing */
 static float center[2] = {60, 60}; /* the middle of each part's instrument, as a MIDI note */
 static int have_top;               /* the host has said where the top part's instrument is */
 static double now, last_tick = -1;
@@ -2011,6 +2012,7 @@ static void draw_keys(const Theme* th) {
 static void draw(void) {
     layout();
     clamp_pos();
+    if (nodraw) { dirty = 0; return; }
     const Theme* th = theme();
     int flat = eink;
     mesh_begin();
@@ -2038,7 +2040,7 @@ static void turn_to(float sw, float sh) {
 }
 
 MESH_EXPORT(init) void init(float width, float height, int flags, double t) {
-    eink = flags & MESH_EINK; now = t;
+    eink = flags & MESH_EINK; nodraw = flags & MESH_NODRAW; now = t;
     turn_to(width, height);
     layout();
     draw();

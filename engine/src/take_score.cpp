@@ -841,7 +841,7 @@ bool render(Take& t, const Package& pkg, const std::vector<double>& values, floa
     host.setTaps(taps);
     std::vector<double> v = settingsFor(t, 0, pkg.manifest, values);
     for (size_t i = 0; i < v.size(); i++) host.setting(int(i), v[i]);
-    host.init(width, height, 0);
+    host.init(width, height, 2);             // no one sees it: it need not draw
     host.instrument(0, centers[0]);
     host.instrument(1, centers[1]);
     // Its touches and settings, in time, with a frame every 1/120 s between.

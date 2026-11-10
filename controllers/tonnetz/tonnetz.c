@@ -251,7 +251,9 @@ static void trail_lines(const float* p, int n, float alpha) {
     }
 }
 
+static int nodraw;              /* no one sees it (MESH_NODRAW): draw nothing */
 static void draw(void) {
+    if (nodraw) { dirty = 0; return; }
     mesh_begin();
     if (eink) mesh_clear(WHITE);
     else {
@@ -334,7 +336,7 @@ static void draw(void) {
 
 /* ---- the interface ------------------------------------------------------------------------------- */
 MESH_EXPORT(init) void init(float width, float height, int flags, double t) {
-    W = width; H = height; eink = flags & MESH_EINK; now = t;
+    W = width; H = height; eink = flags & MESH_EINK; nodraw = flags & MESH_NODRAW; now = t;
     layout();
     draw();
 }

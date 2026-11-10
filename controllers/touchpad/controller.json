@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/touchpad",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "name": "Touch pad",
   "description": "Play with your fingers on the screen: columns of notes, each finger its own voice; slide to glide, up for louder and brighter, rock a finger for vibrato. Split it into two pads, or play a chord's notes from a chord wheel or grid",
   "author": "Patrick Reynolds",

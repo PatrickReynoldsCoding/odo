@@ -18,7 +18,9 @@
 #define MESH_EXPORT(name) __attribute__((export_name(#name)))
 #define MESH_IMPORT(name) __attribute__((import_module("mesh"), import_name(#name)))
 
-enum { MESH_EINK = 1 };
+/* flags: MESH_NODRAW when no one sees it (a take played through it to hear its notes): it need
+   not draw, but it must play exactly as it would on screen. */
+enum { MESH_EINK = 1, MESH_NODRAW = 2 };
 enum { MESH_DOWN = 0, MESH_MOVE = 1, MESH_UP = 2, MESH_CANCEL = 3 };
 
 /* pitch: semitones (MIDI note numbers, with fractions for bends); pressure, slide, velocity 0..1. */

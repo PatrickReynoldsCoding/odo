@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/hex",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "name": "Hex",
   "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, bend the note toward the keys either way (snapped to points if you like); press harder for pressure",
   "author": "Patrick Reynolds",

@@ -49,7 +49,7 @@ provides. All positions are in the controller's own units: its surface is `width
 
 | call | when |
 | --- | --- |
-| `init(width, height, flags, time)` | the controller is opened, or the surface changes size; flags 1 = e-ink |
+| `init(width, height, flags, time)` | the controller is opened, or the surface changes size; flags 1 = e-ink, 2 = no one sees it (a take played through it to hear its notes): it need not draw, but must play just as it would on screen |
 | `instrument(part, centerNote)` | the middle of the range of the instrument a part plays, as a MIDI note |
 | `touch(id, phase, x, y, size, force, time)` | a finger goes down (0), moves (1), lifts (2) or is cancelled (3) |
 | `tick(time)` | every frame, for controllers that do things over time (an arp of their own, animation) |
