@@ -253,6 +253,7 @@ static void hex() {
     for (int k = 1; k <= 128; k++) own.push_back("scala" + std::to_string(k));
     own.push_back("slideSnap");
     own.push_back("snapPoints");
+    for (const char* id : {"moveKeys", "viewReset", "viewX", "viewY", "viewScale", "viewTurn", "sideMove", "place9"}) own.push_back(id);
     bool same = hs.size() == gs.size() + own.size();
     for (size_t i = 0; i < gs.size() && same; i++)
         if (hs[i]["id"].str() != gs[i]["id"].str() || hs[i]["type"].str() != gs[i]["type"].str()) {
@@ -281,9 +282,17 @@ static void hex() {
     CHECK(sr && sr->widget == Widget::Slider && find(ro, "stepUpRight"), "Your own steps: two sliders");
     auto pr = find(rs, "press");
     CHECK(pr && pr->group == "Touch" && pr->display == "Pressure", "Press harder: Pressure");
-    auto cols = find(rs, "cols");
-    CHECK(cols && cols->label == "Keys top to bottom" && cols->widget == Widget::Chips && cols->choices.size() == 14 && cols->display == "5",
-          "Keys top to bottom: 3 to 16, 5");
+    // Moving the keyboard takes the place of Keys top to bottom and Key size: those are hidden (kept,
+    // so old presets load), the mode and putting it back are in Layout, its button in Controls, and
+    // where the keyboard is, hidden.
+    CHECK(!find(rs, "cols") && !find(rs, "squareSize"), "Keys top to bottom and Key size: not on the rail");
+    auto mk = find(rs, "moveKeys"), vb = find(rs, "viewReset"), sm = find(rs, "sideMove");
+    CHECK(mk && mk->group == "Layout" && mk->widget == Widget::Switch && mk->label == "Move the keyboard (two fingers)" && mk->display == "Off",
+          "Move the keyboard (two fingers): a switch in Layout, off");
+    CHECK(vb && vb->group == "Layout" && vb->widget == Widget::Switch && vb->label == "Put the keyboard back", "Put the keyboard back: in Layout");
+    CHECK(sm && sm->group == "Controls" && sm->label == "Move button" && sm->display == "Top" && sm->choices.size() == 3, "Move button: Off/Top/Bottom, Top");
+    for (const char* id : {"viewX", "viewY", "viewScale", "viewTurn", "place9"}) CHECK(!find(rs, id), "%s: hidden", id);
+    CHECK(m["rowTurn"].str() == "viewTurn" && m["bend"].str() == "two fingers out", "its rows turn with viewTurn (for takes)");
     auto col = find(rs, "colours");
     CHECK(col && col->choices.size() == 9 && col->display == "Sharps and flats", "Colours: the Grid's and four more, Sharps and flats");
     // Its touch is its own: the Grid's slide, vibrato and slide-out settings are not on its rail;

@@ -487,6 +487,12 @@ bool Layout::scan(const Package& pkg, const std::vector<double>& values, float w
     s.values = settingsFor(Take(), 0, pkg.manifest, values);
     for (size_t i = 0; i < s.values.size(); i++) s.host->setting(int(i), s.values[i]);
     twoFingerBend_ = pkg.manifest["bend"].str() == "two fingers out";
+    rowTurn_ = 0;
+    if (!pkg.manifest["rowTurn"].str().empty()) {
+        const Json& st = pkg.manifest["settings"];
+        for (size_t i = 0; i < st.size() && i < s.values.size(); i++)
+            if (st[i]["id"].str() == pkg.manifest["rowTurn"].str()) rowTurn_ = float(s.values[i]);
+    }
     s.clock = 1000;
     s.host->init(width, height, 0);
     for (int j = 0; j < kCenters; j++) s.host->instrument(j, centers[j]);
@@ -568,6 +574,7 @@ bool Layout::scan(const Package& pkg, const std::vector<double>& values, float w
             cells_.push_back(c);
         }
     responses_.assign(cells_.size(), Response());
+    middles_.clear();
     if (cells_.empty() && error) *error = "no notes found on " + pkg.name() + " at this size";
     return !cells_.empty();
 }
@@ -581,10 +588,45 @@ const Layout::Cell* Layout::find(int note, float x, float y, int part) const {
     for (const Cell& c : cells_) {
         if (c.note != note || (part < 0 ? false : c.part != part)) continue;
         float d = std::hypot(c.x - x, c.y - y);
-        if (c.probes * 2 < most) d += std::min(w_, h_) * 0.5f;   // cut by an edge or a button: a whole one is better
+        // Cut by an edge or a button: a whole one is better. Where a note bends with two fingers along
+        // its key's row (the Hex), the key's middle and its row are found from the whole key, and its
+        // notes are on keys all over: a key cut at all is passed over for a whole one.
+        if (twoFingerBend_ ? c.probes * 10 < most * 9 : c.probes * 2 < most) d += std::min(w_, h_) * 0.5f;
         if (d < bestCost) { bestCost = d; best = &c; }
     }
     return best;
+}
+
+std::pair<float, float> Layout::middle(const Cell& c) {
+    size_t k = size_t(&c - cells_.data());
+    if (k >= cells_.size()) return {c.x, c.y};
+    if (middles_.size() != cells_.size()) middles_.assign(cells_.size(), {NAN, NAN});
+    if (!std::isnan(middles_[k].first)) return middles_[k];
+    auto inKey = [&](float x, float y) {
+        Note n;
+        return probe(x, y, 0.7f, &n) && int(std::lround(n.pitch)) == c.note && n.part == c.part;
+    };
+    float x = c.x, y = c.y;
+    const float reach = std::max(c.x1 - c.x0, c.y1 - c.y0);
+    // How far the key goes from (x, y) that way: its edge, to a few hundredths of a dp.
+    auto edge = [&](float dx, float dy) {
+        float a = 0, b = reach;
+        for (int i = 0; i < 12; i++) {
+            float m = (a + b) / 2;
+            if (inKey(x + dx * m, y + dy * m)) a = m; else b = m;
+        }
+        return (a + b) / 2;
+    };
+    // Half way across, then half way down, again: on a key the same both sides of its middle (any
+    // way it is turned), that closes on it.
+    if (inKey(x, y))
+        for (int it = 0; it < 3; it++) {
+            x += (edge(1, 0) - edge(-1, 0)) / 2;
+            y += (edge(0, 1) - edge(0, -1)) / 2;
+        }
+    else { x = c.x; y = c.y; }
+    middles_[k] = {x, y};
+    return middles_[k];
 }
 
 Layout::Response Layout::response(const Cell& c) {
@@ -645,7 +687,9 @@ float along(const std::vector<float>& pts, float u, float otherwise) {
 }
 
 // Where in a cell to put the finger for this pressure and tone (either < 0: don't care).
-void offsetFor(const Layout::Response& r, float press, float tone, float hw, float hh, float* dx, float* dy) {
+// askew: the keys are turned part way round on the screen (rowTurn not a right angle), so the cell's
+// box is bigger than its key: the place is kept inside the ellipse in the box, not only inside it.
+void offsetFor(const Layout::Response& r, float press, float tone, float hw, float hh, float* dx, float* dy, bool askew = false) {
     *dx = *dy = 0;
     // Rows: what the place should change.
     float a[2][2], b[2];
@@ -668,7 +712,12 @@ void offsetFor(const Layout::Response& r, float press, float tone, float hw, flo
     }
     *dx = std::clamp(*dx, -0.8f * hw, 0.8f * hw);
     *dy = std::clamp(*dy, -0.8f * hh, 0.8f * hh);
+    if (askew && hw > 0 && hh > 0) {
+        const float e = std::hypot(*dx / (0.8f * hw), *dy / (0.8f * hh));
+        if (e > 1) { *dx /= e; *dy /= e; }
+    }
 }
+bool askew(const Layout& l) { return std::fabs(std::remainder(l.rowTurn(), 90.f)) > 0.01f; }
 
 }  // namespace
 
@@ -820,7 +869,7 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 // note's pressure within 30 ms.
                 if (vel) pr = vel->a + ((pr >= 0 ? pr : 0.7f) - vel->a) * smooth(float((t - t0) / 30.0));
                 float dx, dy;
-                offsetFor(r, pr, tn, hw, hh, &dx, &dy);
+                offsetFor(r, pr, tn, hw, hh, &dx, &dy, askew(layout));
                 float bx = p.x, by = p.y;
                 if (!curvePlaces.empty()) {
                     float q = std::clamp(u, 0.f, 1.f) * float(curvePlaces.size() - 1);
@@ -853,21 +902,46 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                 !(k == 0 && carried.count(i))) {
                 // Its row: the nearest key beside it, or above or below it, whichever touches it (a
                 // turned keyboard's rows run down the screen); and how many semitones away it is.
+                // Beside and above as the keys are turned on the screen (rowTurn: u across, v down).
+                const float th = layout.rowTurn() * float(M_PI) / 180.f;
+                const float ux = th == 0 ? 1.f : std::cos(th), uy = th == 0 ? 0.f : std::sin(th), vx = -uy, vy = ux;
+                const float bw = c.x1 - c.x0, bh = c.y1 - c.y0;
+                auto extent = [&](float ax, float ay) { return std::fabs(ax) * bw + std::fabs(ay) * bh; };   // the key's, that way
                 const Layout::Cell* across = nullptr;
                 const Layout::Cell* down = nullptr;
+                float acrossD = 0, downD = 0;
                 for (const Layout::Cell& o : layout.cells()) {
                     if (o.part != c.part || &o == &c) continue;
-                    if (std::fabs(o.y - c.y) < (c.y1 - c.y0) * 0.2f && (!across || std::fabs(o.x - c.x) < std::fabs(across->x - c.x))) across = &o;
-                    if (std::fabs(o.x - c.x) < (c.x1 - c.x0) * 0.2f && (!down || std::fabs(o.y - c.y) < std::fabs(down->y - c.y))) down = &o;
+                    const float dx = o.x - c.x, dy = o.y - c.y, du = dx * ux + dy * uy, dv = dx * vx + dy * vy;
+                    if (std::fabs(dv) < extent(vx, vy) * 0.2f && (!across || std::fabs(du) < acrossD)) { across = &o; acrossD = std::fabs(du); }
+                    if (std::fabs(du) < extent(ux, uy) * 0.2f && (!down || std::fabs(dv) < downD)) { down = &o; downD = std::fabs(dv); }
                 }
-                const bool rowDown = down && (!across || std::fabs(down->y - c.y) < std::fabs(across->x - c.x));
+                const bool rowDown = down && (!across || downD < acrossD);
                 const Layout::Cell* row = rowDown ? down : across;
+                // Of the keys either side along the row, the whole one (one cut by an edge has its
+                // middle out of place): the nearest on the other side, if it is more of a key.
+                if (row) {
+                    const float sx = row->x - c.x, sy = row->y - c.y;
+                    const float ax = rowDown ? vx : ux, ay = rowDown ? vy : uy, side = sx * ax + sy * ay;
+                    const float bx = rowDown ? ux : vx, by = rowDown ? uy : vy;
+                    const Layout::Cell* other = nullptr;
+                    float otherD = 0;
+                    for (const Layout::Cell& o : layout.cells()) {
+                        if (o.part != c.part || &o == &c) continue;
+                        const float dx = o.x - c.x, dy = o.y - c.y, da = dx * ax + dy * ay, db = dx * bx + dy * by;
+                        if (da * side < 0 && std::fabs(db) < extent(bx, by) * 0.2f && (!other || std::fabs(da) < otherD)) { other = &o; otherD = std::fabs(da); }
+                    }
+                    if (other && other->note != c.note && other->probes > row->probes && otherD < std::fabs(side) * 1.5f) row = other;
+                }
                 if (row && row->note != c.note) {
-                    // Along the row per semitone; out of the key, across the row.
-                    const float perSemi = (rowDown ? row->y - c.y : row->x - c.x) / float(row->note - c.note);
-                    const float alongX = rowDown ? 0.f : 1.f, alongY = rowDown ? 1.f : 0.f;
-                    const float out = (rowDown ? c.x1 - c.x0 : c.y1 - c.y0) * 0.75f;
-                    const float outX = alongY, outY = alongX;   // across the row
+                    // Along the row per semitone; out of the key, across the row. From the keys' own
+                    // middles (the bend is by how far the finger is from its key's middle).
+                    const auto km = layout.middle(c), rm = layout.middle(*row);
+                    const float mx = km.first, my = km.second;
+                    const float alongX = rowDown ? vx : ux, alongY = rowDown ? vy : uy;
+                    const float perSemi = ((rm.first - mx) * alongX + (rm.second - my) * alongY) / float(row->note - c.note);
+                    const float outX = rowDown ? ux : vx, outY = rowDown ? uy : vy;   // across the row
+                    const float out = extent(outX, outY) * 0.75f;
                     auto semis = [&](double t) {
                         float u = dur > 0 ? float((t - t0) / dur) : 0, d = 0;
                         if (curve) d += along(curve->pts, u, 0);
@@ -893,8 +967,9 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                     float lowest = 1;
                     for (double t = t0; t <= t1; t += step) lowest = std::min(lowest, pressure(t));
                     float ldx, ldy;
-                    offsetFor(r, lowest, toneAt(0), hw, hh, &ldx, &ldy);
-                    const float lx = c.x + ldx * alongX, ly = c.y + ldy * alongY;   // its place along the row only
+                    offsetFor(r, lowest, toneAt(0), hw, hh, &ldx, &ldy, askew(layout));
+                    const float al = (c.x + ldx - mx) * alongX + (c.y + ldy - my) * alongY;   // (ldx, ldy: from the cell's x, y)
+                    const float lx = mx + al * alongX, ly = my + al * alongY;     // its place along the row only
                     const float f0 = 0.3f;                                          // how hard it lands
                     auto force = [&](double t) {
                         float more = lowest < 0.999f ? (pressure(t) - lowest) / (1 - lowest) : 0;
@@ -908,16 +983,16 @@ bool expand(const Score& score, Layout& layout, Take& out, Report* report) {
                     // there): quickly, so the dynamics (which follow the finger slowly) stay as it landed.
                     for (double t = t0 + 5; t <= t0 + arm; t += 5) {
                         float s = smooth(float((t - t0) / arm));
-                        float ax = lx + (c.x - lx) * s, ay = ly + (c.y - ly) * s;
+                        float ax = lx + (mx - lx) * s, ay = ly + (my - ly) * s;
                         emit(t, fa, Move, ax - outX * out * s, ay - outY * out * s, f0);
                         emit(t, fb, Move, ax + outX * out * 0.8f * s, ay + outY * out * 0.8f * s, f0);
                     }
-                    emit(t0 + arm + 2, fb, Up, c.x + outX * out * 0.8f, c.y + outY * out * 0.8f, 0);
-                    float x = c.x - outX * out, y = c.y - outY * out;
+                    emit(t0 + arm + 2, fb, Up, mx + outX * out * 0.8f, my + outY * out * 0.8f, 0);
+                    float x = mx - outX * out, y = my - outY * out;
                     for (double t = t0 + arm + 5; t < lift; t += step) {
                         const float d = semis(t) * perSemi;
-                        x = c.x - outX * out + alongX * d;
-                        y = c.y - outY * out + alongY * d;
+                        x = mx - outX * out + alongX * d;
+                        y = my - outY * out + alongY * d;
                         emit(t, fa, Move, x, y, force(t));
                     }
                     emit(lift, fa, Up, x, y, 0);
@@ -1132,7 +1207,7 @@ std::vector<Touch> fromNotes(const Take& t, Layout& layout) {
         }
         Layout::Response r = layout.response(c);
         float dx, dy;
-        offsetFor(r, n.pressure, n.slide, (c.x1 - c.x0) / 2, (c.y1 - c.y0) / 2, &dx, &dy);
+        offsetFor(r, n.pressure, n.slide, (c.x1 - c.x0) / 2, (c.y1 - c.y0) / 2, &dx, &dy, askew(layout));
         *x = bx + dx; *y = by + dy;
     };
     auto emit = [&](double tm, int finger, int phase, float x, float y, float force) {

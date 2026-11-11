@@ -479,6 +479,80 @@ static void relaid() {
     }
 }
 
+// The Hex keyboard moved, sized and turned (its view settings): a take written for it still plays
+// every note as written, its bends too (two fingers out of the key, then along its row, which is
+// turned with it: the manifest's "rowTurn"); and one laid out unmoved follows the keys when they move.
+static void hexMoved() {
+    auto hex = controller("hex");
+    if (!hex) return;
+    const char* text =
+        "odo-take/1.1\n"
+        "tempo: 90\n"
+        "controller: patrickreynolds/hex\n"
+        "settings: {\"chromatic\": 1}\n"
+        "score\n"
+        "C4:2(pitch 0 0.5 -0.5 0) E4:2(bend +2 0.2 0.8) G4:2(vib 0.3 5 0.3) D4:1(press 0.3 0.9) A3+E4:2 F4:2(bend -1 0.3 0.7)\n"
+        "end\n";
+    const Json& st = hex->manifest["settings"];
+    struct View { double x, y, s, a; };
+    auto values = [&](const View& w) {
+        std::vector<double> v;
+        for (size_t i = 0; i < st.size(); i++) {
+            std::string id = st[i]["id"].str();
+            v.push_back(id == "viewX" ? w.x : id == "viewY" ? w.y : id == "viewScale" ? w.s : id == "viewTurn" ? w.a : st[i]["default"].num(0));
+        }
+        return v;
+    };
+    const View views[] = {{0, 0, 1, 0}, {0, 0, 1, 90}, {1.5, -2, 0.8, 37}, {-1, 0.5, 1.2, 210}, {0.5, 1, 1.0, 330}, {0, 0, 0.6, 120}};
+    float c[2] = {60, 60};
+    for (const View& w : views) {
+        Take t;
+        std::string err;
+        parse(text, t, &err);
+        Report rep;
+        bool ok = prepare(t, *hex, values(w), 1000, 560, c, &rep);
+        int wrong = 0;
+        for (const auto& p : rep.played) wrong += !p.asWritten();
+        // The bends: C4 up and down half a semitone, E4 up to F#4, F4 down to E4 (within a tenth of a
+        // semitone: a key's middle is found by touching it all over, a few dp apart).
+        float cLow = 0, cHigh = 0, eHigh = 0, fLow = 0;
+        for (const auto& p : rep.played) {
+            if (p.wanted == 60) { cLow = p.low; cHigh = p.high; }
+            if (p.wanted == 64 && p.high > eHigh) eHigh = p.high;
+            if (p.wanted == 65) fLow = p.low;
+        }
+        CHECK(ok && rep.errors.empty() && wrong == 0 && rep.played.size() == 7,
+              "the Hex moved (%.1f, %.1f), sized %.1f, turned %.0f°: all %zu notes as written (%d not)", w.x, w.y, w.s, w.a, rep.played.size(), wrong);
+        CHECK(std::fabs(cLow - 59.5f) < 0.1f && std::fabs(cHigh - 60.5f) < 0.1f && std::fabs(eHigh - 66) < 0.1f && std::fabs(fLow - 64) < 0.1f,
+              "  turned %.0f°: its bends as written (C4 %.2f..%.2f, E4 up to %.2f, F4 down to %.2f)", w.a, cLow, cHigh, eHigh, fLow);
+    }
+    // Laid out unmoved, then the keyboard moved: its fingers follow (relayout), each on its note's key.
+    Take t;
+    std::string err;
+    parse(text, t, &err);
+    Report rep;
+    prepare(t, *hex, values(views[0]), 1000, 560, c, &rep);
+    for (const View& w : {views[2], views[3]}) {
+        std::vector<double> v = values(w);
+        CHECK(laidOutFor(t, hex->manifest, values(views[0]), 1000, 560) && !laidOutFor(t, hex->manifest, v, 1000, 560),
+              "moving the keyboard is seen as a change of its settings");
+        Take moved = t;
+        CHECK(relayout(moved, *hex, v, 1000, 560, c), "relayout: laid out again on the keyboard turned %.0f°", w.a);
+        mpe::take::Layout lay;
+        lay.scan(*hex, v, 1000, 560, c);
+        int downs = 0, right = 0;
+        std::multiset<float> wanted;
+        for (const Note& n : moved.notes) if (n.kind == On) wanted.insert(std::round(n.pitch));
+        for (const Touch& e : moved.touches) {
+            if (e.phase != Down) continue;
+            downs++;
+            Note got;
+            if (lay.probe(e.x * 1000, e.y * 560, 0.6f, &got) && wanted.count(std::round(got.pitch))) right++;
+        }
+        CHECK(downs > 0 && right == downs, "  turned %.0f°: each finger lands on a key of its notes (%d of %d)", w.a, right, downs);
+    }
+}
+
 static void examples() {
     auto grid = controller("grid");
     if (!grid) return;
@@ -664,6 +738,7 @@ static void presets() {
 
 int main() {
     relaid();
+    hexMoved();
     curves();
     fileRoundTrip();
     recordAndPlay();

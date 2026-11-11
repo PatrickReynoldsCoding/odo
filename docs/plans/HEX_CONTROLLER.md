@@ -156,6 +156,49 @@ hard. Pressing a finger harder spreads it. So **Press harder** (Touch):
 Inside a key, its height is still the dynamics and its place across the tone, as on the Grid;
 Press harder adds to the pressure from there.
 
+## Moving the keyboard (Hex 2.1.0)
+
+The rows run on without end both ways, and the whole keyboard can be moved, sized and turned. This
+takes the place of Keys top to bottom and Key size, which are no longer on the rail.
+
+Words, the same in both apps (they come from the manifest through `mpe::rail`, and the controller
+draws its own):
+
+- **Layout → Move the keyboard (two fingers)**: a switch. While it is on, a finger anywhere on the
+  keys drags them; two fingers pinch them bigger or smaller and twist them round, the point between
+  the fingers staying under them. Nothing plays. A third finger does nothing. Across the top of the
+  keys: **Moving the keyboard** / *One finger drags it; two size and turn it*, with **Put back** and
+  **Done** (Done turns the switch off). A frame shows round the keys.
+- **Layout → Put the keyboard back**: unmoved, unsized, unturned, the rows unscrolled (and the old
+  Keys top to bottom and Key size back to 5 and 100%).
+- **Controls → Move button**: Off / Top / Bottom (Top at first, in the strip with Latch and the
+  Dynamics fader). The button reads **Move**, *on* or *off*; a tap turns moving on or off while
+  playing. Two fingers move the button itself, as the other controls (Moved control 10, `place9`).
+- The turn snaps to every 30° (square to the screen, or along a row of hexagons) within 4°; the size
+  goes from 0.35 to 3 times.
+
+Where it is is kept as the keyboard's own hidden settings, so a preset or a take keeps it exactly:
+`viewX`, `viewY` (moved across and up, upright, in keys at their unsized pitch), `viewScale`,
+`viewTurn` (degrees, clockwise on the screen). They are saved when the last finger lifts.
+
+How it works (hex.c, "the view"): a finger on a key is kept where it is on the keys as they lie
+unmoved (the plane): L = M + T + s R(a) (P - M) about the middle of each half's room. So how a key
+plays, its dynamics (up/down in the key) and tone, and the two-finger slide along its row, are the
+same however the keyboard lies; only where it is on the screen changes. A key is any row and any
+place in it (k = row * 1024 + place + 512); keys that reach past the room into the strips beside are
+covered. The scroll bar still scrolls the rows (sized with the keyboard); its octave marks show only
+while the rows are level or upside down.
+
+Old presets and takes: `cols` and `squareSize` are still read (hidden) and still set the keys' first
+size, so a preset made before plays exactly as it did; the view sizes it from there.
+
+Takes: a take is laid out by touching the keyboard as set (the view too), so a take on a moved
+keyboard plays every note as written, and the apps lay a playing take out again when the keyboard is
+moved (it is a change of settings). For bends with two fingers, a take finds a key's row from its
+manifest's `"rowTurn": "viewTurn"` (CONTROLLER_FORMAT.md), takes each key's middle by touching to
+its edges (a probe's middle is a few dp out on a turned key), and keeps a finger's place inside the
+key when it is turned part way.
+
 ## Scala files
 
 Tuning → **Scala file**, then **Open a Scala file…** (Notes, in both apps). The app reads the `.scl`
@@ -174,9 +217,13 @@ with the engine's `mpe::scala` and gives it to the keyboard as settings (CONTROL
 ## Not done yet
 
 - **Lumatone `.ltn` mappings**: a key-by-key layout, not a tuning; not read.
-- **The tilt**: the Lumatone's rows rise, and Hexatone turns its keyboard by any angle; here the
-  rows are level, so Bosanquet's rows (a sharp up to the right, a flat up to the left) do not climb
-  and it does not scroll: its range is the keys across a row (Keys top to bottom, up to 16).
+- **The tilt**: the Lumatone's rows rise; here the keyboard can be turned by any angle (Move the
+  keyboard), but Bosanquet's rows (a sharp up to the right, a flat up to the left) still do not
+  climb, so it does not scroll: move the keyboard along its rows instead.
+- **Moving the keyboard**: checked in engine tests (two fingers size and turn it, one drags it, no
+  note plays; notes, dynamics and the two-finger slide the same turned) and desktop screenshots; not
+  by hand on a touch screen. A take bends a little off on a key cut by the screen's edge when it is
+  the only one of its note on the screen (sized up a lot).
 - **Touch size on Android**: Compose does not give the touch's major axis; odo could send
   `MotionEvent.getTouchMajor` as `size` from a pointer interop filter.
 - **Presets**: neither app has a built-in preset with the Hex keyboard yet.

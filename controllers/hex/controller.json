@@ -1,9 +1,9 @@
 {
   "format": 1,
   "id": "patrickreynolds/hex",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "name": "Hex",
-  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, bend the note toward the keys either way (snapped to points if you like); press harder for pressure",
+  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, bend the note toward the keys either way (snapped to points if you like); press harder for pressure. Move the keyboard with two fingers: drag it, size it, turn it",
   "author": "Patrick Reynolds",
   "licence": "MIT",
   "needs": {
@@ -17,6 +17,7 @@
   ],
   "partsFrom": "split",
   "bend": "two fingers out",
+  "rowTurn": "viewTurn",
   "arp": "app",
   "settings": [
     {
@@ -27,7 +28,8 @@
       "max": 16,
       "step": 1,
       "default": 5,
-      "group": "Layout"
+      "group": "Layout",
+      "hidden": true
     },
     {
       "id": "layout",
@@ -172,7 +174,8 @@
       "max": 100,
       "step": 5,
       "default": 100,
-      "group": "Layout"
+      "group": "Layout",
+      "hidden": true
     },
     {
       "id": "spacing",
@@ -2375,6 +2378,87 @@
       "showIf": {
         "slideSnap": true
       }
+    },
+    {
+      "id": "moveKeys",
+      "name": "Move the keyboard (two fingers)",
+      "type": "switch",
+      "default": false,
+      "group": "Layout"
+    },
+    {
+      "id": "viewReset",
+      "name": "Put the keyboard back",
+      "type": "switch",
+      "default": false,
+      "group": "Layout"
+    },
+    {
+      "id": "viewX",
+      "name": "Keyboard moved across (keys)",
+      "type": "number",
+      "min": -150,
+      "max": 150,
+      "step": 0,
+      "default": 0,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "viewY",
+      "name": "Keyboard moved up (keys)",
+      "type": "number",
+      "min": -150,
+      "max": 150,
+      "step": 0,
+      "default": 0,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "viewScale",
+      "name": "Keyboard size",
+      "type": "number",
+      "min": 0.35,
+      "max": 3,
+      "step": 0,
+      "default": 1,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "viewTurn",
+      "name": "Keyboard turned (degrees)",
+      "type": "number",
+      "min": 0,
+      "max": 360,
+      "step": 0,
+      "default": 0,
+      "hidden": true,
+      "group": "Layout"
+    },
+    {
+      "id": "sideMove",
+      "name": "Move button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Top",
+        "Bottom"
+      ],
+      "default": 1,
+      "group": "Controls"
+    },
+    {
+      "id": "place9",
+      "name": "Moved control 10",
+      "type": "number",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1,
+      "default": 0,
+      "hidden": true,
+      "group": "Controls"
     }
   ]
 }

@@ -15,10 +15,16 @@
  *
  * Laid out as the Grid is: upright, rows of keys across, each row half a key to the right of the one
  * below (on an even row: rows are counted from 0, the bottom one unscrolled), drawn a quarter turned
- * (Flip 90°: upright). A key k counts along the rows, k = row * cols + place in the row, as the
- * Grid's squares do. In axial terms the key at place c in row r is at q = c - floor(r / 2): the key
+ * (Flip 90°: upright). A key k counts along the rows (kk below: its row and its place in the row),
+ * as the Grid's squares do. In axial terms the key at place c in row r is at q = c - floor(r / 2): the key
  * up to the right of (q, r) is (q, r + 1), so its note is the layout's step up to the right (NE)
  * above it, and the key to its right, (q + 1, r), the step to the right (E) above.
+ *
+ * The rows run on both ways without end, and the keys can be moved, sized and turned as a whole (the
+ * view, below: "Move the keyboard (two fingers)", or the Move button): every finger on a key is kept
+ * where it is on the keys as they lie unmoved (the plane), so how a key plays, its dynamics and the
+ * slide along its row, is the same however the keyboard lies on the screen. Key k is (row, place)
+ * packed: k = row * KSTRIDE + place + KOFF (kk, kr, kc), places from -KOFF on.
  */
 #define KEYS_HEX 1
 #define CELL "key"
@@ -26,15 +32,21 @@
 #define KEYS_MAX_COLS 16
 /* Its own settings, after the Grid's (the manifest lists them in this order, at the end). */
 #define SCALA_MAX 128           /* tuning.h's HT_MAX_N; the manifest's "scala" max */
+/* The view (moving the keyboard): its mode, put back, then where it is (hidden): moved by so many keys
+   across and up (upright, at its size before it is sized), its size and its turn (degrees, clockwise
+   on the screen); the Move button's side, and its own moved place. */
 #define KEYS_EXTRA_SETTINGS S_HEX_LAYOUT, S_TUNING, S_STEP_E, S_STEP_NE, S_PRESS, S_SCALA, S_SCALA1, \
-                            S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1, S_SNAP, S_SNAP_POINTS,
+                            S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1, S_SNAP, S_SNAP_POINTS, \
+                            S_MOVE_KEYS, S_VIEW_RESET, S_VIEW_X, S_VIEW_Y, S_VIEW_SCALE, S_VIEW_TURN, S_SIDE_MOVE, S_PLACE9,
 /* Two fingers to slide: a finger's second (its id, 0: none, and where it is), and its slide: 0 none,
    1 two fingers in its key, 2 sliding (the two have left the key; one finger plays it on). */
 #define KEYS_FINGER_EXTRA int mate, slide; float mx, my, held;
 /* A Scala file's tuning is built again when its settings (or the tuning) change. */
 static int scala_dirty = 1;
-#define KEYS_ON_SETTING(i) do { if ((i) == S_TUNING || (i) >= S_SCALA) scala_dirty = 1; } while (0)
-#define KEYS_EXTRA_DEFAULTS [S_STEP_E] = 2, [S_STEP_NE] = 7, [S_PRESS] = 1, [S_SNAP_POINTS] = 4
+static int view_back;           /* Put the keyboard back: asked, done in tick() (outside the host's call) */
+#define KEYS_ON_SETTING(i) do { if ((i) == S_TUNING || ((i) >= S_SCALA && (i) <= S_SCALA_LAST)) scala_dirty = 1; \
+                                if ((i) == S_VIEW_RESET && set_[i] != 0) view_back = 1; } while (0)
+#define KEYS_EXTRA_DEFAULTS [S_STEP_E] = 2, [S_STEP_NE] = 7, [S_PRESS] = 1, [S_SNAP_POINTS] = 4, [S_VIEW_SCALE] = 1, [S_SIDE_MOVE] = 1
 
 #include "../grid/grid.c"
 #include "tuning.h"
@@ -80,6 +92,13 @@ static void steps(int* e, int* d) {
     else { *e = se; *d = sne; }
 }
 
+/* Key k: its row and its place in the row (any, from -KOFF on), packed. */
+#define KSTRIDE 1024
+#define KOFF 512
+static int kk(int r, int c) { return r * KSTRIDE + c + KOFF; }
+static int kr(int k) { return floordiv(k, KSTRIDE); }
+static int kc(int k) { return floormod(k, KSTRIDE) - KOFF; }
+
 static int note_rc(int r, int c) {
     int e, d;
     steps(&e, &d);
@@ -88,7 +107,7 @@ static int note_rc(int r, int c) {
 static float pitch_of(int note) { return (float)ht_pitch(tuning(), key(), key_step(), note); }
 /* -1 for a key whose pitch MIDI can't play. */
 static int note_of(int k) {
-    int note = note_rc(floordiv(k, cols), floormod(k, cols));
+    int note = note_rc(kr(k), kc(k));
     float p = pitch_of(note);
     return p < 0 || p > 127 ? -1 : note;
 }
@@ -120,7 +139,9 @@ static int demo_note(void) {
 #define SQRT3_2 0.8660254f
 /* A row is cols keys and half a key (every other row sits half a key over), and the spacing; rows
    are closer than keys across, as hexagons nest. */
+static float ax0, ax1 = 400;            /* the keys' room across (upright), between the side strips */
 static void fit(float gx, float gw) {
+    ax0 = gx; ax1 = gx + gw;
     float g = clampf((float)set_[S_SPACING] / 100.0f, 0.02f, 0.3f);
     float size = clampf((float)set_[S_SIZE] / 100.0f, 0.5f, 1);
     cell = size * gw / ((float)cols + 0.5f + g);
@@ -128,6 +149,69 @@ static void fit(float gx, float gw) {
     left = gx + (gw - (cell * ((float)cols + 0.5f) + gap)) / 2 + gap;
     row_h = cell * SQRT3_2;
 }
+
+/* ---- the view: the keyboard moved, sized and turned ---------------------------------------------- */
+/* The keys lie on the plane as they always have (the Grid's layout, rows without end); the view puts
+   the plane on the screen: about the middle of each half's room M, moved by T (upright, in keys at
+   their unsized pitch), sized by s and turned by a. A point P of the plane is on the screen (upright)
+   at  L = M + T + s R(a) (P - M). Drawn through the moved controls' transform (xf). */
+#define VIEW_MIN 0.35f
+#define VIEW_MAX 3.0f
+#define VIEW_PAN 150.0f                   /* keys, either way */
+static float view_s(void) { return clampf((float)set_[S_VIEW_SCALE], VIEW_MIN, VIEW_MAX); }
+static float view_a(void) { return (float)set_[S_VIEW_TURN] * 3.14159265f / 180; }
+static int view_moved(void) {
+    return set_[S_VIEW_X] != 0 || set_[S_VIEW_Y] != 0 || view_s() != 1 || set_[S_VIEW_TURN] != 0;
+}
+static int moving(void) { return set_[S_MOVE_KEYS] != 0; }
+static void view_mid(int h, float* mx, float* my) {
+    const Half* a = &halves[h < nhalves ? h : 0];
+    *mx = (ax0 + ax1) / 2; *my = (a->top + a->bot) / 2;
+}
+/* The plane to the screen (upright), on half h; and back. */
+static void plane_to_screen(int h, float px, float py, float* x, float* y) {
+    if (!view_moved()) { *x = px; *y = py; return; }
+    float mx, my, s = view_s(), a = view_a(), c = cosf_(a), n = sinf_(a);
+    view_mid(h, &mx, &my);
+    float dx = px - mx, dy = py - my;
+    *x = mx + (float)set_[S_VIEW_X] * cell + s * (dx * c - dy * n);
+    *y = my + (float)set_[S_VIEW_Y] * cell + s * (dx * n + dy * c);
+}
+static void screen_to_plane(int h, float x, float y, float* px, float* py) {
+    if (!view_moved()) { *px = x; *py = y; return; }
+    float mx, my, s = view_s(), a = view_a(), c = cosf_(a), n = sinf_(a);
+    view_mid(h, &mx, &my);
+    float dx = (x - mx - (float)set_[S_VIEW_X] * cell) / s, dy = (y - my - (float)set_[S_VIEW_Y] * cell) / s;
+    *px = mx + dx * c + dy * n;
+    *py = my - dx * n + dy * c;
+}
+/* Drawing on half h's plane: through xf, as a moved control is drawn (none while it is not moved). */
+static SideRect view_rect;
+static void view_xf(int h) {
+    if (!view_moved()) { xf = 0; return; }
+    const Half* a = &halves[h < nhalves ? h : 0];
+    float mx, my;
+    view_mid(h, &mx, &my);
+    float px = mx + (float)set_[S_VIEW_X] * cell, py = my + (float)set_[S_VIEW_Y] * cell;
+    SideRect r = {C_COUNT, ax0, a->top, ax1 - ax0, a->bot - a->top, 1, tx(px, py), ty(px, py), view_s(), view_a()};
+    view_rect = r;
+    xf = &view_rect;
+}
+/* A touch on the current half's keys (upright) to its plane: none outside the keys' room. */
+static int to_plane(float* x, float* y) {
+    if (*x < ax0 || *x > ax1) return 0;
+    screen_to_plane(half_index(), *x, *y, x, y);
+    return 1;
+}
+/* A finger already on a key (or the second of two in one) moving: on its own half's plane. */
+static void finger_to_plane(int id, float* x, float* y) {
+    for (int k = 0; k < MAX_FINGERS; k++) {
+        const Finger* f = &fingers[k];
+        if (f->used && f->n != DEMO_N && (f->id == id || f->mate == id)) { screen_to_plane(f->half, *x, *y, x, y); return; }
+    }
+}
+/* The scroll bar drags the rows as the screen shows them: sized, and the other way turned over. */
+static float bar_scale(void) { return cosf_(view_a()) < -0.1f ? -view_s() : view_s(); }
 
 /* The scroll goes as far as keeps the note in the middle of the half inside MIDI's notes. Straight
    up, two rows climb d + (d - e) steps; a layout whose rows do not climb (Bosanquet's in 12: up to
@@ -157,15 +241,17 @@ static float key_cy(int r) {
     float f = ((float)r - hv->pos + 0.5f) * row_h;
     return flipped_y() ? hv->top + f : hv->bot - f;
 }
-/* Split, a row is there only when it is wholly on its side of the line (hexagons reach past their
-   row's pitch). */
-static int row_shown(int r) {
-    if (nhalves < 2) return 1;
-    float cy = key_cy(r), R = key_w() / 1.7320508f;
-    return cy - R >= hv->top - 0.5f && cy + R <= hv->bot + 0.5f;
+/* Split, a key is there only when it is wholly on its side of the line (hexagons reach past their
+   row's pitch); drawn (seen) only if some of it is in the keys' room. */
+static int key_shown(int r, int c, int seen) {
+    if (nhalves < 2 && !seen) return 1;
+    float x, y, R = key_w() / 1.7320508f * view_s();
+    plane_to_screen(half_index(), key_cx(r, c), key_cy(r), &x, &y);
+    if (nhalves > 1 && (y - R < hv->top - 0.5f || y + R > hv->bot + 0.5f)) return 0;
+    return !seen || (x + R > ax0 && x - R < ax1 && y + R > hv->top && y - R < hv->bot);
 }
-static float square_x(int k) { return key_cx(floordiv(k, cols), floormod(k, cols)) - key_w() / 2; }
-static float square_y(int k) { return key_cy(floordiv(k, cols)) - key_w() / 2; }
+static float square_x(int k) { return key_cx(kr(k), kc(k)) - key_w() / 2; }
+static float square_y(int k) { return key_cy(kr(k)) - key_w() / 2; }
 
 static int column_at(float x) {
     int c = (int)floorf_((x - left + gap / 2) / cell);
@@ -176,13 +262,13 @@ static int column_at(float x) {
    the keys' edges. */
 static int square_at(float x, float y) {
     float rf = (flipped_y() ? (y - hv->top) : (hv->bot - y)) / row_h + hv->pos - 0.5f;
-    int r0 = (int)floorf_(rf), best = -100000;
+    int r0 = (int)floorf_(rf), best = NO_KEY;
     float bd = cell * cell * 0.36f;              /* within 0.6 of a key of its middle */
     for (int r = r0 - 1; r <= r0 + 2; r++) {
         int c = roundi((x - left - key_w() / 2) / cell - 0.5f * (float)floormod(r, 2));
-        if (c < 0 || c >= cols || !row_shown(r)) continue;
+        if (c < -KOFF || c >= KOFF || !key_shown(r, c, 0)) continue;
         float dx = x - key_cx(r, c), dy = y - key_cy(r), dd = dx * dx + dy * dy;
-        if (dd < bd) { bd = dd; best = r * cols + c; }
+        if (dd < bd) { bd = dd; best = kk(r, c); }
     }
     return best;
 }
@@ -328,12 +414,28 @@ static void draw_keys(const Theme* th) {
     for (int h = 0; h < nhalves; h++) {
         hv = &halves[h];
         int ks = key_step();
-        int r0 = (int)floorf_(hv->pos) - 2, r1 = (int)floorf_(hv->pos + hv->shown) + 2;
+        /* The rows and places the half's room shows: its corners on the plane. */
+        float lo_x = 1e9f, hi_x = -1e9f, lo_r = 1e9f, hi_r = -1e9f;
+        for (int j = 0; j < 4; j++) {
+            float px, py;
+            screen_to_plane(h, j & 1 ? ax1 : ax0, j & 2 ? hv->bot : hv->top, &px, &py);
+            float rf = (flipped_y() ? (py - hv->top) : (hv->bot - py)) / row_h + hv->pos - 0.5f;
+            if (px < lo_x) lo_x = px;
+            if (px > hi_x) hi_x = px;
+            if (rf < lo_r) lo_r = rf;
+            if (rf > hi_r) hi_r = rf;
+        }
+        int r0 = (int)floorf_(lo_r) - 2, r1 = (int)floorf_(hi_r) + 2;
+        int c0 = (int)floorf_((lo_x - left) / cell) - 2, c1 = (int)floorf_((hi_x - left) / cell) + 2;
+        if (c0 < -KOFF) c0 = -KOFF;
+        if (c1 > KOFF - 1) c1 = KOFF - 1;
+        if (r1 - r0 > 400) r1 = r0 + 400;
+        view_xf(h);
         for (int r = r0; r <= r1; r++) {
             float cy = key_cy(r);
-            if (!row_shown(r) || cy - R > hv->bot || cy + R < hv->top) continue;
-            for (int c = 0; c < cols; c++) {
-                int k = r * cols + c, note = note_of(k);
+            for (int c = c0; c <= c1; c++) {
+                if (!key_shown(r, c, 1)) continue;
+                int k = kk(r, c), note = note_of(k);
                 if (note < 0) continue;
                 float cx = key_cx(r, c);
                 int root = floormod(note - ks, n) == 0;
@@ -379,12 +481,17 @@ static void draw_keys(const Theme* th) {
                 }
             }
         }
+        xf = 0;
     }
     draw_slides(th);
     hv = &halves[0];
+    /* The rows run on past the keys' room: what reaches past it, into the strips beside, is covered. */
+    unsigned bg = flat ? WHITE : th->background;
+    if (ax0 > 0.5f) g_rect(-2, -2, ax0 + 2, H + 4, 0, bg, 0, 0);
+    if (ax1 < W - 0.5f) g_rect(ax1, -2, W - ax1 + 2, H + 4, 0, bg, 0, 0);
     if (nhalves > 1) {
         float y = (halves[1].bot + halves[0].top) / 2;
-        g_line(left - gap / 2, y, left + cell * ((float)cols + 0.5f) - gap / 2, y, mesh_alpha(flat ? BLACK : th->hot, 0.6f), 2);
+        g_line(ax0 + gap / 2, y, ax1 - gap / 2, y, mesh_alpha(flat ? BLACK : th->hot, 0.6f), 2);
     }
 }
 
@@ -398,12 +505,22 @@ static void draw_bar(const Theme* th) {
         hv = &halves[h];
         int ks = key_step();
         g_rect(bar_x + 3, hv->top + 4, BAR - 6, hv->bot - hv->top - 8, 8, flat ? WHITE : mesh_alpha(th->square, 0.9f), mesh_alpha(ink, 0.35f), 1);
-        int r0 = (int)floorf_(hv->pos) - 1, r1 = (int)floorf_(hv->pos + hv->shown) + 1;
+        /* Turned part way, the rows do not cross the bar: no marks. */
+        float sn = sinf_(view_a());
+        if (absf(sn) > 0.02f) continue;
+        float pt, pb, px;
+        screen_to_plane(h, (ax0 + ax1) / 2, hv->top, &px, &pt);
+        screen_to_plane(h, (ax0 + ax1) / 2, hv->bot, &px, &pb);
+        if (pt > pb) { float t = pt; pt = pb; pb = t; }
+        float ra = (flipped_y() ? (pt - hv->top) : (hv->bot - pt)) / row_h + hv->pos, rb = (flipped_y() ? (pb - hv->top) : (hv->bot - pb)) / row_h + hv->pos;
+        int r0 = (int)floorf_(ra < rb ? ra : rb) - 1, r1 = (int)floorf_(ra < rb ? rb : ra) + 1;
+        if (r1 - r0 > 400) r1 = r0 + 400;
         for (int r = r0; r <= r1; r++) {
             int root = -1;
-            for (int c = 0; c < cols; c++) { int note = note_of(r * cols + c); if (note >= 0 && floormod(note - ks, n) == 0) { root = note; break; } }
+            for (int c = 0; c < cols; c++) { int note = note_of(kk(r, c)); if (note >= 0 && floormod(note - ks, n) == 0) { root = note; break; } }
             if (root < 0) continue;
-            float y = key_cy(r);
+            float x, y;
+            plane_to_screen(h, key_cx(r, cols / 2), key_cy(r), &x, &y);
             if (y < hv->top + 10 || y > hv->bot - 10) continue;
             unsigned c = note_colour(root);
             unsigned mark = c && !flat ? c : ink;
@@ -514,6 +631,7 @@ static void draw_slides(const Theme* th) {
         Finger* f = &fingers[k];
         if (!f->used || f->n == DEMO_N || !f->slide) continue;
         hv = &halves[f->half < nhalves ? f->half : 0];
+        view_xf(f->half);
         float cx = key_mx(f), cy = key_my(f), w = key_w();
         if (f->slide == 1) {
             hexagon(cx, cy, w + 10, 0, hot, 3);
@@ -532,6 +650,7 @@ static void draw_slides(const Theme* th) {
         }
         g_circle(cx + t * cell, cy, w * 0.14f, mesh_alpha(hot, 0.85f), eink ? WHITE : th->background, 2);
     }
+    xf = 0;
     hv = &halves[0];
 }
 
@@ -722,4 +841,131 @@ static void ed_touch(int id, int phase, float x, float y) {
         return;
     }
     ed_dragging = 1; ed_from = y; ed_scroll0 = ed_scroll;
+}
+
+/* ---- moving the keyboard ------------------------------------------------------------------------ */
+/* While "Move the keyboard (two fingers)" is on (the rail's Layout, or the Move button), a finger
+   anywhere on the keys drags them, and two pinch them bigger or smaller and twist them round, the
+   point between the fingers staying under them; nothing plays. The view is kept (in presets and takes
+   too) when the last finger lifts. A third finger does nothing. */
+enum { K_VIEW_DONE = 70, K_VIEW_BACK };
+static struct { int n, id[2], half; float x[2], y[2], bx[2], by[2], t0x, t0y, s0, a0; } vg;
+
+/* From the fingers as they are now and the view as it is. */
+static void view_begin(void) {
+    for (int i = 0; i < vg.n; i++) { vg.bx[i] = vg.x[i]; vg.by[i] = vg.y[i]; }
+    vg.t0x = (float)set_[S_VIEW_X] * cell; vg.t0y = (float)set_[S_VIEW_Y] * cell;
+    vg.s0 = view_s(); vg.a0 = view_a();
+}
+
+static void view_apply(void) {
+    const float PI = 3.14159265f;
+    float pmx = vg.bx[0], pmy = vg.by[0], qmx = vg.x[0], qmy = vg.y[0], ds = 1, da = 0;
+    if (vg.n > 1) {
+        float d0x = vg.bx[1] - vg.bx[0], d0y = vg.by[1] - vg.by[0], d1x = vg.x[1] - vg.x[0], d1y = vg.y[1] - vg.y[0];
+        float l0 = __builtin_sqrtf(d0x * d0x + d0y * d0y), l1 = __builtin_sqrtf(d1x * d1x + d1y * d1y);
+        if (l0 > 12) ds = l1 / l0;
+        if (l0 > 12 && l1 > 12) da = atan2f_(d1y, d1x) - atan2f_(d0y, d0x);
+        pmx = (vg.bx[0] + vg.bx[1]) / 2; pmy = (vg.by[0] + vg.by[1]) / 2;
+        qmx = (vg.x[0] + vg.x[1]) / 2; qmy = (vg.y[0] + vg.y[1]) / 2;
+    }
+    float s = clampf(vg.s0 * ds, VIEW_MIN, VIEW_MAX);
+    ds = s / vg.s0;
+    /* Its turn, in degrees: square to the screen, or along a row of the hexagons, when nearly so. */
+    float deg = (vg.a0 + da) * 180 / PI;
+    deg -= 360 * floorf_(deg / 360);
+    float q = 30 * floorf_(deg / 30 + 0.5f);
+    if (absf(deg - q) < 4) deg = q;
+    if (deg >= 359.95f) deg = 0;
+    da = deg * PI / 180 - vg.a0;
+    /* The point of the plane under the fingers' middle when they came down stays under it now. */
+    float mx, my, c = cosf_(da), n = sinf_(da);
+    view_mid(vg.half, &mx, &my);
+    float vx = pmx - mx - vg.t0x, vy = pmy - my - vg.t0y;
+    float px = qmx - mx - ds * (vx * c - vy * n), py = qmy - my - ds * (vx * n + vy * c);
+    set_[S_VIEW_X] = clampf(px / cell, -VIEW_PAN, VIEW_PAN);
+    set_[S_VIEW_Y] = clampf(py / cell, -VIEW_PAN, VIEW_PAN);
+    set_[S_VIEW_SCALE] = s;
+    set_[S_VIEW_TURN] = deg;
+    dirty = 1;
+}
+
+static void view_keep(void) {
+    keep(S_VIEW_X, set_[S_VIEW_X]); keep(S_VIEW_Y, set_[S_VIEW_Y]);
+    keep(S_VIEW_SCALE, set_[S_VIEW_SCALE]); keep(S_VIEW_TURN, set_[S_VIEW_TURN]);
+}
+
+/* Put the keyboard back: unmoved, its keys their first size (the old Keys top to bottom and Key size
+   too, which a preset from before the view may have set), its rows unscrolled. */
+static void view_put_back(void) {
+    keep(S_VIEW_X, 0); keep(S_VIEW_Y, 0); keep(S_VIEW_SCALE, 1); keep(S_VIEW_TURN, 0);
+    keep(S_COLS, 5); keep(S_SIZE, 100);
+    for (int h = 0; h < 2; h++) halves[h].pos = 0;
+    vg.n = 0;
+    layout();
+}
+
+static void view_tick(void) {
+    if (!view_back) return;
+    view_back = 0;
+    view_put_back();
+    keep(S_VIEW_RESET, 0);
+}
+
+static void view_stop(void) { vg.n = 0; }
+
+static int view_find(int id) {
+    for (int i = 0; i < vg.n; i++) if (vg.id[i] == id) return i;
+    return -1;
+}
+
+/* A touch while moving: 1 if it is the view's (x, y upright; sx, sy on the surface). */
+static int view_touch(int id, int phase, float x, float y, float sx, float sy) {
+    if (phase == MESH_DOWN) {
+        if (!moving()) return 0;
+        for (int k = 0; k < nhits; k++) {
+            Hit* t = &hits[k];
+            if (sx < t->x || sx > t->x + t->w || sy < t->y || sy > t->y + t->h) continue;
+            if (t->kind == K_VIEW_DONE) { keep(S_MOVE_KEYS, 0); vg.n = 0; }
+            else if (t->kind == K_VIEW_BACK) view_put_back();
+            else continue;
+            if (nspent < MAX_FINGERS) spent[nspent++] = id;
+            return 1;
+        }
+        if (vg.n >= 2) { if (nspent < MAX_FINGERS) spent[nspent++] = id; return 1; }
+        if (vg.n == 0) { int h = half_at(y); vg.half = h < 0 ? 0 : h; }
+        vg.id[vg.n] = id; vg.x[vg.n] = x; vg.y[vg.n] = y; vg.n++;
+        view_begin();
+        return 1;
+    }
+    int i = view_find(id);
+    if (i < 0) return 0;
+    if (phase == MESH_MOVE) {
+        vg.x[i] = x; vg.y[i] = y;
+        if (moving()) view_apply();
+        return 1;
+    }
+    for (int j = i; j < vg.n - 1; j++) { vg.id[j] = vg.id[j + 1]; vg.x[j] = vg.x[j + 1]; vg.y[j] = vg.y[j + 1]; }
+    vg.n--;
+    if (vg.n > 0) view_begin();
+    else view_keep();
+    return 1;
+}
+
+/* While moving: a frame round the keys, and what to do, with Put back and Done. */
+static void view_draw(const Theme* th) {
+    if (!moving() || editing() || note_editing()) return;
+    nhits = 0;
+    unsigned ink = eink ? BLACK : th->light, hot = eink ? BLACK : th->hot;
+    g_rect(ax0 + 3, 3, ax1 - ax0 - 6, H - 6, 14, 0, mesh_alpha(hot, 0.8f), 3);
+    /* Across the top of the keys' room on the screen. */
+    float rx = turned ? 0 : ax0, rw = turned ? SW : ax1 - ax0, top = turned ? ax0 : 0;
+    float bw = rw - 24 < 560 ? rw - 24 : 560, bh = 52, bx = rx + (rw - bw) / 2, by = top + 12;
+    mesh_rect(bx, by, bw, bh, 12, eink ? WHITE : mesh_alpha(th->background, 0.92f), mesh_alpha(hot, 0.8f), 1.5f);
+    float cw = 80, cb = 96, cy = by + 10, ch = bh - 20;
+    chip(bx + bw - 10 - cw, cy, cw, ch, "Done", 1, th, K_VIEW_DONE, 0);
+    chip(bx + bw - 16 - cw - cb, cy, cb, ch, "Put back", 0, th, K_VIEW_BACK, 0);
+    int wide = bw - 40 - cw - cb > 230;
+    mesh_text(bx + 14, by + 22, wide ? 14 : 12, ink, MESH_TEXT_BOLD, "Moving the keyboard");
+    mesh_text(bx + 14, by + 40, wide ? 11 : 9, mesh_alpha(ink, 0.8f), 0, wide ? "One finger drags it; two size and turn it" : "Drag; pinch; twist");
 }

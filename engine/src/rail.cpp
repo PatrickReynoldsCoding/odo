@@ -187,6 +187,19 @@ bool shown(const Json& manifest, const Json& s, const std::vector<double>& value
 std::vector<Group> groups(const Json& manifest, const std::vector<double>& values) {
     std::vector<Group> out;
     const Json& ss = manifest["settings"];
+    // Groups in the order of their first setting, hidden or not (a group keeps its place when its
+    // first setting is hidden: the Hex's Layout, whose Keys top to bottom is); one with none shown
+    // at all is left out.
+    std::vector<std::string> order;
+    for (size_t i = 0; i < ss.size(); i++) {
+        std::string g = ss[i]["group"].str();
+        if (std::find(order.begin(), order.end(), g) == order.end()) order.push_back(g);
+    }
+    for (const std::string& g : order) {
+        bool any = false;
+        for (size_t i = 0; i < ss.size() && !any; i++) any = ss[i]["group"].str() == g && !ss[i]["hidden"].boolean();
+        if (any) out.push_back({g, {}, 0});
+    }
     for (size_t i = 0; i < ss.size(); i++) {
         const Json& s = ss[i];
         if (s["hidden"].boolean()) continue;
