@@ -54,7 +54,8 @@ struct Effects {
 
 struct Preset {
     std::string name;
-    int split = 0;             // how the screen is split into sides: odo for computers' kSplits index; 0 one side
+    int split = 0;             // how the screen is split into sides: the apps' splits' index; 0 one side
+    std::vector<double> splitAt;   // where its dividers are, 0..1 across then down (empty: evenly)
     std::vector<Side> sides;   // 1 to kMaxSides
     bool layered = false;      // one side's every note plays its first two parts
     bool hasEffects = false;   // false: each app keeps its own

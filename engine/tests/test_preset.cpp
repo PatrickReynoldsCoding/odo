@@ -14,6 +14,8 @@ int main() {
     p.hasEffects = true;
     p.effects.bpm = 96;
     p.effects.delayPingPong = false;
+    p.split = 1;
+    p.splitAt = {0.62};
     Side s;
     s.controller = "patrickreynolds/grid";
     s.settings = mpe::Json::parse(R"({"split": 1, "slide": 0.25, "latch": true})");
@@ -28,6 +30,7 @@ int main() {
     std::string err;
     CHECK(parse(text, q, &err), "what is written reads back (%s)", err.c_str());
     CHECK(q.name == p.name && q.madeBy == p.madeBy, "name and madeBy");
+    CHECK(q.split == 1 && q.splitAt.size() == 1 && near(q.splitAt[0], 0.62), "the split and where its divider is");
     CHECK(q.hasEffects && near(q.effects.bpm, 96) && !q.effects.delayPingPong, "effects");
     CHECK(q.sides.size() == 1 && q.sides[0].controller == "patrickreynolds/grid", "the side's controller");
     CHECK(near(q.sides[0].settings["split"].num(), 1) && near(q.sides[0].settings["slide"].num(), 0.25)

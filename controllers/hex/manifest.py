@@ -26,6 +26,9 @@ for k in ('orientation', 'parts', 'partsFrom'):
 m['bend'] = 'two fingers out'
 m['rowTurn'] = 'viewTurn'
 m['arp'] = g['arp']
+# Each side of a split its own look: the themes in order (Neon, Ember, Ice, Violet), as the Grid's.
+m['sideThemes'] = g['sideThemes']
+m['themeColours'] = g['themeColours']
 
 # Keys top to bottom and Key size are hidden: moving the keyboard (its view, below) sizes it now. They
 # still set the keys' first size, so a preset from before plays as it did.

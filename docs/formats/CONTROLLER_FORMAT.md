@@ -128,6 +128,8 @@ the rest.
 | `parts` | the sounds it plays, by name: one, or the sections of a split |
 | `partsFrom` | optional: the id of a setting that says how many of `parts` it plays now, its value + 1 (a switch: the first part off, the first two on); or a list of ids, one more part for each that is on, up to the first that is off (the Grid's and Hex's `["split", "third"]`: one, two or three keyboards). The MESH gives it that many sounds, and calls `instrument` for each. Without it, every part always |
 | `bend` | optional: `"two fingers out"` if it bends a note only with two fingers in its key slid out of it, then by how far along its row the finger is (the Hex). A take written by hand (`pitch`, `bend`, `vib`) is then played so; without it, by one finger moving toward the notes. |
+| `sideThemes` | optional: for each side of a split (1st, 2nd, 3rd, 4th), the value of its `theme` setting a new side starts with, so the sides of a split stand apart (the Grid: Neon, Ember, Ice, Violet). |
+| `themeColours` | optional: each `theme` option's colour (`RRGGBB`): on a split screen the app's rail takes the colour of the side it changes. |
 | `rowTurn` | optional, with `bend`: the id of a number setting saying how many degrees (clockwise on the screen) the keys' rows are turned from where they lie unturned (the Hex: `"viewTurn"`, its keyboard moved and turned). A take finds a key's row that way. |
 | `drumsFrom` | optional: for each of `parts`, the id of a `switch` the MESH sets on while that part's sound is a drum kit (an instrument in the `drums` group) and off otherwise, when the sound changes and when the controller opens. The touch pad lays out drums on it. Usually `hidden` |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |

@@ -23,6 +23,20 @@
   "bend": "two fingers out",
   "rowTurn": "viewTurn",
   "arp": "app",
+  "sideThemes": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "themeColours": [
+    "23FFD0",
+    "FF8A4C",
+    "7FC4FF",
+    "C58BFF",
+    "FF5FA2",
+    "0E7C66"
+  ],
   "settings": [
     {
       "id": "cols",

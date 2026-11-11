@@ -210,7 +210,8 @@ const Split kSplits[] = {
 };
 constexpr int kSplitCount = int(sizeof kSplits / sizeof kSplits[0]);
 constexpr int kSides = 4;
-constexpr float kGap = 6;              // between two sides
+constexpr float kGap = 3;              // the line between two sides
+constexpr float kDivideGrab = 14;      // a touch this close (points) to a divider drags it, as on the touch pad
 
 // ---- the app -----------------------------------------------------------------------------------
 
@@ -232,6 +233,9 @@ struct App {
         std::vector<double> settings;   // the controller's, by position
         float x = 0, y = 0, w = 0, h = 0;   // its place in the window
         float initW = 0, initH = 0;     // the size its controller was started with
+        // Where it shows: each side's controller is the whole play area (x, y, w, h), and it shows
+        // its own share of it (as the touch pad's two pads show theirs), so a divider slides between.
+        float vx = 0, vy = 0, vw = 0, vh = 0;
         int engineIndex = -1;           // the instrument its part plays now
         // How its parts play, as the preset (or take) on gave them (each part's level, effects,
         // arp): a part plays so while its sound is the one named; otherwise with its sound's own.
@@ -243,6 +247,8 @@ struct App {
     mpe::preset::Effects effects;
     Side sides[kSides];
     int split = 0, active = 0;          // the split, and the side the rail changes
+    // Where the split's dividers are, 0..1: its columns' (left to right), then its rows' (top down).
+    std::vector<double> splitAt;
     int count() const { return kSplits[split].sides; }
     Side& cur() { return sides[active]; }
 
@@ -254,6 +260,7 @@ struct App {
     std::map<std::string, std::map<std::string, double>> saved;
     std::string savedController[kSides], savedSound[kSides], savedMore[kSides][3];
     int savedSplit = 0, savedActive = 0;
+    std::vector<double> savedSplitAt;
     bool savedFullscreen = false;
 
     void loadConfig() {
@@ -276,6 +283,7 @@ struct App {
         layered = j["layered"].boolean();
         if (j["effects"].type == mpe::Json::Object) { hasEffects = true; effects = mpe::preset::effectsFrom(j["effects"]); }
         savedSplit = std::clamp(int(j["split"].num(0)), 0, kSplitCount - 1);
+        for (size_t i = 0; i < j["splitAt"].size() && i < 8; i++) savedSplitAt.push_back(j["splitAt"][i].num(0.5));
         savedActive = std::clamp(int(j["active"].num(0)), 0, kSides - 1);
         railHidden = j["railHidden"].boolean();
         savedFullscreen = j["fullscreen"].boolean();
@@ -290,6 +298,7 @@ struct App {
             p.name = ps[i]["name"].str();
             if (p.name.empty()) continue;
             p.split = std::clamp(int(ps[i]["split"].num(0)), 0, kSplitCount - 1);
+            for (size_t d = 0; d < ps[i]["splitAt"].size() && d < 8; d++) p.splitAt.push_back(ps[i]["splitAt"][d].num(0.5));
             const mpe::Json& sd = ps[i]["sides"];
             for (size_t k = 0; k < sd.size() && k < size_t(kSides); k++) {
                 PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), {sd[k]["sound2"].str(), sd[k]["sound3"].str(), sd[k]["sound4"].str()}, {}, {}};
@@ -306,7 +315,14 @@ struct App {
             for (const auto& sv : kv.second.o) saved[kv.first][sv.first] = sv.second.num();
     }
 
-    static std::string quoted(const std::string& v) {
+    static // A list of numbers as JSON: [0.5, 0.25].
+std::string numbers(const std::vector<double>& v) {
+    std::string out = "[";
+    for (size_t i = 0; i < v.size(); i++) { char b[32]; std::snprintf(b, sizeof b, "%s%.4g", i ? ", " : "", v[i]); out += b; }
+    return out + "]";
+}
+
+std::string quoted(const std::string& v) {
         std::string o = "\"";
         for (char ch : v) { if (ch == '"' || ch == '\\') o += '\\'; o += ch; }
         return o + "\"";
@@ -332,7 +348,7 @@ struct App {
         std::ofstream f(configPath + ".tmp");
         f.precision(17);     // every digit: a strike zone map is a seven-digit number
         f << "{\n  \"controller\": " << quoted(controllerId(0)) << ",\n  \"sound\": " << quoted(soundId(0))
-          << ",\n  \"split\": " << split << ",\n  \"active\": " << active << ",\n  \"sides\": [";
+          << ",\n  \"split\": " << split << ",\n  \"splitAt\": " << numbers(splitAt) << ",\n  \"active\": " << active << ",\n  \"sides\": [";
         for (int k = 0; k < kSides; k++) {
             f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k))
               << ", \"sound2\": " << quoted(moreId(k, 1)) << ", \"sound3\": " << quoted(moreId(k, 2))
@@ -365,7 +381,8 @@ struct App {
         f << "\n  },\n  \"preset\": " << quoted(presetName) << ",\n  \"presets\": [";
         for (size_t i = 0; i < userPresets.size(); i++) {
             const Preset& p = userPresets[i];
-            f << (i ? ",\n    " : "\n    ") << "{\"name\": " << quoted(p.name) << ", \"split\": " << p.split << ", \"sides\": [";
+            f << (i ? ",\n    " : "\n    ") << "{\"name\": " << quoted(p.name) << ", \"split\": " << p.split
+              << ", \"splitAt\": " << numbers(p.splitAt) << ", \"sides\": [";
             for (size_t k = 0; k < p.sides.size(); k++) {
                 const PresetSide& s = p.sides[k];
                 f << (k ? ", " : "") << "{\"controller\": " << quoted(s.controller) << ", \"sound\": " << quoted(s.sound)
@@ -432,7 +449,7 @@ struct App {
     // Android has them. They are kept, and given back when the preset is shared, while its sounds stay.
     struct PresetSide { std::string controller, sound; std::array<std::string, 3> more; std::map<std::string, double> settings;
                         std::vector<mpe::preset::Part> parts; };
-    struct Preset { std::string name; int split = 0; std::vector<PresetSide> sides; bool builtIn = false;
+    struct Preset { std::string name; int split = 0; std::vector<double> splitAt; std::vector<PresetSide> sides; bool builtIn = false;
                     bool layered = false, hasEffects = false; mpe::preset::Effects effects; };
     std::vector<Preset> userPresets;
     std::string presetName;               // the one on view, or ""
@@ -495,6 +512,7 @@ struct App {
         Preset p;
         p.name = name;
         p.split = split;
+        p.splitAt = splitAt;
         // All of it: each sound's effects as they play now (its own, or as set) and the room.
         p.layered = layered; p.hasEffects = true; p.effects = shownEffects();
         for (int k = 0; k < count(); k++) {
@@ -513,6 +531,10 @@ struct App {
     // What plays now is as the preset has it (only the settings it names).
     bool matches(const Preset& p) const {
         if (p.split != split || p.sides.size() != size_t(count())) return false;
+        if (!p.splitAt.empty()) {
+            std::vector<double> want = dividers(split, p.splitAt);
+            for (size_t i = 0; i < want.size() && i < splitAt.size(); i++) if (std::fabs(want[i] - splitAt[i]) > 1e-3) return false;
+        }
         for (int k = 0; k < count(); k++) {
             const PresetSide& s = p.sides[size_t(k)];
             if (s.controller != controllerId(k) || s.sound != soundId(k) || s.more[0] != moreId(k, 1) || s.more[1] != moreId(k, 2) ||
@@ -583,7 +605,9 @@ struct App {
             sd.host.reset();
         }
         for (size_t k = p.sides.size(); k < size_t(kSides); k++) sides[k].parts.clear();
-        setSplit(p.split);
+        setSplit(p.split, false);
+        splitAt = dividers(split, p.splitAt);
+        layoutSides();
         presetName = onView ? p.name : "";
         confirmDelete = false;
         persist = keep;
@@ -652,6 +676,7 @@ struct App {
         f.name = p.name;
         f.madeBy = std::string("odo ") + ODO_DESKTOP_VERSION + " (computer)";
         f.split = p.split;
+        f.splitAt = p.splitAt;
         f.layered = p.layered;
         f.hasEffects = p.hasEffects;
         f.effects = p.effects;
@@ -695,6 +720,7 @@ struct App {
         Preset p;
         p.name = keep ? freeName(f.name) : f.name;
         p.split = std::clamp(f.split, 0, kSplitCount - 1);
+        p.splitAt = f.splitAt;
         p.layered = f.layered;
         p.hasEffects = f.hasEffects;
         p.effects = f.effects;
@@ -852,28 +878,87 @@ struct App {
     // ---- sides ----------------------------------------------------------------------------------
 
     // Where each side is: the window right of the rail, shared as the split says.
+    // A split's columns and rows, and its dividers evenly (the first col-1 across, then row-1 down).
+    static int splitCols(int n) { return kSplits[n].cols; }
+    static int splitRows(int n) { return (kSplits[n].sides + kSplits[n].cols - 1) / kSplits[n].cols; }
+    static std::vector<double> evenly(int n) {
+        std::vector<double> v;
+        for (int c = 1; c < splitCols(n); c++) v.push_back(double(c) / splitCols(n));
+        for (int r = 1; r < splitRows(n); r++) v.push_back(double(r) / splitRows(n));
+        return v;
+    }
+    // The dividers of split n, from `at` if it has as many (else evenly), kept in order and apart.
+    static std::vector<double> dividers(int n, const std::vector<double>& at) {
+        std::vector<double> v = at.size() == evenly(n).size() ? at : evenly(n);
+        int cols = splitCols(n);
+        for (size_t i = 0; i < v.size(); i++) {
+            int first = int(i) < cols - 1 ? 0 : cols - 1, last = int(i) < cols - 1 ? cols - 2 : int(v.size()) - 1;
+            double lo = (int(i) > first ? v[i - 1] : 0) + 0.12, hi = (int(i) < last ? v[i + 1] : 1) - 0.12;
+            v[i] = std::clamp(v[i], std::min(lo, hi), std::max(lo, hi));
+        }
+        return v;
+    }
+
+    // Each side: the whole play area right of the rail, showing its own share of it (the split's
+    // dividers). Its controller keeps its size as a divider moves: more or less of it shows.
     void layoutSides() {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         float ax = railW(), aw = float(ww) - ax, ah = float(wh);
-        const Split& sp = kSplits[split];
-        int cols = sp.cols, rows = (sp.sides + cols - 1) / cols;
-        float cw = (aw - kGap * float(cols - 1)) / float(cols), rh = (ah - kGap * float(rows - 1)) / float(rows);
-        for (int k = 0; k < sp.sides; k++) {
+        int cols = splitCols(split), rows = splitRows(split);
+        splitAt = dividers(split, splitAt);
+        auto edge = [&](int i, int n, bool across) {      // the i-th edge of n, in points
+            if (i <= 0) return across ? ax : 0.f;
+            if (i >= n) return across ? ax + aw : ah;
+            return across ? ax + aw * float(splitAt[size_t(i - 1)]) : ah * float(splitAt[size_t(cols - 1 + i - 1)]);
+        };
+        for (int k = 0; k < count(); k++) {
             Side& s = sides[k];
-            s.x = ax + float(k % cols) * (cw + kGap);
-            s.y = float(k / cols) * (rh + kGap);
-            s.w = cw;
-            s.h = rh;
+            s.x = ax; s.y = 0; s.w = aw; s.h = ah;
+            int c = k % cols, r = k / cols;
+            s.vx = edge(c, cols, true); s.vw = edge(c + 1, cols, true) - s.vx;
+            s.vy = edge(r, rows, false); s.vh = edge(r + 1, rows, false) - s.vy;
         }
     }
 
     int sideAt(float x, float y) const {
         for (int k = 0; k < count(); k++) {
             const Side& s = sides[k];
-            if (x >= s.x - kGap / 2 && x < s.x + s.w + kGap / 2 && y >= s.y - kGap / 2 && y < s.y + s.h + kGap / 2) return k;
+            if (x >= s.vx && x < s.vx + s.vw && y >= s.vy && y < s.vy + s.vh) return k;
         }
         return -1;
+    }
+    // The divider near (x, y), as its index in splitAt, or -1.
+    int dividerAt(float x, float y) const {
+        if (count() < 2) return -1;
+        int cols = splitCols(split);
+        for (int k = 0; k < count(); k++) {
+            const Side& s = sides[k];
+            int c = k % cols, r = k / cols;
+            if (c > 0 && std::fabs(x - s.vx) < kDivideGrab && y >= s.vy && y < s.vy + s.vh) return c - 1;
+            if (r > 0 && std::fabs(y - s.vy) < kDivideGrab && x >= s.vx && x < s.vx + s.vw) return cols - 1 + r - 1;
+        }
+        return -1;
+    }
+    struct DividerDrag { int64_t key = 0; int index = -1; } dividerDrag;
+    // The rail's colour: split, the colour of the side it changes (the first side orange, the second
+    // blue, as the touch pad's two pads), so which side you change shows at a glance.
+    uint32_t sideColour() const { return count() < 2 ? look().parts[0] : sideColourOf(active); }
+    uint32_t sideColourOf(int k) const {
+        if (look().eink) return look().parts[0];
+        // The colour of the side's own look, if its controller says (its manifest's "themeColours",
+        // one a value of its "theme" setting); else the side's part colour.
+        const Side& sd = sides[k];
+        if (sd.host) {
+            const mpe::Json& m = sd.host->manifest();
+            const mpe::Json& st = m["settings"];
+            for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
+                if (st[i]["id"].str() == "theme") {
+                    std::string hex = m["themeColours"][size_t(std::max(0.0, sd.settings[i]))].str();
+                    if (hex.size() == 6) return (uint32_t(std::stoul(hex, nullptr, 16)) << 8) | 0xFFu;
+                }
+        }
+        return look().parts[size_t(k) % 4];
     }
 
     // How many sounds side k's controller plays now: its parts, as many as its "partsFrom" says (a
@@ -925,8 +1010,12 @@ struct App {
         ensureLoading();
     }
 
-    void setSplit(int n) {
-        split = (n % kSplitCount + kSplitCount) % kSplitCount;
+    // fresh: chosen now (not a preset's or last time's): a new side takes its own look (sideThemes).
+    void setSplit(int n, bool fresh = true) {
+        const int before = count();
+        n = (n % kSplitCount + kSplitCount) % kSplitCount;
+        if (n != split) splitAt.clear();         // the new split's dividers evenly
+        split = n;
         for (int k = 0; k < kSides; k++) {
             Side& s = sides[k];
             if (k >= count()) {                  // a side no longer shown: its notes stop
@@ -936,6 +1025,7 @@ struct App {
                 continue;
             }
             if (!s.host) chooseController(k, s.controller);
+            if (fresh && k >= before) sideTheme(k);
             route(k);
             s.initW = s.initH = 0;               // started again, at its new size
         }
@@ -944,6 +1034,23 @@ struct App {
         applySounds();
         ensureLoading();
         saveConfig();
+    }
+
+    // Side k's controller in its own look, if it has looks for sides (its manifest's "sideThemes":
+    // its "theme" setting's value for each side), so the sides of a split stand apart.
+    void sideTheme(int k) {
+        Side& sd = sides[k];
+        if (!sd.host) return;
+        const mpe::Json& m = sd.host->manifest();
+        const mpe::Json& looks = m["sideThemes"];
+        if (looks.size() == 0) return;
+        const mpe::Json& st = m["settings"];
+        for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
+            if (st[i]["id"].str() == "theme") {
+                double v = looks[size_t(k) % looks.size()].num(0);
+                sd.host->setting(int(i), v);
+                keepSetting(k, i, v);
+            }
     }
 
     void setActive(int k) { active = (k % count() + count()) % count(); settingsScroll = 0; saveConfig(); }
@@ -2202,8 +2309,24 @@ struct App {
 
     // A pointer on the play area: down on a side, it plays that side until it lifts.
     void pointer(int64_t key, mpe::ControllerHost::Phase ph, float x, float y, float force) {
+        // A divider: dragged, more of one side shows and less of the other (none plays).
+        if (dividerDrag.index >= 0 && key == dividerDrag.key) {
+            if (ph == mpe::ControllerHost::Move) {
+                int ww, wh;
+                SDL_GetWindowSize(window, &ww, &wh);
+                float ax = railW();
+                bool across = dividerDrag.index < splitCols(split) - 1;
+                splitAt[size_t(dividerDrag.index)] = across ? double((x - ax) / std::max(1.f, float(ww) - ax)) : double(y / std::max(1, wh));
+                layoutSides();
+            } else if (ph == mpe::ControllerHost::Up || ph == mpe::ControllerHost::Cancel) {
+                dividerDrag = DividerDrag();
+                saveConfig();
+            }
+            return;
+        }
         if (ph == mpe::ControllerHost::Down) {
             layoutSides();
+            if (int d = dividerAt(x, y); d >= 0 && dividerDrag.index < 0) { dividerDrag = DividerDrag{key, d}; return; }
             int k = sideAt(x, y);
             if (k < 0 || !sides[k].host) return;
             Pointer p{k, nextFinger++};
@@ -2366,7 +2489,7 @@ struct App {
 
     void drawRail(float h) {
         const tokens::Palette& p = look();
-        draw::Color bg = rgba(p.ink), text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]);
+        draw::Color bg = rgba(p.ink), text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(sideColour());
         draw::Color tile = rgba(p.panel), key = rgba(p.panelHigh), line = rgba(p.line);
         draw::fillRect(renderer, 0, 0, kRail, h, bg);
         if (p.eink) draw::fillRect(renderer, kRail - 2, 0, 2, h, line);
@@ -2527,7 +2650,7 @@ struct App {
         Panel pl = panelLayout();
         if (!pl.open) return;
         const tokens::Palette& p = look();
-        draw::Color text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(p.parts[0]), line = rgba(p.line), bg = rgba(p.ink);
+        draw::Color text = rgba(p.text), dim = rgba(p.textDim), accent = rgba(sideColour()), line = rgba(p.line), bg = rgba(p.ink);
         draw::Color soft = rgba(tokens::alpha(p.line, 0xC0));
         draw::fillRect(renderer, pl.x, pl.y, pl.w, pl.h, rgba(p.panel), tokens::radius::card);
         draw::strokeRect(renderer, pl.x, pl.y, pl.w, pl.h, p.eink ? line : soft, p.eink ? 2 : 1, tokens::radius::card);
@@ -2659,20 +2782,44 @@ struct App {
             any = true;
             SDL_Rect area{int(sd.x), int(sd.y), int(sd.w), int(sd.h)};
             SDL_SetRenderViewport(renderer, &area);
+            SDL_Rect clip{int(sd.vx - sd.x), int(sd.vy - sd.y), int(std::ceil(sd.vw)), int(std::ceil(sd.vh))};
+            SDL_SetRenderClipRect(renderer, &clip);
             draw::list(renderer, sd.host->drawList(), sd.w, sd.h);
             if (player.playing()) draw::list(renderer, player.drawGhosts(k, sd.w, sd.h, ghostStyle()), sd.w, sd.h);
+            SDL_SetRenderClipRect(renderer, nullptr);
         }
         SDL_SetRenderViewport(renderer, nullptr);
-        // The lines between the sides; with the rail out, the side it changes is outlined.
-        for (int k = 0; k < count() && count() > 1; k++) {
-            const Side& sd = sides[k];
-            draw::Color gap = rgba(eink ? look().line : 0x000000FFu);
-            if (sd.x > railW() + 1) draw::fillRect(renderer, sd.x - kGap, sd.y, kGap, sd.h, gap);
-            if (sd.y > 1) draw::fillRect(renderer, sd.x, sd.y - kGap, sd.w, kGap, gap);
-        }
-        if (!railHidden && count() > 1) {
-            const Side& sd = cur();
-            draw::strokeRect(renderer, sd.x + 1, sd.y + 1, sd.w - 2, sd.h - 2, rgba(tokens::alpha(look().parts[0], 0xB0)), 2, 4);
+        // The dividers, as the touch pad's: a line, and a grip to drag it (lit while dragged); with
+        // the rail out, the side it changes outlined in its own colour.
+        if (count() > 1) {
+            const int cols = splitCols(split);
+            const draw::Color ink = rgba(tokens::alpha(look().text, 0x99)), grip = rgba(look().panelHigh);
+            for (int k = 0; k < count(); k++) {
+                const Side& sd = sides[k];
+                const int c = k % cols, r = k / cols;
+                for (int way = 0; way < 2; way++) {
+                    bool across = way == 0;
+                    if (across ? c == 0 : r == 0) continue;
+                    int index = across ? c - 1 : cols - 1 + r - 1;
+                    bool dragged = dividerDrag.index == index;
+                    draw::Color line = dragged ? rgba(sideColourOf(k)) : ink;
+                    if (across) draw::fillRect(renderer, sd.vx - kGap / 2, sd.vy, kGap, sd.vh, line);
+                    else draw::fillRect(renderer, sd.vx, sd.vy - kGap / 2, sd.vw, kGap, line);
+                    // The grip: in the middle of this side's stretch of the divider.
+                    float gx = across ? sd.vx : sd.vx + sd.vw / 2, gy = across ? sd.vy + sd.vh / 2 : sd.vy;
+                    float gw = across ? 28 : 56, gh = across ? 56 : 28;
+                    draw::fillRect(renderer, gx - gw / 2, gy - gh / 2, gw, gh, dragged ? rgba(sideColourOf(k)) : grip, 14);
+                    draw::strokeRect(renderer, gx - gw / 2, gy - gh / 2, gw, gh, ink, 2, 14);
+                    for (int q = -1; q <= 1; q++) {
+                        if (across) draw::fillRect(renderer, gx + float(q) * 5 - 1, gy - 10, 2, 20, ink);
+                        else draw::fillRect(renderer, gx - 10, gy + float(q) * 5 - 1, 20, 2, ink);
+                    }
+                }
+            }
+            if (!railHidden) {
+                const Side& sd = cur();
+                draw::strokeRect(renderer, sd.vx + 2, sd.vy + 2, sd.vw - 4, sd.vh - 4, rgba(tokens::alpha(sideColour(), 0xC0)), 3, 6);
+            }
         }
         if (!any) draw::text(renderer, railW() + 20, 40, 14, rgba(look().text), "No controller packages (.odoc) in the library.");
         if (!status.empty()) draw::text(renderer, railW() + 16, float(wh) - 16, tokens::type::header, rgba(look().warn), status);
@@ -2922,7 +3069,8 @@ int main(int argc, char** argv) {
     if (einkArg) app.eink = true;
     app.setMasterVolume(app.masterVolume, false);
     app.active = selftestOut ? 0 : app.savedActive;
-    app.setSplit(splitArg >= 0 ? splitArg : app.savedSplit);
+    app.setSplit(splitArg >= 0 ? splitArg : app.savedSplit, false);
+    if (splitArg < 0) app.splitAt = app.savedSplitAt;
     for (const auto& ps : presetSettings) {
         App::Side& sd = app.sides[ps.side];
         if (sd.host && ps.index >= 0 && size_t(ps.index) < sd.settings.size()) {

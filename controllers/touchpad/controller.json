@@ -966,5 +966,19 @@
       "group": "Notes",
       "hidden": true
     }
+  ],
+  "sideThemes": [
+    0,
+    2,
+    3,
+    1
+  ],
+  "themeColours": [
+    "FF8A65",
+    "FFB74D",
+    "80DEEA",
+    "D4E157",
+    "FFEB3B",
+    "D84315"
   ]
 }

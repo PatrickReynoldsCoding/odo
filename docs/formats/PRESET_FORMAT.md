@@ -48,7 +48,8 @@ UTF-8 JSON, at most 1 MB. MIME type `application/vnd.odo.preset+json`.
 | `format` | `odo-preset/<major>[.<minor>]`. A reader refuses a newer major and reads a newer minor, leaving out the keys it doesn't know. |
 | `name` | Shown in the picker. A name already taken gets " 2", " 3"... when opened. |
 | `madeBy` | Which app made it. Only shown; never relied on. |
-| `split` | How the screen is split into sides (odo for computers' splits; 0: one side). |
+| `split` | How the screen is split into sides (0 whole; 1 side by side; 2 above and below; 3 three side by side; 4 three above each other; 5 four). |
+| `splitAt` | Where its dividers are, 0 to 1: across (left to right), then down (top to bottom). Left out: evenly. Each side's controller is the whole screen, showing its own share of it: a divider slides between them (as the touch pad's two pads). |
 | `layered` | One side: every note plays its first two parts. |
 | `effects` | The room and clock the parts share. Left out: the app keeps its own. |
 | `sides[]` | 1 to 4. Each: the `controller`, its `settings` and its `parts`. |

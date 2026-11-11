@@ -169,6 +169,7 @@ bool parse(const std::string& text, Preset& out, std::string* error) {
     if (p.name.empty()) p.name = "Preset";
     p.madeBy = j["madeBy"].str();
     p.split = int(finite(j["split"], 0, 0, 64));
+    for (size_t i = 0; i < j["splitAt"].size() && i < 8; i++) p.splitAt.push_back(finite(j["splitAt"][i], 0.5, 0.05, 0.95));
     p.layered = j["layered"].boolean();
 
     if (j["effects"].type == Json::Object) { p.hasEffects = true; p.effects = effectsFrom(j["effects"]); }
@@ -203,6 +204,11 @@ std::string write(const Preset& p) {
     w.key("name"); quote(w.o, p.name);
     if (!p.madeBy.empty()) { w.key("madeBy"); quote(w.o, p.madeBy); }
     w.key("split"); num(w.o, p.split);
+    if (!p.splitAt.empty()) {
+        w.key("splitAt"); w.o += '[';
+        for (size_t i = 0; i < p.splitAt.size(); i++) { if (i) w.o += ", "; num(w.o, p.splitAt[i]); }
+        w.o += ']';
+    }
     w.key("layered"); w.o += p.layered ? "true" : "false";
     if (p.hasEffects) { w.key("effects"); w.o += toJson(effectsJson(p.effects)); }
     w.key("sides"); w.open('[');
