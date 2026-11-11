@@ -11,7 +11,7 @@ tempo: 60
 meter: 4/4
 key: C major
 controller: patrickreynolds/hex
-settings: {"hexLayout": 0, "tuning": 0, "chromatic": 1, "scale": 8, "insideDyn": 1, "dynLow": 0, "dynHigh": 100, "insideTone": 0, "vibrato": 0, "slide": 0, "slideOnly": 0, "press": 1, "latch": 0, "split": true, "splitSize": 50, "cols": 12, "octave": -1, "topOctave": 0}
+settings: {"hexLayout": 0, "tuning": 0, "chromatic": 1, "scale": 8, "insideDyn": 1, "dynLow": 0, "dynHigh": 100, "insideTone": 0, "vibrato": 0, "slide": 0, "slideOnly": 0, "press": 1, "latch": 0, "split": true, "splitSize": 50, "cols": 9, "octave": -1, "topOctave": 0}
 sound: patrickreynolds/cello
 sound: patrickreynolds/clarinet
 volume: 1

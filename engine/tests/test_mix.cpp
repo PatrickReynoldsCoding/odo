@@ -92,12 +92,12 @@ int main() {
     CHECK(mpe::compareVersions("1.10.0", "1.9.2") > 0 && mpe::compareVersions("1.0", "1.0.0") < 0 &&
           mpe::compareVersions("2.0.0", "2.0.0") == 0 && mpe::compareVersions("", "0.0.1") < 0, "versions compare by number");
     int now = mpe::findInstrument("patrickreynolds/piano"), old = mpe::findInstrument("patrickreynolds/piano@1.0.0");
-    CHECK(now >= 0 && mpe::instrumentAt(now).version == "1.1.0", "the piano's newest version is found by its id");
+    CHECK(now >= 0 && mpe::instrumentAt(now).version == "1.2.1", "the piano's newest version is found by its id");
     CHECK(old >= 0 && old != now && mpe::instrumentAt(old).version == "1.0.0", "and 1.0.0 by id@version, to go back to");
     CHECK(mpe::findInstrument("keys/piano") == now && mpe::findInstrument("keys/piano@1.0.0") == old, "an old id finds the versions too");
     CHECK(mpe::findInstrument("patrickreynolds/piano@9.9.9") < 0, "a version there isn't is not found");
     std::vector<int> v = mpe::instrumentVersions(old);
-    CHECK(v.size() == 2 && v[0] == now && v[1] == old, "the piano's versions, newest first");
+    CHECK(v.size() == 3 && v[0] == now && mpe::instrumentAt(v[1]).version == "1.1.0" && v[2] == old, "the piano's versions, newest first");
     CHECK(mpe::isNewestVersion(now) && !mpe::isNewestVersion(old), "only the newest is the newest");
     int flute = mpe::findInstrument("patrickreynolds/flute");
     CHECK(flute >= 0 && mpe::instrumentVersions(flute).size() == 1 && mpe::isNewestVersion(flute), "a sound with one version");
