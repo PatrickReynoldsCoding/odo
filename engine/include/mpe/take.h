@@ -216,14 +216,23 @@ public:
     // its row the finger is (the Hex: its manifest's "bend": "two fingers out"); a lone finger keeps
     // its note.
     bool bendsWithTwoFingers() const { return twoFingerBend_; }
+    // How far its rows are turned on the screen, in degrees clockwise (its manifest's "rowTurn": the
+    // id of the setting that says; the Hex moved and turned): a key's row is looked for that way.
+    float rowTurn() const { return rowTurn_; }
+    // A key's own middle, where it plays the same note all over (a hexagon): half way between its
+    // edges across and down, found by touching (the cell's x, y are its probes' middle, a few dp out
+    // where the probes fall unevenly over it). Found the first time it is asked for.
+    std::pair<float, float> middle(const Cell& c);
 
 private:
     struct Sim;
     std::unique_ptr<Sim> sim_;
     std::vector<Cell> cells_;
     std::vector<Response> responses_;
+    std::vector<std::pair<float, float>> middles_;   // middle(): NAN until found
     float w_ = 0, h_ = 0;
     bool twoFingerBend_ = false;
+    float rowTurn_ = 0;
 };
 
 struct Report {

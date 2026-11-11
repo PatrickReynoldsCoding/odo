@@ -128,6 +128,7 @@ the rest.
 | `parts` | the sounds it plays, by name: one, or the sections of a split |
 | `partsFrom` | optional: the id of a setting that says how many of `parts` it plays now, its value + 1 (a switch: the first part off, the first two on). The MESH gives it that many sounds, and calls `instrument` for each. Without it, every part always |
 | `bend` | optional: `"two fingers out"` if it bends a note only with two fingers in its key slid out of it, then by how far along its row the finger is (the Hex). A take written by hand (`pitch`, `bend`, `vib`) is then played so; without it, by one finger moving toward the notes. |
+| `rowTurn` | optional, with `bend`: the id of a number setting saying how many degrees (clockwise on the screen) the keys' rows are turned from where they lie unturned (the Hex: `"viewTurn"`, its keyboard moved and turned). A take finds a key's row that way. |
 | `drumsFrom` | optional: for each of `parts`, the id of a `switch` the MESH sets on while that part's sound is a drum kit (an instrument in the `drums` group) and off otherwise, when the sound changes and when the controller opens. The touch pad lays out drums on it. Usually `hidden` |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
 | `settings` | its options: `choice`, `number`, `switch`, `scala` ([Scala tunings](#scala-tunings)), shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"group"` (optional): a short heading it is shown under |
@@ -150,7 +151,7 @@ Each setting has an `id`, a `name` (the `id` if none), a `type`, a `default` and
 | `panel` | `true` on a `switch` that opens the controller's own panel (drawn on its surface; it turns the switch off when closed). A MESH whose rail opens a group as a panel opens this one instead, for its group |
 
 - **Order.** Hidden settings are left out. The rest are grouped by `group` (no group: a group
-  named `""`). Groups appear in the order of their first setting; within a group, settings keep
+  named `""`). Groups appear in the order of their first setting (hidden or not); within a group, settings keep
   the manifest's order. A setting is still set by its place in the manifest, whatever its group.
 - **switch**: an on/off switch, shown `On` or `Off`. A step flips it.
 - **choice**: chips, one per option, the chosen one marked. A step on or back moves to the next

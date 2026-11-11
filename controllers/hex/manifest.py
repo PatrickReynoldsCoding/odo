@@ -9,20 +9,28 @@ g = json.load(open(root + '/controllers/grid/controller.json'), object_pairs_hoo
 m = collections.OrderedDict()
 m['format'] = 1
 m['id'] = 'patrickreynolds/hex'
-m['version'] = '2.0.0'
+m['version'] = '2.1.0'
 m['name'] = 'Hex'
 m['description'] = ("Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape "
                     "in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or "
                     "just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, "
-                    "bend the note toward the keys either way (snapped to points if you like); press harder for pressure")
+                    "bend the note toward the keys either way (snapped to points if you like); press harder for pressure. "
+                    "Move the keyboard with two fingers: drag it, size it, turn it")
 for k in ('author', 'licence'):
     m[k] = g[k]
 m['needs'] = collections.OrderedDict([('fingers', 10), ('touchSize', False)])
-for k in ('orientation', 'parts', 'partsFrom', 'arp'):
+for k in ('orientation', 'parts', 'partsFrom'):
     m[k] = g[k]
+# Two fingers slid out of a key bend it along its row; the rows are turned on the screen by viewTurn's
+# degrees (the keyboard moved: hex.c's view), so a take finds a key's row that way (take_score.cpp).
+m['bend'] = 'two fingers out'
+m['rowTurn'] = 'viewTurn'
+m['arp'] = g['arp']
 
+# Keys top to bottom and Key size are hidden: moving the keyboard (its view, below) sizes it now. They
+# still set the keys' first size, so a preset from before plays as it did.
 words = {
-    'cols': dict(name='Keys top to bottom', min=3, max=16, default=5),
+    'cols': dict(name='Keys top to bottom', min=3, max=16, default=5, hidden=True),
     'layout': dict(hidden=True),
     'scrollLock': dict(hidden=True),
     'split': dict(name='Second keyboard on the right'),
@@ -32,7 +40,7 @@ words = {
     'topScale': dict(name='Right keyboard: scale'),
     'topKey': dict(name='Right keyboard: key'),
     'topOctave': dict(name="Right keyboard: octave (from left's)"),
-    'squareSize': dict(name='Key size (%)'),
+    'squareSize': dict(name='Key size (%)', hidden=True),
     'chromatic': dict(hidden=True, default=1),
     'insideDyn': dict(name='Up/down in a key: dynamics'),
     'dynLow': dict(name='Loudness at the bottom of a key (%)'),
@@ -93,6 +101,18 @@ settings += [
     S(id='slideSnap', name='Snap the slide to points', type='switch', default=False, group='Touch'),
     S(id='snapPoints', name='Points between keys', type='number', min=1, max=24, step=1, default=4, group='Touch',
       showIf={'slideSnap': True}),
+]
+# Moving the keyboard (hex.c's view): the mode and putting it back on the rail; where it is, hidden
+# (kept in presets and takes); its button beside the keys, and where that button is moved to.
+settings += [
+    S(id='moveKeys', name='Move the keyboard (two fingers)', type='switch', default=False, group='Layout'),
+    S(id='viewReset', name='Put the keyboard back', type='switch', default=False, group='Layout'),
+    S(id='viewX', name='Keyboard moved across (keys)', type='number', min=-150, max=150, step=0, default=0, hidden=True, group='Layout'),
+    S(id='viewY', name='Keyboard moved up (keys)', type='number', min=-150, max=150, step=0, default=0, hidden=True, group='Layout'),
+    S(id='viewScale', name='Keyboard size', type='number', min=0.35, max=3, step=0, default=1, hidden=True, group='Layout'),
+    S(id='viewTurn', name='Keyboard turned (degrees)', type='number', min=0, max=360, step=0, default=0, hidden=True, group='Layout'),
+    S(id='sideMove', name='Move button', type='choice', options=['Off', 'Top', 'Bottom'], default=1, group='Controls'),
+    S(id='place9', name='Moved control 10', type='number', min=0, max=9007199254740991, step=1, default=0, hidden=True, group='Controls'),
 ]
 m['settings'] = settings
 out = json.dumps(m, ensure_ascii=False, indent=2)

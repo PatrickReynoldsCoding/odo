@@ -1,6 +1,8 @@
 // Packages: an instrument package compiled while running (libfaust) sounds like the same
 // instrument compiled in, and a controller package (the Tonnetz) plays the notes it should.
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <cstring>
 #include <ctime>
 #include "check.h"
@@ -152,7 +154,7 @@ static void hexPackage() {
     host.instrument(0, 60);
     for (size_t i = 0; i < ss.size(); i++) host.setting(int(i), ss[i]["default"].num());
     const std::pair<const char*, double> plain[] = {{"flip90", 1}, {"flipAcross", 1}, {"cols", 4}, {"spacing", 2}, {"scrollBar", 0},
-                                                    {"sideLatch", 0}, {"sideDyn", 0}, {"vibrato", 0}, {"press", 0}};
+                                                    {"sideLatch", 0}, {"sideDyn", 0}, {"sideMove", 0}, {"vibrato", 0}, {"press", 0}};
     for (auto& p : plain) host.setting(at(p.first), p.second);
     host.tick();
     CHECK(host.takeDirty() && host.drawList().size() > 2000, "it draws (%zu bytes)", host.drawList().size());
@@ -335,6 +337,107 @@ static void hexPackage() {
     host.touch(a, ControllerHost::Up, 351, my, 0, 0);
     host.touch(b, ControllerHost::Up, 330, my, 0, 0);
     host.setting(at("tuning"), HT_12);
+
+    // Moving the keyboard (Move the keyboard (two fingers)): fingers anywhere move it and play
+    // nothing; one drags, two size and turn it about the point between them. Kept as its view
+    // settings when the last lifts.
+    host.takeSettingChanges();
+    int velUnmoved;
+    host.touch(id, ControllerHost::Down, 221, my, 0, 0);                    // C4, near its foot: its dynamics
+    velUnmoved = vel;
+    host.touch(id++, ControllerHost::Up, 221, my, 0, 0);
+    host.setting(at("moveKeys"), 1);
+    host.tick();
+    std::map<int, double> view;
+    auto kept = [&] { for (auto& c : host.takeSettingChanges()) view[c.index] = c.value; };
+    before = ons;
+    a = id++; b = id++;
+    host.touch(a, ControllerHost::Down, 176, 200, 0, 0);
+    host.touch(b, ControllerHost::Down, 276, 200, 0, 0);
+    host.touch(a, ControllerHost::Move, 166, 200, 0, 0);                    // apart: 100 to 120, 1.2 times
+    host.touch(b, ControllerHost::Move, 286, 200, 0, 0);
+    host.touch(a, ControllerHost::Up, 166, 200, 0, 0);
+    host.touch(b, ControllerHost::Up, 286, 200, 0, 0);
+    kept();
+    CHECK(ons == before && std::fabs(view[at("viewScale")] - 1.2) < 0.01 && std::fabs(view[at("viewX")]) < 0.01,
+          "two fingers apart: bigger by 1.2 (%.3f), no note (%d)", view[at("viewScale")], ons - before);
+    host.touch(a, ControllerHost::Down, 226, 200, 0, 0);                    // one finger drags: half a key
+    host.touch(a, ControllerHost::Move, 276, 200, 0, 0);
+    host.touch(a, ControllerHost::Up, 276, 200, 0, 0);
+    kept();
+    CHECK(ons == before && std::fabs(view[at("viewX")] - 0.5) < 0.01 && std::fabs(view[at("viewY")]) < 0.01,
+          "one finger drags it half a key across (%.3f, %.3f)", view[at("viewX")], view[at("viewY")]);
+    host.touch(a, ControllerHost::Down, 226, 150, 0, 0);                    // a quarter turn about (226, 200)
+    host.touch(b, ControllerHost::Down, 226, 250, 0, 0);
+    host.touch(a, ControllerHost::Move, 276, 200, 0, 0);
+    host.touch(b, ControllerHost::Move, 176, 200, 0, 0);
+    host.touch(a, ControllerHost::Up, 276, 200, 0, 0);
+    host.touch(b, ControllerHost::Up, 176, 200, 0, 0);
+    kept();
+    const double vs = view[at("viewScale")], vt = view[at("viewTurn")], vx = view[at("viewX")] * 100, vy = view[at("viewY")] * 100;
+    CHECK(ons == before && std::fabs(vt - 90) < 0.01 && std::fabs(vs - 1.2) < 0.01, "two fingers twisted: a quarter turn (%.2f°), still 1.2, no note", vt);
+    host.setting(at("moveKeys"), 0);
+    // Where a point of the keys (as they lay, unmoved) is now: about the middle (226, 200).
+    auto L = [&](float px, float py, float* x, float* y) {
+        const double r = vt * M_PI / 180, dx = px - 226, dy = py - 200;
+        *x = float(226 + vx + vs * (dx * std::cos(r) - dy * std::sin(r)));
+        *y = float(200 + vy + vs * (dx * std::sin(r) + dy * std::cos(r)));
+    };
+    float lx, ly, lx2, ly2;
+    L(251, my, &lx, &ly);
+    host.touch(id, ControllerHost::Down, lx, ly, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "moved, sized and turned: C4 where its key went (%.0f, %.0f) (%.2f)", lx, ly, ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, lx, ly, 0, 0);
+    L(351, my, &lx, &ly);
+    host.touch(id, ControllerHost::Down, lx, ly, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 62) < 0.01, "and D4 next along its row, now down the screen (%.0f, %.0f) (%.2f)", lx, ly, ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, lx, ly, 0, 0);
+    L(221, my, &lx, &ly);
+    host.touch(id, ControllerHost::Down, lx, ly, 0, 0);
+    CHECK(vel == velUnmoved, "the same place in the key, turned: the same dynamics (%d, %d)", vel, velUnmoved);
+    host.touch(id++, ControllerHost::Up, lx, ly, 0, 0);
+    // Two fingers to slide, along the turned row: as unmoved.
+    a = id++; b = id++;
+    L(245, my, &lx, &ly); L(257, my + 5, &lx2, &ly2);
+    host.touch(a, ControllerHost::Down, lx, ly, 0, 0);
+    host.touch(b, ControllerHost::Down, lx2, ly2, 0, 0);
+    L(330, my, &lx, &ly);
+    host.touch(a, ControllerHost::Move, lx, ly, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "turned: one of the two out of the key, no bend yet (%.2f)", ch[lastCh].pitch());
+    L(305, my + 5, &lx2, &ly2);
+    host.touch(b, ControllerHost::Move, lx2, ly2, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 61.58f) < 0.03, "turned: both out, 0.79 of a key toward D (%.2f)", ch[lastCh].pitch());
+    L(301, my, &lx, &ly);
+    host.touch(a, ControllerHost::Move, lx, ly, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 61) < 0.03, "turned: on the line between C and D, C♯ (%.2f)", ch[lastCh].pitch());
+    L(151, my, &lx, &ly);
+    host.touch(a, ControllerHost::Move, lx, ly, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 58) < 0.03, "turned: back past C to B♭'s middle (%.2f)", ch[lastCh].pitch());
+    host.touch(a, ControllerHost::Up, lx, ly, 0, 0);
+    host.touch(b, ControllerHost::Up, lx2, ly2, 0, 0);
+    // The Move button (Top: the upright left strip, alone there, at its foot) turns moving on.
+    host.setting(at("sideMove"), 1);
+    host.tick();
+    host.takeSettingChanges();
+    host.touch(id, ControllerHost::Down, 32, 364, 0, 0);
+    host.touch(id++, ControllerHost::Up, 32, 364, 0, 0);
+    bool on = false;
+    for (auto& c : host.takeSettingChanges()) on |= c.index == at("moveKeys") && c.value == 1;
+    CHECK(on, "the Move button turns Move the keyboard on");
+    host.setting(at("moveKeys"), 0);
+    host.setting(at("sideMove"), 0);
+    // Put the keyboard back: unmoved again, C4 in the middle.
+    host.setting(at("viewReset"), 1);
+    host.tick();
+    view.clear();
+    kept();
+    CHECK(view[at("viewScale")] == 1 && view[at("viewTurn")] == 0 && view[at("viewX")] == 0 && view.count(at("viewReset")) && view[at("viewReset")] == 0,
+          "Put the keyboard back: unmoved, and the switch off again");
+    host.setting(at("cols"), 4);                                            // as these tests had it
+    host.touch(id, ControllerHost::Down, 251, my, 0, 0);
+    CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "put back: C4 in the middle again (%.2f)", ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, 251, my, 0, 0);
+
     host.stop();
     CHECK(host.lastError().empty(), "no errors from the WebAssembly (%s)", host.lastError().c_str());
     (void)offs; (void)vel;

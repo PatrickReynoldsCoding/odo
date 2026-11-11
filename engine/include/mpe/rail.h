@@ -28,7 +28,7 @@ struct Row {
 struct Group { std::string name; std::vector<Row> rows; int hiddenNow = 0; };
 
 // The rail: non-hidden settings, grouped, without those whose "showIf" is not met by the values
-// now. Groups appear in the order of their first setting; rows keep manifest order within a group.
+// now. Groups appear in the order of their first setting (hidden or not; one with none shown is left out); rows keep manifest order within a group.
 // values[i] is setting i's value; a missing one is its default.
 std::vector<Group> groups(const Json& manifest, const std::vector<double>& values);
 // Flat convenience: every shown row, in display order (groups flattened).

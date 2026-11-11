@@ -64,6 +64,7 @@
 #define CUST_WORDS 22          /* 128 squares, 6 to a setting: 8 bits each, inside a double's 53 */
 #define CUST_ANY 255           /* a square as Along the rows has it */
 #define NOTES_EVEN 281474976710655.0   /* 2^48 - 1: six squares, all CUST_ANY */
+#define NO_KEY (-2147483647)  /* no square (or key) there */
 
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
@@ -121,7 +122,8 @@ static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
-enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_SLIDE, C_INSIDE, C_OUT, C_COUNT };   /* the side controls */
+/* The side controls. C_MOVE, the Hex keyboard's alone: its Move button (move the keyboard). */
+enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_LOCK, C_SLIDE, C_INSIDE, C_OUT, C_MOVE, C_COUNT };
 enum { COL_PLAIN, COL_DEGREES, COL_CHORD, COL_PILLARS, COL_NAMES };
 /* Same notes elsewhere: how the other squares of a held note's pitch, in any octave, are marked. */
 enum { ECHO_OFF, ECHO_RING, ECHO_GLOW };
@@ -235,12 +237,17 @@ static int locked(void) { return set_[S_LOCK] != 0; }
 /* The Lock button only means something with the columns. */
 static int side_of(int c) {
     if (c == C_LOCK && !columns()) return SIDE_OFF;
+#ifdef KEYS_HEX
+    if (c == C_MOVE) return (int)set_[S_SIDE_MOVE];
+#else
+    if (c == C_MOVE) return SIDE_OFF;
+#endif
     return (int)set_[c == C_SLIDE ? S_SIDE_SLIDE : c == C_INSIDE ? S_SIDE_INSIDE : c == C_OUT ? S_SIDE_OUT : S_SIDE0 + c];
 }
 static int is_button(int c) { return c <= C_HOLD || c == C_LOCK || c >= C_SLIDE; }
 /* The toggles (Slide only, Inside, Slide out): a double tap changes one; held, it is the other way
    only while held (flipped[c]). */
-static int is_toggle(int c) { return c >= C_SLIDE; }
+static int is_toggle(int c) { return c >= C_SLIDE && c <= C_OUT; }
 static int flipped[C_COUNT];
 static int toggle_setting(int c) { return c == C_SLIDE ? S_SLIDE_ONLY : c == C_INSIDE ? S_INSIDE_ON : S_OUT_ON; }
 static int toggle_on(int c) { return (set_[toggle_setting(c)] != 0) != (flipped[c] != 0); }
@@ -254,7 +261,11 @@ static int out_on(void) { return toggle_on(C_OUT); }
 /* Where a moved control is, on the surface: its middle (as a share of the surface), its size and
    its turn (degrees). Kept in one number: 0 is "in its gutter". */
 typedef struct { float fx, fy, scale, deg; } Place;
-static int place_index(int c) { return c < 7 ? S_PLACE0 + c : S_PLACE7 + (c - 7); }
+#ifdef KEYS_HEX
+static int place_index(int c) { return c < 7 ? S_PLACE0 + c : c == C_MOVE ? S_PLACE9 : S_PLACE7 + (c - 7); }
+#else
+static int place_index(int c) { return c < 7 ? S_PLACE0 + c : c == C_MOVE ? S_PLACE8 : S_PLACE7 + (c - 7); }   /* C_MOVE: never shown */
+#endif
 static int placed(int c) { return set_[place_index(c)] != 0; }
 static Place place_of(int c) {
     double v = set_[place_index(c)] - 1;
@@ -494,7 +505,7 @@ static int column_at(float x) {
 
 static int square_at(float x, float y) {
     int c = column_at(x);
-    if (c < 0) return -100000;
+    if (c < 0) return NO_KEY;
     float p = scroll_of(c);
     float f = flipped_y() ? (y - hv->top) / cell + p : (hv->bot - y) / cell + p;
     int r = (int)floorf_(f);
@@ -794,18 +805,25 @@ static int find_latched(int half, int n) {
 }
 
 static void down_in(int id, float x, float y, int h);
+#ifdef KEYS_HEX
+static int to_plane(float* x, float* y);
+#endif
 /* A finger on a square: it plays its half's note, on its half's part. */
 static void down(int id, float x, float y) {
     int h = half_at(y);
     if (h < 0) return;
     hv = &halves[h];
+#ifdef KEYS_HEX
+    /* On the keys as they lie before they were moved, sized and turned (hex.c, "the view"). */
+    if (!to_plane(&x, &y)) { hv = &halves[0]; return; }
+#endif
     down_in(id, x, y, h);
     hv = &halves[0];
 }
 
 static void down_in(int id, float x, float y, int h) {
     int n = square_at(x, y);
-    if (n == -100000 || note_of(n) < 0) return;
+    if (n == NO_KEY || note_of(n) < 0) return;
 #ifdef KEYS_HEX
     if (pair_down(id, h, n, x, y)) return;      /* a second finger on a held key: no note of its own */
 #endif
@@ -851,7 +869,7 @@ static void glide_to(Finger* f, float x, float y) {
     Half* was = hv;
     hv = &halves[f->half < nhalves ? f->half : 0];
     int n = square_at(x, y);
-    if (n != -100000 && note_of(n) >= 0) {
+    if (n != NO_KEY && note_of(n) >= 0) {
         if (n != f->n) {
             f->n = n; f->note = note_of(n);
             f->rx = square_x(n); f->ry = square_y(n); f->rs = cell - gap;
@@ -868,8 +886,8 @@ static void slide_to(Finger* f, float x, float y) {
     Half* was = hv;
     hv = &halves[h];
     int n = square_at(x, y);
-    if (n != -100000 && note_of(n) < 0) n = -100000;
-    if (n == -100000 || (h == f->half && n == f->n)) { hv = was; return; }
+    if (n != NO_KEY && note_of(n) < 0) n = NO_KEY;
+    if (n == NO_KEY || (h == f->half && n == f->n)) { hv = was; return; }
     if (h == f->half) {
         /* Past the old square's edge by a little more than the gap. */
         float m = gap / 2 + cell * 0.08f, sx = square_x(f->n), sy = square_y(f->n), side = cell - gap;
@@ -1036,8 +1054,15 @@ static void side_drag(SideTouch* s, float at) {
 
 /* The scroll bar: the rows follow the finger, as a list does. */
 /* Split, each half's part of the bar scrolls that half. */
+#ifdef KEYS_HEX
+static float bar_scale(void);
+#endif
 static void bar_drag(SideTouch* s, float y) {
+#ifdef KEYS_HEX
+    float rows = (y - s->y) / (row_h * bar_scale());   /* as the moved keyboard shows them */
+#else
     float rows = (y - s->y) / row_h;
+#endif
     hv = &halves[s->half];
     hv->pos = s->start + (flipped_y() ? -rows : rows);
     hv = &halves[0];
@@ -1233,6 +1258,9 @@ static void side_up(SideTouch* s) {
     else if (s->control == C_DYN) mesh_set_setting(S_DYN, set_[S_DYN]);   /* remembered */
     else if (s->control == C_LOCK) keep(S_LOCK, locked() ? 0 : 1);         /* the rail shows it */
     else if (is_toggle(s->control)) toggle_up(s, s->control);
+#ifdef KEYS_HEX
+    else if (s->control == C_MOVE) keep(S_MOVE_KEYS, set_[S_MOVE_KEYS] != 0 ? 0 : 1);   /* the rail shows it */
+#endif
     s->id = 0;
     dirty = 1;
 }
@@ -1314,6 +1342,9 @@ static void draw_sides(const Theme* th) {
         case C_SLIDE: draw_button(r, "Slide", flipped[C_SLIDE] ? "for now" : slide_only() ? "only" : "all", slide_only(), th, ink); break;
         case C_INSIDE: draw_button(r, "Inside", flipped[C_INSIDE] ? "for now" : toggle_on(C_INSIDE) ? "on" : "off", toggle_on(C_INSIDE), th, ink); break;
         case C_OUT: draw_button(r, "Slide out", flipped[C_OUT] ? "for now" : out_on() ? "on" : "off", out_on(), th, ink); break;
+#ifdef KEYS_HEX
+        case C_MOVE: draw_button(r, "Move", set_[S_MOVE_KEYS] != 0 ? "on" : "off", set_[S_MOVE_KEYS] != 0, th, ink); break;
+#endif
         case C_BEND: {
             int tenths = roundi(side_bend * 10);
             if (tenths == 0) put(v, "0");
@@ -1886,6 +1917,14 @@ static int SHARED in_half(float y) { return y >= hv->top && y <= hv->bot; }
 /* The keys' shape, again: drawing them and the scroll bar beside them. */
 static void draw_keys(const Theme* th);
 static void draw_bar(const Theme* th);
+#ifdef KEYS_HEX
+static void view_xf(int half);
+static void view_draw(const Theme* th);
+static int view_touch(int id, int phase, float x, float y, float sx, float sy);
+static void view_tick(void);
+static void view_stop(void);
+static void finger_to_plane(int id, float* x, float* y);
+#endif
 
 #ifndef KEYS_HEX
 static void note_name(char* out, int note, int octave) {
@@ -2023,10 +2062,18 @@ static void draw(void) {
     draw_keys(th);
     /* A halo that follows each finger. */
     if (!flat && !th->bright)
-        for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used)
+        for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) {
+#ifdef KEYS_HEX
+            view_xf(fingers[k].half);
+#endif
             g_glow(fingers[k].x, fingers[k].y, cell * 0.9f, mesh_alpha(th->hot, 0.5f), mesh_alpha(th->light, 0));
+            xf = 0;
+        }
     draw_bar(th);
     draw_sides(th);
+#ifdef KEYS_HEX
+    view_draw(th);
+#endif
     if (editing()) ed_draw(th);
     else if (note_editing()) ne_draw(th);
     mesh_end();
@@ -2087,7 +2134,14 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
         if (find(id)) up(id);
         layout();
         if (gesture_down(id, x, y, sx, sy)) { dirty = 1; return; }
-        if (!side_down(id, x, y, sx, sy)) { if (columns() && !locked()) col_down(id, x, y); else down(id, x, y); }
+#ifdef KEYS_HEX
+        /* Moving the keyboard: a touch anywhere but on a control moves it, and plays nothing. */
+        if (!side_down(id, x, y, sx, sy) && !view_touch(id, phase, x, y, sx, sy)) {
+#else
+        if (!side_down(id, x, y, sx, sy)) {
+#endif
+            if (columns() && !locked()) col_down(id, x, y); else down(id, x, y);
+        }
         /* Editing your own notes: the square played is the one to change. */
         Finger* f = note_editing() ? find(id) : 0;
         if (f) { sel = f->n; sel_half = f->half; resetting = 0; }
@@ -2111,6 +2165,8 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
             return;
         }
 #ifdef KEYS_HEX
+        if (view_touch(id, phase, x, y, sx, sy)) { dirty = 1; return; }
+        finger_to_plane(id, &x, &y);                /* where it is on the keys as they lie */
         if (pair_move(id, x, y)) { dirty = 1; return; }
 #endif
         Finger* f = find(id);
@@ -2122,7 +2178,7 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
         SideTouch* s = side_find(id);
         if (s) side_up(s);
 #ifdef KEYS_HEX
-        else if (!pair_up(id)) up(id);
+        else if (!view_touch(id, phase, x, y, sx, sy) && !pair_up(id)) up(id);
 #else
         else up(id);
 #endif
@@ -2142,6 +2198,9 @@ MESH_EXPORT(tick) void tick(double t) {
         keep(S_PLACE_RESET, 0);
         layout();
     }
+#ifdef KEYS_HEX
+    view_tick();
+#endif
     /* The slow position trails the finger by about 0.12 s: a wiggle is faster than that. */
     float k = 1 - expf_(-dt / 0.12f);
     int any = 0;
@@ -2174,6 +2233,9 @@ MESH_EXPORT(stop) void stop(void) {
     for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) { let_go(&fingers[k]); fingers[k].used = 0; }
     for (int k = 0; k < MAX_FINGERS; k++) side_touches[k].id = 0;
     gest.on = 0;
+#ifdef KEYS_HEX
+    view_stop();
+#endif
     for (int c = 0; c < C_COUNT; c++) flipped[c] = 0;
     for (int c = 0; c < C_COUNT; c++) touched[c] = 0;
     nspent = 0;
