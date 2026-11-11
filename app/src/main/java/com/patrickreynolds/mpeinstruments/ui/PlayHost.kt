@@ -224,10 +224,10 @@ private fun TileEyebrow(text: String) = Text(text, color = TextDim, fontSize = 1
 private fun PresetTile(open: Boolean, onClick: () -> Unit) = Tile(open, onClick = onClick) {
     val name = AppState.presetName
     val p = AppState.allPresets.firstOrNull { it.name == name }
-    val edited = p?.builtIn == true && AppState.presetEdited
+    val edited = p != null && AppState.presetEdited
     TileEyebrow("PRESET")
     Text(name.ifEmpty { "None" }, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    Text(when { edited -> "Changed since loaded"; p == null -> "Keep what plays as a preset"; else -> presetSummary(p) },
+    Text(when { edited -> if (p?.builtIn == true) "Changed since loaded" else "Changed since saved"; p == null -> "Keep what plays as a preset"; else -> presetSummary(p) },
          color = if (edited) PartColors[0] else TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 

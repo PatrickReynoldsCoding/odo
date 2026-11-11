@@ -155,6 +155,8 @@ object AppState {
             if (presetName == "Violin, in tune") presetName = ""
             prefs.edit().putBoolean("assistOff", true).apply()
         }
+        // Your preset on view: changed since saved, if what plays (kept from last time) is not it.
+        presetEdited = activePreset?.let { current(it.name) != it } ?: false
         applyAll()
     }
 
@@ -318,23 +320,28 @@ object AppState {
     // ---- presets ----------------------------------------------------------------------------
 
     val allPresets get() = BUILT_IN_PRESETS + userPresets
-    /** The preset on view, if it is one of yours: what you change is kept in it. */
+    /** The preset on view, if it is one of yours. A preset is a save point: what you change after is
+     *  not kept in it until you save it (saveChanges). */
     val activePreset get() = userPresets.firstOrNull { it.name == presetName }
     private var loading = false
 
     /** What is playing now, as a preset of yours. */
     private fun current(name: String) = Preset(name, perf, controller = controller.id, settings = controller.save().toString())
 
-    /** Something changed: keep it in your preset on view, or note that a built-in one was changed. */
+    /** Something changed: the preset on view is now changed since it was saved (yours) or loaded (a
+     *  built-in one). It is not kept in it: Save changes does that. */
     private fun touched() {
         if (loading || presetName.isEmpty()) return
         val p = activePreset
-        if (p == null) { presetEdited = true; return }
-        val now = current(p.name)
-        if (now == p) return
-        userPresets = userPresets.map { if (it.name == p.name) now else it }
-        saver.removeCallbacks(savePresetsNow)
-        saver.postDelayed(savePresetsNow, 400)
+        presetEdited = p == null || current(p.name) != p
+    }
+
+    /** Save changes: your preset on view becomes what plays now. */
+    fun saveChanges() {
+        val p = activePreset ?: return
+        userPresets = userPresets.map { if (it.name == p.name) current(p.name) else it }
+        presetEdited = false
+        savePresets()
     }
 
     /** [p] on, as loading a preset does. [onView] false: what plays is changed, but no preset is on

@@ -69,8 +69,8 @@ fun PresetMenu(p: Preset, expanded: Boolean, onDismiss: () -> Unit, onRename: ()
 
 /**
  * The preset library. A preset is a whole touch pad: its sounds and effects, and the pads'
- * notes, scale, glide, split... Yours keep what you change as you play, like tabs; they stay for
- * next time. The starting points are the app's own: change one and keep it as yours.
+ * notes, scale, glide, split... A save point: what you change after is not kept in it until you
+ * save it. The starting points are the app's own: change one and keep it as yours.
  */
 @Composable
 fun PresetLibrary(accent: Color, onLoaded: () -> Unit = {}) {
@@ -81,7 +81,8 @@ fun PresetLibrary(accent: Color, onLoaded: () -> Unit = {}) {
         current.isEmpty() -> "Not a preset yet: keep what is playing as one of yours."
         builtInOn && AppState.presetEdited -> "$current, changed: keep it as yours, or the changes are not saved."
         builtInOn -> "$current, a starting point."
-        else -> "$current: changes are kept in it as you play."
+        AppState.presetEdited -> "$current, changed since saved: save the changes, or they are not kept."
+        else -> "$current, as saved."
     }, color = TextDim, fontSize = 12.sp)
     Row(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { AppState.newPreset(if (builtInOn) current else AppState.soundName()) }) {

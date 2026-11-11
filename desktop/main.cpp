@@ -326,7 +326,6 @@ struct App {
     std::string settingsKey(int k) const { return k == 0 ? controllerId(0) : controllerId(k) + "#" + std::to_string(k + 1); }
 
     void saveConfig() {
-        if (!loadingPreset) keepInPreset();
         if (!persist) return;
         std::error_code ec;
         fs::create_directories(fs::path(configPath).parent_path(), ec);
@@ -496,9 +495,12 @@ struct App {
         Preset p;
         p.name = name;
         p.split = split;
-        p.layered = layered; p.hasEffects = hasEffects; p.effects = effects;   // as the preset on gave them
+        // All of it: each sound's effects as they play now (its own, or as set) and the room.
+        p.layered = layered; p.hasEffects = true; p.effects = shownEffects();
         for (int k = 0; k < count(); k++) {
-            PresetSide s{controllerId(k), soundId(k), {moreId(k, 1), moreId(k, 2), moreId(k, 3)}, {}, sides[k].parts};
+            std::vector<mpe::preset::Part> parts;
+            for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) parts.push_back(partNow(k, j));
+            PresetSide s{controllerId(k), soundId(k), {moreId(k, 1), moreId(k, 2), moreId(k, 3)}, {}, parts};
             if (sides[k].host) {
                 const mpe::Json& st = sides[k].host->manifest()["settings"];
                 for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) s.settings[st[i]["id"].str()] = sides[k].settings[i];
@@ -515,6 +517,8 @@ struct App {
             const PresetSide& s = p.sides[size_t(k)];
             if (s.controller != controllerId(k) || s.sound != soundId(k) || s.more[0] != moreId(k, 1) || s.more[1] != moreId(k, 2) ||
                 s.more[2] != moreId(k, 3)) return false;
+            for (size_t j = 0; j < s.parts.size() && int(j) < partsOf(k); j++)
+                if (s.parts[j].full && !samePart(s.parts[j], partNow(k, int(j)))) return false;
             if (!sides[k].host) continue;
             const mpe::Json& st = sides[k].host->manifest()["settings"];
             for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) {
@@ -522,20 +526,36 @@ struct App {
                 if (it != s.settings.end() && std::fabs(it->second - sides[k].settings[i]) > 1e-9) return false;
             }
         }
+        if (p.hasEffects) {
+            const mpe::preset::Effects a = p.effects, b = shownEffects();
+            auto near = [](double x, double y) { return std::fabs(x - y) < 1e-6; };
+            if (!near(a.reverbSize, b.reverbSize) || !near(a.reverbDamp, b.reverbDamp) || !near(a.delayBeats, b.delayBeats) ||
+                !near(a.delayFeedback, b.delayFeedback) || a.delayPingPong != b.delayPingPong || !near(a.bpm, b.bpm)) return false;
+        }
         return true;
     }
+    static bool samePart(const mpe::preset::Part& a, const mpe::preset::Part& b) {
+        auto near = [](double x, double y) { return std::fabs(x - y) < 1e-6; };
+        return a.transpose == b.transpose && near(a.volume, b.volume) && near(a.brightness, b.brightness) && near(a.drive, b.drive) &&
+               near(a.pressureCurve, b.pressureCurve) && near(a.reverb, b.reverb) && near(a.delay, b.delay) &&
+               near(a.release, b.release) && near(a.width, b.width) && a.arp.on == b.arp.on;
+    }
 
-    // A built-in preset on view, changed since it was loaded.
+    // The preset on view, changed since it was loaded (a built-in one) or saved (yours).
     bool presetEdited() const {
         if (presetName.empty()) return false;
-        for (const Preset& p : allPresets()) if (p.name == presetName) return p.builtIn && !matches(p);
+        for (const Preset& p : allPresets()) if (p.name == presetName) return !matches(p);
         return false;
     }
 
-    // Something changed: kept in your preset on view.
-    void keepInPreset() {
+    // Save changes: your preset on view becomes what plays now (a preset is a save point: what you
+    // change after is not kept in it until you save it).
+    void saveChanges() {
         Preset* p = userPreset(presetName);
-        if (p && !matches(*p)) *p = current(p->name);
+        if (!p) return;
+        *p = current(p->name);
+        saveConfig();
+        status = "Saved \xE2\x80\x9C" + p->name + "\xE2\x80\x9D.";
     }
 
     // onView false: what plays is changed, but no preset is on view (a take's settings, not one of yours).
@@ -1342,9 +1362,11 @@ struct App {
 
     const mpe::Package& soundPkg(int j) const { return *lib.instruments[size_t(soundOf(active, j))].pkg; }
     // Part j of the side in use, as it plays now: as the preset on gave it, or its sound's own.
-    mpe::preset::Part shownPart(int j) const {
-        const mpe::Package& pkg = soundPkg(j);
-        const std::vector<mpe::preset::Part>& given = sides[active].parts;
+    mpe::preset::Part shownPart(int j) const { return partNow(active, j); }
+    // Part j of side k, as it plays now.
+    mpe::preset::Part partNow(int k, int j) const {
+        const mpe::Package& pkg = *lib.instruments[size_t(soundOf(k, j))].pkg;
+        const std::vector<mpe::preset::Part>& given = sides[k].parts;
         if (size_t(j) < given.size() && given[size_t(j)].full && given[size_t(j)].sound == pkg.id()) return given[size_t(j)];
         const mpe::Json& s = pkg.manifest["sound"];
         mpe::preset::Part d;
@@ -1654,7 +1676,7 @@ struct App {
 
     // ---- the panel beside the rail ----
 
-    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
+    enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aSaveChanges, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
                aRecord, aTake, aListen, aAlong, aSpeed, aFingers, aLoop, aFx, aFxReset, aDelayTime, aPingPong, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
                aTakeUse, aTakeKeep };
     struct PItem {
@@ -1742,6 +1764,7 @@ struct App {
             }
             heading("THIS PRESET");
             auto action = [&](const std::string& t, int act) { PItem it{PItem::Row, t, "", x, y, in, 40}; it.act = act; it.rule = true; p.items.push_back(it); y += 40; };
+            if (userPreset(presetName) && presetEdited()) action("Save changes to \xE2\x80\x9C" + presetName + "\xE2\x80\x9D", aSaveChanges);
             action("+ Keep what is playing as a new preset", aNewPreset);
             action(presetName.empty() ? std::string("Share what is playing as a file\xE2\x80\xA6")
                                       : "Share \xE2\x80\x9C" + presetName + "\xE2\x80\x9D as a file\xE2\x80\xA6", aShare);
@@ -2035,6 +2058,7 @@ struct App {
             switch (it.act) {
                 case aLoadPreset: { std::vector<Preset> all = allPresets(); if (it.arg < int(all.size())) loadPreset(all[size_t(it.arg)]); break; }
                 case aNewPreset: newPreset(); renaming = false; break;
+                case aSaveChanges: saveChanges(); break;
                 case aShare: askToShare(); break;
                 case aOpenFile: askToOpen(); break;
                 case aRename: renaming = true; editText = presetName; break;
@@ -2379,7 +2403,9 @@ struct App {
                         std::string sub;
                         for (const Preset& pr : allPresets()) if (pr.name == presetName) sub = presetSubtitle(pr);
                         if (presetName.empty()) sub = "Keep what plays as a preset";
-                        draw::text(renderer, b.x + 12, y + 54, 12, edited ? accent : dim, draw::fit(edited ? "Changed since loaded" : sub, 12, b.w - 24));
+                        const bool mine = userPreset(presetName) != nullptr;
+                        draw::text(renderer, b.x + 12, y + 54, 12, edited ? accent : dim,
+                                   draw::fit(edited ? (mine ? "Changed since saved" : "Changed since loaded") : sub, 12, b.w - 24));
                     } else if (b.key == kSplitKey) {
                         eyebrow(b.x + 12, y + 17, "SPLIT");
                         splitPic(split, count() > 1 ? active : -1, b.x + 12, y + 28, 46, 30, p.eink ? text : accent);

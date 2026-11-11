@@ -4,6 +4,12 @@ A preset file is how one odo gives a preset to another: a phone to a computer, o
 another. Both apps read and write it through the same code, `mpe::preset`
 (`engine/include/mpe/preset.h`), so a file one app makes loads in the other.
 
+A preset is a save point. **+ Keep what is playing as a new preset** saves all of it: each side's
+controller and every one of its settings, each sound with its effects (as set, or the sound's own),
+the split, layering, and the shared reverb and delay. What you change after is not kept in it: the
+preset tile says **Changed since saved** (a built-in one: Changed since loaded), and **Save changes
+to "…"** (This preset) keeps the changes in it. Loading it again goes back to it as saved.
+
 In the preset picker, **Share** sends the preset on view as a file, and **Open a preset file**
 reads one in as one of yours. On Android, Share uses the share sheet (send it by email, a chat
 or Drive), and opening an `.odopreset` file from another app also adds it. On a computer, both

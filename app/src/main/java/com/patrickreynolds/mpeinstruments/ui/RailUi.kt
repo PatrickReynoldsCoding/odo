@@ -304,6 +304,9 @@ private fun PresetsPanel() {
     for (p in AppState.userPresets) row(p)
     PHeading("THIS PRESET")
     val on = AppState.allPresets.firstOrNull { it.name == current }
+    if (on != null && !on.builtIn && AppState.presetEdited) PRow("Save changes to “${on.name}”") {
+        AppState.saveChanges(); renaming = false; confirmDelete = false
+    }
     PRow("+ Keep what is playing as a new preset") {
         AppState.newPreset(if (on?.builtIn == true) current else AppState.soundName()); renaming = false; confirmDelete = false
     }
