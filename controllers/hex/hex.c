@@ -489,8 +489,8 @@ static void draw_keys(const Theme* th) {
     unsigned bg = flat ? WHITE : th->background;
     if (ax0 > 0.5f) g_rect(-2, -2, ax0 + 2, H + 4, 0, bg, 0, 0);
     if (ax1 < W - 0.5f) g_rect(ax1, -2, W - ax1 + 2, H + 4, 0, bg, 0, 0);
-    if (nhalves > 1) {
-        float y = (halves[1].bot + halves[0].top) / 2;
+    for (int h = 1; h < nhalves; h++) {
+        float y = (halves[h].bot + halves[h - 1].top) / 2;
         g_line(ax0 + gap / 2, y, ax1 - gap / 2, y, mesh_alpha(flat ? BLACK : th->hot, 0.6f), 2);
     }
 }

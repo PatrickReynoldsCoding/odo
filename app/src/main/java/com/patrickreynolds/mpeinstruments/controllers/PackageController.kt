@@ -71,13 +71,17 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     }
 
     /** "partsFrom": the setting that says how many of its parts it plays now (its value + 1; a switch:
-     *  one part off, two on), as the Grid's split does. Without one, all of them. */
-    private val partsFrom = manifest.optString("partsFrom").let { id -> settings.indexOfFirst { it.optString("id") == id } }
-    val inUse: Int get() = if (partsFrom < 0) parts.size else (1 + (values.getOrNull(partsFrom) ?: 0.0).toInt()).coerceIn(1, parts.size)
+     *  one part off, two on), as the Grid's split does; or a list of them, one more part for each that
+     *  is on, up to the first that is off (the Grid's split, then its third). Without one, all of them. */
+    private val partsFrom: List<Int> = manifest.opt("partsFrom").let { v ->
+        when (v) { is org.json.JSONArray -> List(v.length()) { v.optString(it) }; is String -> listOf(v); else -> emptyList() }
+    }.map { id -> settings.indexOfFirst { it.optString("id") == id } }.filter { it >= 0 }
+    val inUse: Int get() = if (partsFrom.isEmpty()) parts.size
+        else (1 + partsFrom.map { values.getOrNull(it) ?: 0.0 }.takeWhile { it != 0.0 }.sumOf { it.toInt() }).coerceIn(1, parts.size)
 
     /** The engine follows when the parts in use change; the rail goes back to the first if its part went. */
     private fun changed(index: Int) {
-        val engine = index == partsFrom
+        val engine = index in partsFrom
         if (engine && AppState.side >= inUse) AppState.side = 0
         AppState.controllerChanged(this, engine)
     }
@@ -124,7 +128,7 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     override fun loadPreset(o: JSONObject) = load(o, values, preset = true)
 
     /** A preset made for another controller, or none: what is per preset (a split) goes back to off. */
-    override fun clearForPreset() { if (partsFrom >= 0) change(partsFrom, 0.0) }
+    override fun clearForPreset() { partsFrom.forEach { change(it, 0.0) } }
 
     private fun load(o: JSONObject?, base: List<Double>, preset: Boolean) {
         // The Kotlin touch pad's settings (until 0.26), or a preset made with it: as this package's.

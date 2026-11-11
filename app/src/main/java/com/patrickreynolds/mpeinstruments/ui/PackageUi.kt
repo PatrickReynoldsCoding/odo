@@ -48,10 +48,11 @@ fun PackageSurface(c: PackageController) {
         onDispose { com.patrickreynolds.mpeinstruments.Takes.stop(); Native.nativeCtlStop() }
     }
     val center = AppState.instrument(0)?.centerNote ?: 60f
-    // A split (the Grid's): the second part's instrument too, so its half centres on its own sound.
-    val center1 = if (c.inUse > 1) AppState.instrument(1)?.centerNote else null
+    // A split (the Grid's, the Hex's): each further part's instrument too (a second keyboard, a third),
+    // so each centres on its own sound.
+    val centers = (1 until c.inUse.coerceAtMost(4)).map { AppState.instrument(it)?.centerNote ?: center }
     LaunchedEffect(center) { Native.nativeCtlInstrument(0, center) }
-    LaunchedEffect(center1) { center1?.let { Native.nativeCtlInstrument(1, it) } }
+    LaunchedEffect(centers) { centers.forEachIndexed { k, v -> Native.nativeCtlInstrument(k + 1, v) } }
     // A drum kit: the controller's "drumsFrom" switches follow each part's sound (the touch pad lays out drums).
     val drums = List(2) { AppState.instrument(it)?.group == "drums" }
     LaunchedEffect(c, drums) { c.syncDrums(drums) }
@@ -93,7 +94,7 @@ fun PackageSurface(c: PackageController) {
             com.patrickreynolds.mpeinstruments.Takes.surfaceH = size.height / density
             Native.nativeCtlInit(size.width / density, size.height / density, if (Eink) 1 else 0)
             Native.nativeCtlInstrument(0, center)
-            center1?.let { Native.nativeCtlInstrument(1, it) }
+            centers.forEachIndexed { k, v -> Native.nativeCtlInstrument(k + 1, v) }
             c.values.forEachIndexed { k, v -> Native.nativeCtlSetting(k, v) }
         }
         val d = density

@@ -9,7 +9,7 @@ g = json.load(open(root + '/controllers/grid/controller.json'), object_pairs_hoo
 m = collections.OrderedDict()
 m['format'] = 1
 m['id'] = 'patrickreynolds/hex'
-m['version'] = '2.1.0'
+m['version'] = '2.2.0'
 m['name'] = 'Hex'
 m['description'] = ("Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape "
                     "in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or "
@@ -40,6 +40,8 @@ words = {
     'topScale': dict(name='Right keyboard: scale'),
     'topKey': dict(name='Right keyboard: key'),
     'topOctave': dict(name="Right keyboard: octave (from left's)"),
+    'third': dict(name='Third keyboard, right of the second'),
+    'thirdOctave': dict(name="Third keyboard: octave (from left's)"),
     'squareSize': dict(name='Key size (%)', hidden=True),
     'chromatic': dict(hidden=True, default=1),
     'insideDyn': dict(name='Up/down in a key: dynamics'),

@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.8.1",
+  "version": "2.9.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -13,9 +13,13 @@
   "orientation": "landscape",
   "parts": [
     "Left",
-    "Right"
+    "Right",
+    "Far right"
   ],
-  "partsFrom": "split",
+  "partsFrom": [
+    "split",
+    "third"
+  ],
   "arp": "app",
   "settings": [
     {
@@ -1101,6 +1105,29 @@
       "default": 0,
       "hidden": true,
       "group": "Controls"
+    },
+    {
+      "id": "third",
+      "name": "Third grid, right of the second",
+      "type": "switch",
+      "default": false,
+      "group": "Second grid",
+      "showIf": {
+        "split": true
+      }
+    },
+    {
+      "id": "thirdOctave",
+      "name": "Third grid: octave (from left's)",
+      "type": "number",
+      "min": -3,
+      "max": 3,
+      "step": 1,
+      "default": 0,
+      "group": "Second grid",
+      "showIf": {
+        "third": true
+      }
     }
   ]
 }

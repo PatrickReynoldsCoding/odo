@@ -230,3 +230,12 @@ with the engine's `mpe::scala` and gives it to the keyboard as settings (CONTROL
 - **Colours per degree**: Hexatone and the Lumatone editor let you pick each degree's colour.
 - Checked without a touch screen only: engine tests (every key of nine layout and tuning pairs
   played through the MESH), and desktop screenshots. Not by hand, not on Android.
+
+## A third keyboard (Hex 2.2.0, Grid 2.9.0)
+
+Second keyboard → **Third keyboard, right of the second** (with a second on): three keyboards side
+by side, each its own sound (the far right one the third: Sounds lists Left, Right, Far right).
+The right two share the second's room, half each. The third plays the second's notes (its rows,
+scale, key) from its own octave: **Third keyboard: octave (from left's)**. The manifest's
+`partsFrom` is `["split", "third"]`: one sound, two, or three (CONTROLLER_FORMAT.md). Both apps give a
+side up to four sounds. The Grid has the same (Third grid, right of the second).

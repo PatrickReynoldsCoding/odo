@@ -103,6 +103,8 @@ enum {
     /* Inside a square (its dynamics and tone) and sliding out past it, each on or off as a whole
        (their own settings kept); the buttons' places; the two new controls' moved places */
     S_INSIDE_ON, S_OUT_ON, S_SIDE_INSIDE, S_SIDE_OUT, S_PLACE7, S_PLACE8,
+    /* A third keyboard beside the second (its own part, the third sound), and its octave from the first's */
+    S_THIRD, S_THIRD_OCTAVE,
     /* The Hex keyboard's own, after these (hex.c) */
 #ifdef KEYS_EXTRA_SETTINGS
     KEYS_EXTRA_SETTINGS
@@ -184,8 +186,9 @@ static int turned;
 static int reset_places;           /* Put the moved controls back: asked, not yet done */
 static int eink;
 static int nodraw;              /* no one sees it (MESH_NODRAW): lay out, but draw nothing */
-static float center[2] = {60, 60}; /* the middle of each part's instrument, as a MIDI note */
+static float center[3] = {60, 60, 60}; /* the middle of each part's instrument, as a MIDI note */
 static int have_top;               /* the host has said where the top part's instrument is */
+static int have_third;             /* ... and the third's */
 static double now, last_tick = -1;
 static int dirty = 1;
 
@@ -208,7 +211,8 @@ typedef struct {
     float pos, colpos[8];          /* the scroll: rows slid by (fractions too); up each column, each column's */
     int flip, key, chrom, mask, ndeg, degs[12], kshift;
 } Half;
-static Half halves[2] = {{0, 700, 7, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0}, {0, 0, 0, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0}};
+static Half halves[3] = {{0, 700, 7, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0}, {0, 0, 0, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0},
+                         {0, 0, 0, 0, {0}, 0, 0, 0, 0xAB5, 7, {0}, 0}};
 static Half* hv = &halves[0];
 static int nhalves = 1;
 static int half_index(void) { return (int)(hv - halves); }
@@ -354,8 +358,10 @@ static void layout(void) {
     if (gw < 40) gw = 40;
     fit(gx, gw);
     /* Split: the line across at the top's share of the height, a little gap either side of it. */
-    nhalves = split_on() ? 2 : 1;
+    nhalves = split_on() ? (set_[S_THIRD] != 0 ? 3 : 2) : 1;
     float line = H * clampf((float)set_[S_SPLIT_SIZE] / 100.0f, 0.2f, 0.8f), half_gap = gap > 6 ? gap : 6;
+    /* Three: the right two share the right keyboard's room, half each. */
+    float line2 = line / 2;
     for (int h = 0; h < nhalves; h++) {
         Half* a = &halves[h];
         int bottom = h == 0;
@@ -365,16 +371,17 @@ static void layout(void) {
         a->key = bottom || set_[S_TOP_KEY] == 0 ? (int)set_[S_KEY] : (int)set_[S_TOP_KEY] - 1;
         a->chrom = bottom || set_[S_TOP_NOTES] == 0 ? set_[S_CHROMATIC] != 0 : set_[S_TOP_NOTES] == 2;
         a->flip = bottom ? set_[S_FLIP_Y] != 0 : set_[S_TOP_WAY] == 0 ? set_[S_FLIP_Y] == 0 : set_[S_FLIP_Y] != 0;
-        a->top = bottom ? (nhalves > 1 ? line + half_gap / 2 : 0) : 0;
-        a->bot = bottom ? H : line - half_gap / 2;
+        a->top = bottom ? (nhalves > 1 ? line + half_gap / 2 : 0) : h == 1 && nhalves > 2 ? line2 + half_gap / 2 : 0;
+        a->bot = bottom ? H : h == 1 ? line - half_gap / 2 : line2 - half_gap / 2;
         a->shown = (a->bot - a->top) / row_h;
         a->mask = MASKS[sc < 0 || sc > 8 ? 0 : sc];
         a->ndeg = 0;
         for (int d = 0; d < 12; d++) if ((a->mask >> d) & 1) a->degs[a->ndeg++] = d;
         hv = a;
         /* At no scroll, the middle of the half holds the note nearest its instrument's middle. */
-        float c = bottom || !have_top ? center[0] : center[1];
-        int oct = (int)set_[S_OCTAVE] + (bottom ? 0 : (int)set_[S_TOP_OCTAVE]);
+        /* The third: the second's notes, its own octave from the first's and its own instrument's middle. */
+        float c = bottom || !have_top ? center[0] : h == 2 && have_third ? center[2] : center[1];
+        int oct = (int)set_[S_OCTAVE] + (bottom ? 0 : h == 2 ? (int)set_[S_THIRD_OCTAVE] : (int)set_[S_TOP_OCTAVE]);
         a->kshift = shift_for(roundi(c + 12.0f * (float)oct));
     }
     hv = &halves[0];
@@ -384,7 +391,8 @@ static void layout(void) {
 /* The half at upright height y, or -1 on the line between. */
 static int half_at(float y) {
     if (nhalves < 2) return 0;
-    return y >= halves[0].top ? 0 : y <= halves[1].bot ? 1 : -1;
+    for (int h = 0; h < nhalves; h++) if (y >= halves[h].top && y <= halves[h].bot) return h;
+    return y >= halves[0].top ? 0 : -1;
 }
 
 static void keep(int index, double v);
@@ -2044,8 +2052,8 @@ static void draw_keys(const Theme* th) {
     }
     hv = &halves[0];
     /* Split: the line between the halves. */
-    if (nhalves > 1) {
-        float y = (halves[1].bot + halves[0].top) / 2;
+    for (int h = 1; h < nhalves; h++) {
+        float y = (halves[h].bot + halves[h - 1].top) / 2;
         g_line(left - gap / 2, y, left + cell * (float)cols - gap / 2, y, mesh_alpha(flat ? BLACK : th->hot, 0.6f), 2);
     }
 }
@@ -2097,9 +2105,10 @@ MESH_EXPORT(init) void init(float width, float height, int flags, double t) {
 }
 
 MESH_EXPORT(instrument) void instrument(int part, float center_note) {
-    if (part < 0 || part > 1) return;
+    if (part < 0 || part > 2) return;
     center[part] = center_note;
     if (part == 1) have_top = 1;
+    if (part == 2) have_third = 1;
     layout();
     dirty = 1;
 }

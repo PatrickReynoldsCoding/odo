@@ -110,7 +110,7 @@ static void recordAndPlay() {
     Live live(*grid);
     // Where two notes are on it, found by the layout (what a score uses too).
     take::Layout lay;
-    float c[2] = {60, 72};
+    float c[kCenters] = {60, 72, 72, 72};
     CHECK(lay.scan(*grid, live.host.values(), 800, 500, c), "the Grid's layout scans: %zu cells", lay.cells().size());
     const take::Layout::Cell* a = lay.find(60, -1, -1);
     const take::Layout::Cell* b = a ? lay.find(64, a->x, a->y) : nullptr;
@@ -338,7 +338,7 @@ static void authored() {
         }
         CHECK(parse(src, t, &err, &warnings) && warnings.empty() && !t.performed(), "%s: the score reads (%s)", pkg->name().c_str(), err.c_str());
         Report rep;
-        float c[2] = {60, 72};
+        float c[kCenters] = {60, 72, 72, 72};
         bool ok = prepare(t, *pkg, {}, 900, 500, c, &rep);
         for (const auto& e : rep.errors) std::printf("      %s\n", e.c_str());
         CHECK(ok && rep.errors.empty() && t.performed(), "%s: it expands and plays (%zu touches, %zu notes)", pkg->name().c_str(),
@@ -374,7 +374,7 @@ static void authored() {
     std::string err;
     parse("odo-take/1\ntempo: 100\nsettings: {\"chromatic\": 0, \"scale\": 0, \"key\": 0}\nscore\nC4:1 C#4:1 D4:1\nend\n", t, &err);
     Report rep;
-    float c[2] = {60, 72};
+    float c[kCenters] = {60, 72, 72, 72};
     prepare(t, *grid, {}, 900, 500, c, &rep);
     bool told = false;
     for (const auto& e : rep.errors) told |= e.find("C#4") != std::string::npos && e.find("line 5") != std::string::npos;
@@ -398,7 +398,7 @@ static void curves() {
     std::string err;
     CHECK(parse(text, t, &err) && !t.performed(), "a score with curves reads (%s)", err.c_str());
     Report rep;
-    float c[2] = {60, 60};
+    float c[kCenters] = {60, 60, 60, 60};
     CHECK(prepare(t, *pad, {}, 1000, 560, c, &rep) && rep.errors.empty(), "it plays on the touch pad (%s)",
           rep.errors.empty() ? "" : rep.errors[0].c_str());
     std::vector<Heard> h = heard(t);
@@ -451,7 +451,7 @@ static void relaid() {
         Take t;
         std::string err;
         parse(text, t, &err);
-        float c[2] = {60, 60};
+        float c[kCenters] = {60, 60, 60, 60};
         Report rep;
         CHECK(prepare(t, *hex, {}, 900, 500, c, &rep) && rep.errors.empty(), "relayout: it plays on the Hex at 900x500");
         if (fromNotes) t.score.clear();                 // as a take that was played, not written
@@ -504,7 +504,7 @@ static void hexMoved() {
         return v;
     };
     const View views[] = {{0, 0, 1, 0}, {0, 0, 1, 90}, {1.5, -2, 0.8, 37}, {-1, 0.5, 1.2, 210}, {0.5, 1, 1.0, 330}, {0, 0, 0.6, 120}};
-    float c[2] = {60, 60};
+    float c[kCenters] = {60, 60, 60, 60};
     for (const View& w : views) {
         Take t;
         std::string err;
@@ -572,17 +572,19 @@ static void examples() {
         bool ok = parse(ss.str(), t, &err, &warnings);
         Report rep;
         // Each part's middle from its sound, as odo lays a take out (60 and 72 without them).
-        float c[2] = {60, 72};
+        float c[kCenters] = {60, 72, 72, 72};
         if (!t.sides.empty())
-            for (size_t j = 0; j < 2 && j < t.sides[0].sounds.size(); j++) {
+            for (size_t j = 0; j < size_t(kCenters) && j < t.sides[0].sounds.size(); j++) {
                 const std::string& id = t.sides[0].sounds[j];
                 std::string perr;
                 auto snd = Package::read(std::string(MPE_TEST_PACKAGES) + "/" + id.substr(id.find('/') + 1) + ".odoi", &perr);
                 if (!snd) continue;
                 double lo = snd->manifest["range"][size_t(0)].num(), hi = snd->manifest["range"][size_t(1)].num();
                 if (lo > 0 && hi > 0) c[j] = float(69 + 12 * std::log2(std::sqrt(lo * hi) / 440));
-                if (t.sides[0].sounds.size() == 1) c[1] = c[0];
             }
+        // Parts past the sounds named play the last one.
+        if (!t.sides.empty() && !t.sides[0].sounds.empty())
+            for (size_t j = t.sides[0].sounds.size(); j < size_t(kCenters); j++) c[j] = c[j - 1];
         auto pkg = controller(t.sides.empty() || t.sides[0].controller.empty() ? "grid" : t.sides[0].controller.substr(t.sides[0].controller.find('/') + 1));
         ok = ok && pkg && prepare(t, *pkg, {}, 1000, 560, c, &rep);
         int wrong = 0;
@@ -606,7 +608,7 @@ static void looping() {
     std::stringstream ss;
     ss << in.rdbuf();
     Take t;
-    float c[2] = {60, 72};
+    float c[kCenters] = {60, 72, 72, 72};
     if (!parse(ss.str(), t) || !prepare(t, *grid, {}, 900, 500, c)) { CHECK(false, "ode-to-joy.odotake prepares"); return; }
     Player p;
     p.load(t);

@@ -856,18 +856,28 @@ struct App {
         return -1;
     }
 
-    // How many sounds side k's controller plays now: its parts, as many as its "partsFrom" setting
-    // says (the Grid's split: one, or two), or all of them; 1 to 2.
+    // How many sounds side k's controller plays now: its parts, as many as its "partsFrom" says (a
+    // setting's value + 1, the Grid's split: one, or two; or a list of settings, one more for each
+    // that is on up to the first that is off: its split, then its third), or all of them; 1 to kParts.
     int partsOf(int k) const {
         const Side& sd = sides[k];
         if (!sd.host) return 1;
         const mpe::Json& m = sd.host->manifest();
         int n = std::max(1, int(m["parts"].size()));
-        std::string from = m["partsFrom"].str();
-        if (!from.empty()) {
+        const mpe::Json& from = m["partsFrom"];
+        std::vector<std::string> ids;
+        if (from.size() > 0) for (size_t j = 0; j < from.size(); j++) ids.push_back(from[j].str());
+        else if (!from.str().empty()) ids.push_back(from.str());
+        if (!ids.empty()) {
             const mpe::Json& st = m["settings"];
-            for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++)
-                if (st[i]["id"].str() == from) { n = std::min(n, 1 + int(sd.settings[i])); break; }
+            int on = 1;
+            for (const std::string& id : ids) {
+                double v = 0;
+                for (size_t i = 0; i < st.size() && i < sd.settings.size(); i++) if (st[i]["id"].str() == id) { v = sd.settings[i]; break; }
+                if (v == 0) break;
+                on += int(v);
+            }
+            n = std::min(n, on);
         }
         return std::clamp(n, 1, mpe::kParts);
     }
@@ -1285,8 +1295,8 @@ struct App {
         Side& sd = sides[0];
         if (!sd.host) { takeNote = "No controller to play it on."; return; }
         if (!t.performed()) {
-            float centers[2] = {60, 72};
-            for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
+            float centers[mpe::take::kCenters] = {60, 72, 72, 72};
+            for (int j = 0; j < mpe::take::kCenters && !lib.instruments.empty(); j++)
                 centers[j] = centerNote(*lib.instruments[size_t(soundOf(0, std::min(j, partsOf(0) - 1)))].pkg);
             mpe::take::Report rep;
             bool ok = mpe::take::prepare(t, *lib.controllers[size_t(sd.controller)], sd.settings, sd.w, sd.h, centers, &rep);
@@ -1317,8 +1327,8 @@ struct App {
         laidAt = now; laidW = sd.w; laidH = sd.h; laidValues = sd.settings;
         const mpe::Package& pkg = *lib.controllers[size_t(sd.controller)];
         if (mpe::take::laidOutFor(loadedTake, pkg.manifest, sd.settings, sd.w, sd.h)) { player.retouch(loadedTake.touches); return; }
-        float centers[2] = {60, 72};
-        for (int j = 0; j < 2 && !lib.instruments.empty(); j++)
+        float centers[mpe::take::kCenters] = {60, 72, 72, 72};
+        for (int j = 0; j < mpe::take::kCenters && !lib.instruments.empty(); j++)
             centers[j] = centerNote(*lib.instruments[size_t(soundOf(0, std::min(j, partsOf(0) - 1)))].pkg);
         mpe::take::Take t = loadedTake;
         if (mpe::take::relayout(t, pkg, sd.settings, sd.w, sd.h, centers)) player.retouch(std::move(t.touches));
