@@ -194,6 +194,12 @@ fun PresetSheet(onClose: () -> Unit) {
 
 internal fun presetSummary(p: Preset): String {
     fun name(id: String) = AppState.instruments.firstOrNull { it.id == id }?.name ?: id
+    // Split: the split, its sides' controllers and their sounds, as odo for computers says it.
+    if (p.split != 0) {
+        val ctls = (listOfNotNull(p.controller) + p.more.map { it.controller }).map { Controllers.byId(it).name }.distinct()
+        val sounds = (listOf(p.perf.part(0)) + p.more.map { it.parts[0] }).map { name(it.instrument) }
+        return com.patrickreynolds.mpeinstruments.Splits.of(p.split).name + " · " + ctls.joinToString(" + ") + " · " + sounds.joinToString(", ")
+    }
     val s = p.settings?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
     val pad = p.controller == LegacyTouchPad.ID || p.controller == LegacyTouchPad.PACKAGE
     // Its split: in the Kotlin touch pad's settings, or the package's.

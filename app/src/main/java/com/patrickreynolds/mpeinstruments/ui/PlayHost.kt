@@ -52,6 +52,7 @@ import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.PadSettings
 import com.patrickreynolds.mpeinstruments.Part
 import com.patrickreynolds.mpeinstruments.PhoneMods
+import com.patrickreynolds.mpeinstruments.Splits
 import com.patrickreynolds.mpeinstruments.Stats
 import com.patrickreynolds.mpeinstruments.Updater
 import com.patrickreynolds.mpeinstruments.controllers.ArpUse
@@ -63,7 +64,7 @@ import kotlinx.coroutines.delay
 
 /** The colour of part [k] on the rail: the controller's own, else the theme's, else the app's. */
 fun partColor(t: PadTheme, k: Int): Color =
-    AppState.controller.partColors?.getOrNull(k) ?: t.parts.getOrNull(k) ?: PartColors.getOrElse(k) { PartColors[0] }
+    AppState.controller.partColors?.getOrNull(k) ?: t.parts.getOrNull(k) ?: PartColors.getOrElse(k) { Accent }
 
 /** The touch pad's look while it is in use (the loop buttons take their colours from it), else the default one. */
 fun hostTheme(): PadTheme {
@@ -95,16 +96,23 @@ fun PlayHost(onClose: () -> Unit) {
         // A phone gets a narrower rail than a tablet or a computer's 300.
         val railW = if (maxWidth >= 1000.dp) 300.dp else 256.dp
         // An upright controller keeps its size and place: the rail lies over it.
-        val over = c.upright
+        val over = AppState.sideController(0).upright
+        // Split, every side on the play area at once (PackageSides); else the controller's own surface.
+        val split = (0 until AppState.count).mapNotNull { AppState.sideController(it) as? PackageController }
+        @Composable
+        fun surface() {
+            if (AppState.count > 1 && split.size == AppState.count) PackageSides(split)
+            // A new surface for each controller: the old one lets go of its notes as it goes.
+            else key(c.id) { c.Surface(part) }
+        }
         if (over) Box(Modifier.fillMaxSize()) {
-            key(c.id) { c.Surface(part) }
+            surface()
             if (dock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
         Row(Modifier.fillMaxSize()) {
             if (!AppState.railHidden) Rail(railW, pane, { p -> pane = if (pane == p) null else p }, onClose)
             if (!over) Box(Modifier.weight(1f).fillMaxHeight()) {
-                // A new surface for each controller: the old one lets go of its notes as it goes.
-                key(c.id) { c.Surface(part) }
+                surface()
                 if (dock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
             }
         }
@@ -130,6 +138,7 @@ fun PlayHost(onClose: () -> Unit) {
 /** What the panel beside the rail shows. */
 sealed interface Pane {
     data object Presets : Pane
+    data object Split : Pane
     data object Controller : Pane
     /** The sound picker for part [part]. */
     data class Sound(val part: Int) : Pane
@@ -152,7 +161,7 @@ class RailEntry(val name: String, val summary: String, val count: Int?, val pane
 @Composable
 private fun Rail(width: Dp, pane: Pane?, open: (Pane) -> Unit, onClose: () -> Unit) {
     val c = AppState.controller
-    val accent = PartColors[0]
+    val accent = Accent
     Column(Modifier.width(width).fillMaxHeight().background(Ink)
                .then(if (Eink) Modifier.border(BorderStroke(2.dp, Line)) else Modifier)) {
         Row(Modifier.fillMaxWidth().height(46.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -163,10 +172,18 @@ private fun Rail(width: Dp, pane: Pane?, open: (Pane) -> Unit, onClose: () -> Un
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 2.dp),
                verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PresetTile(pane == Pane.Presets) { open(Pane.Presets) }
-            ControllerTile(pane == Pane.Controller) { open(Pane.Controller) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SplitTile(pane == Pane.Split, Modifier.weight(1f)) { open(Pane.Split) }
+                ControllerTile(pane == Pane.Controller, Modifier.weight(1f)) { open(Pane.Controller) }
+            }
             SoundTile(pane) { k -> AppState.side = k; open(Pane.Sound(k)) }
+            // Split: which side the rail changes, each side as it lies on the screen.
+            if (AppState.count > 1) Column {
+                Eyebrow("CHANGING")
+                SidesMap { k -> if (k != AppState.activeSide) { AppState.setActive(k); if (pane is Pane.Group) open(pane) } }
+            }
             Column {
-                Eyebrow(c.name.uppercase())
+                Eyebrow(c.name.uppercase() + if (AppState.count > 1) " · " + AppState.sideName(AppState.activeSide).uppercase() else "")
                 for (e in controllerEntries()) GroupRow(e, e.on || (e.pane != null && pane == e.pane)) { e.tap?.invoke() ?: e.pane?.let(open) }
                 Eyebrow(if (AppState.twoParts) "SOUND · ${partLabel(AppState.part).uppercase()}" else "SOUND")
                 for (e in soundEntries()) GroupRow(e, pane == e.pane) { e.pane?.let(open) }
@@ -206,7 +223,7 @@ private fun TopButton(what: String, onClick: () -> Unit) {
 private fun Tile(open: Boolean, modifier: Modifier = Modifier, onClick: (() -> Unit)?, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Column(modifier.fillMaxWidth().clip(shape).background(if (open) PanelHigh else Panel)
-               .then(if (open || Eink) Modifier.border(if (open) 2.dp else 1.5.dp, if (open && !Eink) PartColors[0] else Line, shape) else Modifier)
+               .then(if (open || Eink) Modifier.border(if (open) 2.dp else 1.5.dp, if (open && !Eink) Accent else Line, shape) else Modifier)
                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                .padding(horizontal = 12.dp, vertical = 8.dp), content = content)
 }
@@ -228,16 +245,72 @@ private fun PresetTile(open: Boolean, onClick: () -> Unit) = Tile(open, onClick 
     TileEyebrow("PRESET")
     Text(name.ifEmpty { "None" }, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     Text(when { edited -> if (p?.builtIn == true) "Changed since loaded" else "Changed since saved"; p == null -> "Keep what plays as a preset"; else -> presetSummary(p) },
-         color = if (edited) PartColors[0] else TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+         color = if (edited) Accent else TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** The controller: its drawing and its name. */
 @Composable
-private fun ControllerTile(open: Boolean, onClick: () -> Unit) = Tile(open, onClick = onClick) {
+private fun ControllerTile(open: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) = Tile(open, modifier, onClick = onClick) {
     val c = AppState.controller
     TileEyebrow("CONTROLLER")
-    ControllerPic(c.id, c.name, if (Eink) Fg else PartColors[0], Modifier.padding(vertical = 4.dp).size(46.dp, 32.dp))
+    ControllerPic(c.id, c.name, if (Eink) Fg else Accent, Modifier.padding(vertical = 4.dp).size(46.dp, 32.dp))
     Text(c.name, color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/** The split: its drawing (the side the rail changes filled) and its name. */
+@Composable
+private fun SplitTile(open: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) = Tile(open, modifier, onClick = onClick) {
+    TileEyebrow("SPLIT")
+    SplitPic(AppState.split, if (AppState.count > 1) AppState.activeSide else -1, if (Eink) Fg else Accent,
+             Modifier.padding(vertical = 5.dp).size(46.dp, 30.dp))
+    Text(Splits.of(AppState.split).name, color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/** A split, drawn: its sides as boxes; [activeSide] filled (-1: none). As odo for computers' splitPic. */
+@Composable
+fun SplitPic(n: Int, activeSide: Int, c: Color, modifier: Modifier) = Canvas(modifier) {
+    val sp = Splits.of(n)
+    val g = 3.dp.toPx()
+    val cw = (size.width - g * (sp.cols - 1)) / sp.cols
+    val rh = (size.height - g * (sp.rows - 1)) / sp.rows
+    val r = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
+    for (k in 0 until sp.sides) {
+        val o = Offset((k % sp.cols) * (cw + g), (k / sp.cols) * (rh + g))
+        val s = androidx.compose.ui.geometry.Size(cw, rh)
+        if (k == activeSide) drawRoundRect(c.copy(alpha = 0.45f), o, s, r)
+        drawRoundRect(c, o, s, r, style = androidx.compose.ui.graphics.drawscope.Stroke(1.6.dp.toPx()))
+    }
+}
+
+/** Under CHANGING: the sides as they lie on the screen, each its name and "Controller · Sound"; the
+ *  one the rail changes outlined in its colour. A tap changes that one. */
+@Composable
+private fun SidesMap(pick: (Int) -> Unit) {
+    val sp = Splits.of(AppState.split)
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(Panel).then(if (Eink) Modifier.border(2.dp, Line, shape) else Modifier)
+               .padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (row in 0 until sp.rows) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (col in 0 until sp.cols) {
+                val k = row * sp.cols + col
+                if (k >= sp.sides) { Spacer(Modifier.weight(1f)); continue }
+                val on = k == AppState.activeSide
+                val cell = RoundedCornerShape(8.dp)
+                val colour = sideColour(k)
+                val ctl = AppState.sideController(k)
+                val what = ctl.name + (AppState.instrumentOf(k, 0)?.let { " · " + it.name } ?: "")
+                Column(Modifier.weight(1f).height(38.dp).clip(cell)
+                           .background(if (on) (if (Eink) Fg else colour.copy(alpha = 0x38 / 255f)) else Ink)
+                           .border(if (on) 2.dp else 1.dp, if (on) (if (Eink) Fg else colour) else Line, cell)
+                           .clickable { pick(k) }.padding(horizontal = 8.dp, vertical = 3.dp),
+                       verticalArrangement = Arrangement.Center) {
+                    Text(sp.side[k], color = if (on && Eink) Ink else Fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                         overflow = TextOverflow.Ellipsis)
+                    Text(what, color = if (on && Eink) Ink else TextDim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
 }
 
 /** The sound, or each part's (a split's, or the main sound and its layer): a badge, the name, its pack and group. */
@@ -259,7 +332,7 @@ private fun SoundTile(pane: Pane?, pick: (Int) -> Unit) = Tile(pane is Pane.Soun
             Column(Modifier.padding(start = 10.dp).weight(1f)) {
                 Row {
                     if (n > 1) Text(partLabel(k) + " ", color = TextDim, fontSize = 14.sp, maxLines = 1)
-                    Text((inst?.name ?: "?") + if (inst != null && !inst.newest) " ${inst.version}" else "", color = if (open) PartColors[0] else Fg, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    Text((inst?.name ?: "?") + if (inst != null && !inst.newest) " ${inst.version}" else "", color = if (open) Accent else Fg, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                          maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 val id = inst?.id ?: ""
@@ -276,7 +349,7 @@ private fun SoundTile(pane: Pane?, pick: (Int) -> Unit) = Tile(pane is Pane.Soun
 @Composable
 private fun GroupRow(e: RailEntry, open: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
-    val nameColour = when { open && Eink -> Ink; open -> PartColors[0]; else -> Fg }
+    val nameColour = when { open && Eink -> Ink; open -> Accent; else -> Fg }
     val dim = if (open && Eink) Ink else TextDim
     Row(Modifier.fillMaxWidth().height(50.dp).padding(bottom = 2.dp).clip(shape)
             .then(if (open) Modifier.background(if (Eink) Fg else PanelHigh) else Modifier)
@@ -313,7 +386,7 @@ private fun RailFoot() {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         Text("odo ${BuildConfig.VERSION_NAME}" + if (msg.isNotEmpty() && act == null) " · $msg" else "", color = TextDim,
              fontSize = Tokens.Type.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (act != null) Text(msg, color = PartColors[0], fontSize = Tokens.Type.header, fontWeight = FontWeight.Bold, maxLines = 1,
+        if (act != null) Text(msg, color = Accent, fontSize = Tokens.Type.header, fontWeight = FontWeight.Bold, maxLines = 1,
                               overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = act))
         stats?.let { st ->
             Text("Latency %.1f ms, max %.1f · Load %.0f%% · Voices %d".format(st.eventAgeAvgMs, st.eventAgeMaxMs, 100 * st.loadAvg, st.voices),
@@ -364,7 +437,7 @@ private fun soundEntries(): List<RailEntry> {
     val p = AppState.perf.part(k)
     return listOfNotNull(
         RailEntry("Octave and layer", "Octave " + (if (p.transpose == 0) "0" else "%+d".format(p.transpose / 12)) +
-                  if (AppState.shape.split) "" else " · layer " + if (AppState.perf.layered) "on" else "off", null, Pane.Own("Octave and layer")),
+                  if (AppState.shape.split || AppState.count > 1) "" else " · layer " + if (AppState.perf.layered) "on" else "off", null, Pane.Own("Octave and layer")),
         RailEntry("Effects", effectsSummary(p) + " · release " + releaseName(p.release).lowercase(), null, Pane.Own("Effects")),
         if (AppState.controller.arpUse == ArpUse.App) {
             val arp = AppState.perf.part(arpPart(k)).arp
@@ -383,7 +456,7 @@ private fun appEntries(): List<RailEntry> = listOfNotNull(
 )
 
 /** Layered, both parts arpeggiate as the main one does, so that one is changed. */
-internal fun arpPart(k: Int) = if (AppState.perf.layout(AppState.shape) == 2) 0 else k
+internal fun arpPart(k: Int) = if (AppState.layeredNow) 0 else k
 
 /** The volume as odo for computers shows it: 100% is the engine's usual level. */
 internal fun masterPercent() = Math.round(AppState.volume / 0.8f * 100)

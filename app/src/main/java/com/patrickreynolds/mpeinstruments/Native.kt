@@ -14,21 +14,37 @@ object Native {
     /** One MIDI message from the on-screen pad (UI thread only). */
     external fun nativeTouch(status: Int, d1: Int, d2: Int)
 
-    // A controller package (.odoc) running in the engine (wasm3): one at a time, UI thread only.
-    external fun nativeCtlLoad(bytes: ByteArray): Boolean
-    external fun nativeCtlError(): String
-    external fun nativeCtlUnload()
+    // Controller packages (.odoc) running in the engine (wasm3): one for each side of the screen
+    // (a split's, 0..3), each its own host. UI thread only.
+    external fun nativeCtlLoad(side: Int, bytes: ByteArray): Boolean
+    external fun nativeCtlError(side: Int): String
+    external fun nativeCtlUnload(side: Int)
     /** Its surface in dp; flags 1 = e-ink. */
-    external fun nativeCtlInit(width: Float, height: Float, flags: Int)
-    external fun nativeCtlInstrument(part: Int, centerNote: Float)
+    external fun nativeCtlInit(side: Int, width: Float, height: Float, flags: Int)
+    external fun nativeCtlInstrument(side: Int, part: Int, centerNote: Float)
     /** phase: 0 down, 1 move, 2 up, 3 cancel; x, y in dp. */
-    external fun nativeCtlTouch(id: Int, phase: Int, x: Float, y: Float, size: Float, force: Float)
-    external fun nativeCtlSetting(index: Int, value: Double)
-    external fun nativeCtlStop()
+    external fun nativeCtlTouch(side: Int, id: Int, phase: Int, x: Float, y: Float, size: Float, force: Float)
+    external fun nativeCtlSetting(side: Int, index: Int, value: Double)
+    external fun nativeCtlStop(side: Int)
+    /** Where its notes go: its first part (the sides' parts follow one another), and its MIDI channels
+     *  first .. first + count - 1 (of 1..15), as odo for computers' route(). */
+    external fun nativeCtlRoute(side: Int, part: Int, firstChannel: Int, channels: Int)
     /** A frame: its draw list if it changed (docs/formats/CONTROLLER_FORMAT.md), else null. */
-    external fun nativeCtlTick(): ByteArray?
+    external fun nativeCtlTick(side: Int): ByteArray?
     /** Settings it changed itself (its editor, a button on its surface): index, value pairs, or null. */
-    external fun nativeCtlTakeSettings(): DoubleArray?
+    external fun nativeCtlTakeSettings(side: Int): DoubleArray?
+
+    // Splits of the screen (engine mpe/split.h): the same as odo for computers'. Any thread.
+    /** The splits as UTF-8 JSON: [{"name", "sides", "cols", "side": [names]}]. */
+    external fun nativeSplits(): ByteArray
+    /** Split n's dividers from [at] (evenly if it has not as many), kept in order and apart. */
+    external fun nativeSplitDividers(n: Int, at: DoubleArray): DoubleArray
+    /** Each side's region as fractions of the play area: x, y, w, h, side after side. */
+    external fun nativeSplitRegions(n: Int, at: DoubleArray): DoubleArray
+    /** The divider within [grab] dp of (x, y) in a w x h dp play area, or -1. */
+    external fun nativeSplitDividerAt(n: Int, at: DoubleArray, x: Double, y: Double, w: Double, h: Double, grab: Double): Int
+    /** Divider [i] dragged to (x, y), fractions of the play area: the dividers then. */
+    external fun nativeSplitDragged(n: Int, at: DoubleArray, i: Int, x: Double, y: Double): DoubleArray
 
     // The rail's settings model (engine mpe/rail.h), from a controller's manifest: the same rows and
     // steps as odo for computers. It needs no controller loaded. Any thread.

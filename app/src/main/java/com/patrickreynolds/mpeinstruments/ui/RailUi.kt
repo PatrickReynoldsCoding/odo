@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.Preset
+import com.patrickreynolds.mpeinstruments.Splits
 import com.patrickreynolds.mpeinstruments.controllers.Controller
 import com.patrickreynolds.mpeinstruments.controllers.Controllers
 import com.patrickreynolds.mpeinstruments.controllers.PackageController
@@ -82,18 +83,23 @@ fun RailPanel(p: Pane, start: Dp, width: Dp, go: (Pane?) -> Unit, close: () -> U
     val k = AppState.part
     val two = AppState.twoParts
     val c = AppState.controller
+    // Split: which side the panel changes ("For the left side"), as odo for computers says it.
+    val forSide = if (AppState.count > 1) "For the ${AppState.sideName(AppState.activeSide).lowercase()} side" else ""
+    val sideWord = if (AppState.count > 1) " · ${AppState.sideName(AppState.activeSide)} side" else ""
     when (p) {
         Pane.Presets -> PanelFrame(start, width, "Presets", "The sound, the controller and its settings", close) { PresetsPanel() }
-        Pane.Controller -> PanelFrame(start, width, "Controller", "What you play on", close) { ControllersPanel() }
+        Pane.Split -> PanelFrame(start, width, "Split", "Share the screen: each side its own controller and sound", close) { SplitsPanel() }
+        Pane.Controller -> PanelFrame(start, width, "Controller", forSide.ifEmpty { "What you play on" }, close) { ControllersPanel() }
         is Pane.Sound -> {
             if (p.part >= AppState.partCount) { SideEffect { go(null) }; return }
-            PanelFrame(start, width, if (two) "Sound: ${partLabel(p.part)}" else "Sound", "Type to find one", close) { SoundsPanel(p.part) }
+            PanelFrame(start, width, if (two) "Sound: ${partLabel(p.part)}" else "Sound",
+                       if (forSide.isEmpty()) "Type to find one" else "$forSide · type to find one", close) { SoundsPanel(p.part) }
         }
         is Pane.Group -> {
             if (c is PackageController) {
                 val g = c.railGroups().firstOrNull { it.name == p.name }
                 if (g == null) { SideEffect { go(null) }; return }
-                PanelFrame(start, width, groupLabel(g.name), c.name, close) { GroupPanel(c, g) }
+                PanelFrame(start, width, groupLabel(g.name), c.name + sideWord, close) { GroupPanel(c, g) }
             } else {
                 val o = c.options(k).firstOrNull { it.label == p.name && it.panel != null }
                 if (o == null) { SideEffect { go(null) }; return }
@@ -102,7 +108,7 @@ fun RailPanel(p: Pane, start: Dp, width: Dp, go: (Pane?) -> Unit, close: () -> U
         }
         is Pane.Own -> {
             val forPart = if (two) "For the ${partLabel(k).lowercase()} sound" else ""
-            val accent = if (Eink) Color.Black else PartColors[0]
+            val accent = if (Eink) Color.Black else Accent
             when (p.name) {
                 "Octave and layer" -> PanelFrame(start, width, p.name, forPart.ifEmpty { AppState.instrument(k)?.name ?: "" }, close) {
                     SoundControls(k, accent)
@@ -142,7 +148,7 @@ private fun PanelFrame(start: Dp, width: Dp, title: String, sub: String, close: 
                     Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (sub.isNotEmpty()) Text(sub, color = TextDim, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                TextButton(onClick = close, modifier = Modifier.focusProperties { canFocus = false }) { Text("Done", color = PartColors[0], fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = close, modifier = Modifier.focusProperties { canFocus = false }) { Text("Done", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
             }
             Column(Modifier.verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
                    content = content)
@@ -175,7 +181,7 @@ private fun PRow(text: String, sub: String = "", on: Boolean = false, rule: Bool
         verticalAlignment = Alignment.CenterVertically) {
         if (pic != null) { Box(Modifier.size(width = 40.dp, height = 30.dp)) { pic() }; Spacer(Modifier.width(12.dp)) }
         Column(Modifier.weight(1f)) {
-            Text(text, color = when { on -> PartColors[0]; danger -> Warn; else -> Fg }, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            Text(text, color = when { on -> Accent; danger -> Warn; else -> Fg }, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                  maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (sub.isNotEmpty()) Text(sub, color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -215,7 +221,7 @@ private fun PFold(label: String, value: String, open: Boolean, rule: Boolean, on
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(value, color = if (open) PartColors[0] else TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(value, color = if (open) Accent else TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         val dim = TextDim
         Canvas(Modifier.size(12.dp)) {
@@ -237,18 +243,18 @@ fun PChips(names: List<String>, chosen: Int, onPick: (Int) -> Unit) {
             val on = i == chosen
             val shape = RoundedCornerShape(8.dp)
             Box(Modifier.height(34.dp).clip(shape)
-                    .then(if (on) Modifier.background(if (Eink) Fg else PartColors[0].copy(alpha = 0x38 / 255f)) else Modifier)
-                    .border(if (Eink) 2.dp else 1.dp, if (Eink) Line else if (on) PartColors[0] else Line, shape)
+                    .then(if (on) Modifier.background(if (Eink) Fg else Accent.copy(alpha = 0x38 / 255f)) else Modifier)
+                    .border(if (Eink) 2.dp else 1.dp, if (Eink) Line else if (on) Accent else Line, shape)
                     .clickable { onPick(i) }.padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center) {
-                Text(name, color = when { on && Eink -> Ink; on -> PartColors[0]; else -> Fg }, fontSize = 13.sp, maxLines = 1)
+                Text(name, color = when { on && Eink -> Ink; on -> Accent; else -> Fg }, fontSize = 13.sp, maxLines = 1)
             }
         }
     }
 }
 
 @Composable
-private fun PSlider(fraction: Float, onChange: (Float) -> Unit) = OdoSlider(fraction, PartColors[0], onChange)
+private fun PSlider(fraction: Float, onChange: (Float) -> Unit) = OdoSlider(fraction, Accent, onChange)
 
 /** A box to type in: the accent round it, [hint] while it is empty. */
 @Composable
@@ -262,14 +268,14 @@ private fun PField(text: String, hint: String, onChange: (String) -> Unit, focus
         androidx.compose.ui.text.TextRange(if (focus) 0 else text.length, text.length))) }
     if (value.text != text) value = value.copy(text = text, selection = androidx.compose.ui.text.TextRange(text.length))
     BasicTextField(value, { v -> value = v; if (v.text != text) onChange(v.text) }, singleLine = true, textStyle = TextStyle(color = Fg, fontSize = 14.sp),
-                   cursorBrush = SolidColor(PartColors[0]),
+                   cursorBrush = SolidColor(Accent),
                    keyboardOptions = KeyboardOptions(imeAction = if (onDone != null) ImeAction.Done else ImeAction.Search),
                    keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
                    modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().then(
                        if (focus) Modifier.focusRequester(asked) else Modifier),
                    decorationBox = { inner ->
                        Box(Modifier.fillMaxWidth().height(40.dp).clip(shape).background(Ink)
-                               .border(if (Eink) 2.dp else 1.5.dp, PartColors[0], shape).padding(horizontal = 12.dp),
+                               .border(if (Eink) 2.dp else 1.5.dp, Accent, shape).padding(horizontal = 12.dp),
                            contentAlignment = Alignment.CenterStart) {
                            if (text.isEmpty()) Text(hint, color = TextDim, fontSize = 14.sp)
                            inner()
@@ -293,7 +299,7 @@ private fun PresetsPanel() {
     fun row(p: Preset) {
         val on = p.name == current
         PRow(p.name, presetSummary(p), on = on,
-             pic = { p.controller?.let { ControllerPic(Controllers.byId(it).id, Controllers.byId(it).name, if (on) PartColors[0] else dim, Modifier.size(38.dp, 30.dp)) } }) {
+             pic = { p.controller?.let { ControllerPic(Controllers.byId(it).id, Controllers.byId(it).name, if (on) Accent else dim, Modifier.size(38.dp, 30.dp)) } }) {
             AppState.load(p); renaming = false; confirmDelete = false
         }
     }
@@ -345,7 +351,8 @@ private fun PresetsPanel() {
 /** The controllers, two to a row: each drawn, its name, and what it is. */
 @Composable
 private fun ControllersPanel() {
-    val all = Controllers.all
+    // Split, the side's own controllers: a split's sides are played on the screen (no External MIDI).
+    val all = Controllers.forSide(AppState.activeSide).filter { AppState.count == 1 || it !== com.patrickreynolds.mpeinstruments.controllers.ExternalMidi }
     for (row in all.chunked(2)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (c in row) ControllerCard(c, Modifier.weight(1f))
@@ -353,6 +360,29 @@ private fun ControllersPanel() {
         }
     }
     PNote("Each controller keeps its own settings. The sound, its arp, effects, loops and presets stay as they are when you switch.")
+    if (AppState.count > 1) PNote("External MIDI plays on the whole screen: Split, Whole, to play it.")
+}
+
+/** The splits, two to a row: each drawn, its name and how many sides. Each side its own controller and sound. */
+@Composable
+private fun SplitsPanel() {
+    for (row in Splits.all.indices.chunked(2)) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (k in row) {
+                val on = k == AppState.split
+                val shape = RoundedCornerShape(12.dp)
+                val sp = Splits.of(k)
+                Column(Modifier.weight(1f).height(96.dp).clip(shape).background(Ink).border(if (on) 2.dp else 1.dp, if (on) Accent else Line, shape)
+                           .clickable { AppState.setSplit(k) }.padding(10.dp)) {
+                    SplitPic(k, -1, if (on) Accent else TextDim, Modifier.size(52.dp, 34.dp))
+                    Spacer(Modifier.weight(1f))
+                    Text(sp.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(Splits.sidesWord(sp.sides), color = TextDim, fontSize = 11.sp, maxLines = 1)
+                }
+            }
+            if (row.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
 }
 
 @Composable
@@ -363,9 +393,9 @@ private fun ControllerCard(c: Controller, modifier: Modifier) {
         val cut = d.indexOfFirst { it == ':' || it == ';' || it == ',' }
         if (cut >= 0) d.substring(0, cut) else d
     }
-    Column(modifier.height(100.dp).clip(shape).background(Ink).border(if (on) 2.dp else 1.dp, if (on) PartColors[0] else Line, shape)
+    Column(modifier.height(100.dp).clip(shape).background(Ink).border(if (on) 2.dp else 1.dp, if (on) Accent else Line, shape)
                .clickable { AppState.switchController(c) }.padding(10.dp)) {
-        ControllerPic(c.id, c.name, if (on) PartColors[0] else TextDim, Modifier.size(58.dp, 40.dp))
+        ControllerPic(c.id, c.name, if (on) Accent else TextDim, Modifier.size(58.dp, 40.dp))
         Spacer(Modifier.weight(1f))
         Text(c.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(about, color = TextDim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

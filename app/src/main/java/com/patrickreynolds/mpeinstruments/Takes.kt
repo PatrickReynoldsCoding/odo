@@ -131,8 +131,8 @@ object Takes {
             return
         }
         stop()
-        if (AppState.controller !is PackageController) { note = "Takes are recorded from a controller on the screen."; return }
-        val sounds = (0 until AppState.partCount).mapNotNull { AppState.instrument(it)?.id }.joinToString("\n")
+        if (AppState.sideController(0) !is PackageController) { note = "Takes are recorded from a controller on the screen."; return }
+        val sounds = (0 until AppState.sidePartCount(0)).mapNotNull { AppState.instrumentOf(0, it)?.id }.joinToString("\n")
         // What plays now, as a preset, and the volume: kept in the take, so it plays back as it was played.
         val setup = AppState.currentPresetFileText()
         if (!Native.nativeTakeRecord(sounds.toByteArray(Charsets.UTF_8), setup.toByteArray(Charsets.UTF_8), AppState.volume / 0.8))
@@ -179,14 +179,14 @@ object Takes {
         if (playing == mode + 1) { stop(); return }
         stop()
         if (recording >= 0) toggleRecord()
-        val switched = t.controller.isNotEmpty() && AppState.controller.id != t.controller
+        val switched = t.controller.isNotEmpty() && AppState.sideController(0).id != t.controller
         val said = apply(t, keep = false, said = "") ?: return
         if (switched) {
             note = "Its controller is on the screen now: tap ${if (mode == 0) "Listen" else "Play along"} again."
             return                               // its surface opens and loads it first
         }
         val left = said.substringAfter(". ", "")  // what of its set-up is not here
-        val c = AppState.controller as? PackageController ?: run { note = "Takes play on a controller on the screen."; return }
+        val c = AppState.sideController(0) as? PackageController ?: run { note = "Takes play on a controller on the screen."; return }
         val centers = partCenters()
         val r = String(Native.nativeTakePlay(t.file.readBytes(), mode, c.values.toDoubleArray(), surfaceW, surfaceH, centers,
                                              speed, loop), Charsets.UTF_8)
@@ -208,7 +208,7 @@ object Takes {
     /** While a take plays: if the surface or the controller's settings changed (the rail closed, a
      *  layout setting), lay its ghost fingers out again so they stay on the keys (at most 4 a second). */
     private fun followLayout(w: Float, h: Float) {
-        val c = AppState.controller as? PackageController ?: return
+        val c = AppState.sideController(0) as? PackageController ?: return
         val values = c.values.toList()
         if (Math.abs(w - laidW) < 0.5f && Math.abs(h - laidH) < 0.5f && values == laidValues) return
         val now = System.currentTimeMillis()
@@ -221,7 +221,7 @@ object Takes {
 
     /** Each part's instrument middle (MIDI note), for laying a take out: four, the parts past those
      *  playing as the last one. */
-    private fun partCenters() = FloatArray(4) { AppState.instrument(it.coerceAtMost(AppState.partCount - 1))?.centerNote ?: 60f }
+    private fun partCenters() = FloatArray(4) { AppState.instrumentOf(0, it.coerceAtMost(AppState.sidePartCount(0) - 1))?.centerNote ?: 60f }
 
     fun changeSpeed(s: Double) { speed = s; Native.nativeTakeSpeed(s) }
     fun changeLoop(k: Int) { loop = k; Native.nativeTakeLoop(k) }

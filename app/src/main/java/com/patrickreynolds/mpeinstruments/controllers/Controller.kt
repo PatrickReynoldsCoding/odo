@@ -104,9 +104,29 @@ data class Option(
  * Grid it replaced, is no longer offered, and presets that used it open the package.
  */
 object Controllers {
+    /** The first side's packages; [forSide] gives the others theirs. */
     var packaged: List<PackageController> = emptyList()
+        set(v) { field = v; sides = List(SIDES - 1) { k -> v.map { it.forSide(k + 1) } } }
+    /** Sides 2 to 4 of a split: each its own of every package, with its own settings. */
+    private var sides: List<List<PackageController>> = emptyList()
     private val builtIn: List<Controller> get() = listOf(ExternalMidi)
     val all: List<Controller> get() = builtIn + packaged
+    /** The most sides a split has (mpe::split::kMaxSides). */
+    const val SIDES = 4
+
+    /** Side [side]'s controllers: the first side's are [all] (External MIDI too); the others', their
+     *  own of every package (a split's sides are played on the screen). */
+    fun forSide(side: Int): List<Controller> = if (side <= 0) all else sides.getOrElse(side - 1) { emptyList() }
+    /** Every controller of every side, to load and keep their settings. */
+    val every: List<Controller> get() = all + sides.flatten()
+
+    /** Side [side]'s controller [id] (as [byId]); never External MIDI after the first side. */
+    fun byId(id: String?, side: Int): Controller {
+        if (side <= 0) return byId(id)
+        val list = forSide(side)
+        val want = byId(id).id
+        return list.firstOrNull { it.id == want } ?: list.firstOrNull { it.id == LegacyTouchPad.PACKAGE } ?: list.firstOrNull() ?: byId(id)
+    }
     /** Older ids a package now answers to: the Kotlin Grid's, from 0.23.7 the Kotlin Tonnetz's (the
      *  package has the same settings, by the same names, so they carry over: PackageController.load),
      *  and from 0.26 the Kotlin touch pad's (its settings converted: LegacyTouchPad). */

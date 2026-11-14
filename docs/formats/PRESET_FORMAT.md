@@ -66,8 +66,11 @@ Values out of range are clamped. A value of the wrong type takes the default.
 
 ## What each app does with it
 
-- **odo for Android** plays one side. When it opens a file with more sides, it takes the first one
-  and says the rest were left out. It writes every part with all its settings, and the effects.
+- **odo for Android** plays every side, as odo for computers does: the same splits (`split`), the
+  dividers where `splitAt` puts them, each side its controller, settings and parts. A file with more
+  sides than its split has: the rest are left out, and it says so. It writes every side's parts
+  with all their settings, and the effects. External MIDI plays only the whole screen (`split` 0):
+  split, its side gets the touch pad. Takes record and play the first side.
 - **odo for computers** plays every side. Its Effects panel (as Android's) sets each sound's tone
   (and air), width, drive, touch, release, sends and level, and the shared reverb and delay; it
   plays a preset's parts as given (transpose and arp too, which it has no controls for), while

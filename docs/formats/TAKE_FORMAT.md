@@ -180,7 +180,8 @@ those, and its score is only kept.
   would send it), goes in the `preset` line, and the master volume in `volume`.
 - Fingers still down at Stop are lifted, and notes still sounding let go of, at the end.
 - On a computer every side of a split window is recorded, each its own `side`. Odo on Android has
-  one side.
+  splits too, but records and plays only the first side (the `preset` line keeps every side and the
+  split).
 
 ## Any controller
 

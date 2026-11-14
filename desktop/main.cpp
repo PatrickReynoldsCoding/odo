@@ -50,6 +50,7 @@
 #include "mpe/preset.h"
 #include "mpe/rail.h"
 #include "mpe/scala.h"
+#include "mpe/split.h"
 #include "mpe/take.h"
 
 namespace fs = std::filesystem;
@@ -198,17 +199,10 @@ float centerNote(const mpe::Package& p) {
 // ---- splits ------------------------------------------------------------------------------------
 
 // The ways the window can be shared: each side its own controller playing its own sound (a part
-// of the engine), up to four.
-struct Split { const char* name; int sides; int cols; const char* side[4]; };
-const Split kSplits[] = {
-    {"Whole", 1, 1, {"Whole"}},
-    {"Side by side", 2, 2, {"Left", "Right"}},
-    {"Above and below", 2, 1, {"Top", "Bottom"}},
-    {"Three side by side", 3, 3, {"Left", "Middle", "Right"}},
-    {"Three above each other", 3, 1, {"Top", "Middle", "Bottom"}},
-    {"Four", 4, 2, {"Top left", "Top right", "Bottom left", "Bottom right"}},
-};
-constexpr int kSplitCount = int(sizeof kSplits / sizeof kSplits[0]);
+// of the engine), up to four. The same splits, by the same names, as odo on Android's (mpe/split.h).
+using Split = mpe::split::Split;
+constexpr const auto& kSplits = mpe::split::kSplits;
+constexpr int kSplitCount = mpe::split::kCount;
 constexpr int kSides = 4;
 constexpr float kGap = 3;              // the line between two sides
 constexpr float kDivideGrab = 14;      // a touch this close (points) to a divider drags it, as on the touch pad
@@ -877,27 +871,11 @@ std::string quoted(const std::string& v) {
 
     // ---- sides ----------------------------------------------------------------------------------
 
-    // Where each side is: the window right of the rail, shared as the split says.
-    // A split's columns and rows, and its dividers evenly (the first col-1 across, then row-1 down).
-    static int splitCols(int n) { return kSplits[n].cols; }
-    static int splitRows(int n) { return (kSplits[n].sides + kSplits[n].cols - 1) / kSplits[n].cols; }
-    static std::vector<double> evenly(int n) {
-        std::vector<double> v;
-        for (int c = 1; c < splitCols(n); c++) v.push_back(double(c) / splitCols(n));
-        for (int r = 1; r < splitRows(n); r++) v.push_back(double(r) / splitRows(n));
-        return v;
-    }
+    // A split's columns and rows (mpe/split.h, shared with odo on Android).
+    static int splitCols(int n) { return mpe::split::cols(n); }
+    static int splitRows(int n) { return mpe::split::rows(n); }
     // The dividers of split n, from `at` if it has as many (else evenly), kept in order and apart.
-    static std::vector<double> dividers(int n, const std::vector<double>& at) {
-        std::vector<double> v = at.size() == evenly(n).size() ? at : evenly(n);
-        int cols = splitCols(n);
-        for (size_t i = 0; i < v.size(); i++) {
-            int first = int(i) < cols - 1 ? 0 : cols - 1, last = int(i) < cols - 1 ? cols - 2 : int(v.size()) - 1;
-            double lo = (int(i) > first ? v[i - 1] : 0) + 0.12, hi = (int(i) < last ? v[i + 1] : 1) - 0.12;
-            v[i] = std::clamp(v[i], std::min(lo, hi), std::max(lo, hi));
-        }
-        return v;
-    }
+    static std::vector<double> dividers(int n, const std::vector<double>& at) { return mpe::split::dividers(n, at); }
 
     // Each side: the whole play area right of the rail, showing its own share of it (the split's
     // dividers). Its controller keeps its size as a divider moves: more or less of it shows.

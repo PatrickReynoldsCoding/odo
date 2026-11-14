@@ -21,12 +21,21 @@ import org.json.JSONObject
  * with and that controller's settings (the touch pad's notes and split, say). [controller] null (some
  * built-in presets): any controller, the one in use, with what is per preset turned off.
  * [settings] is kept as JSON text, so two presets compare by value.
+ *
+ * Those are its first side's. Split ([split], a Splits index; 0 the whole screen), [more] has each
+ * further side's controller, settings and sounds, and [splitAt] where the dividers are (empty: evenly).
  */
 data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false,
-                  val controller: String? = LegacyTouchPad.ID, val settings: String? = null) {
+                  val controller: String? = LegacyTouchPad.ID, val settings: String? = null,
+                  val split: Int = 0, val splitAt: List<Double> = emptyList(), val more: List<PresetSide> = emptyList()) {
     fun json(): JSONObject = JSONObject().put("name", name).put("perf", perf.json()).apply {
         controller?.let { put("controller", it) }
         settings?.let { put("settings", JSONObject(it)) }
+        if (split != 0) {
+            put("split", split)
+            put("splitAt", JSONArray().apply { for (d in splitAt) put(d) })
+            put("sides", JSONArray().apply { for (s in more) put(s.json()) })
+        }
     }
     companion object {
         fun from(o: JSONObject): Preset {
@@ -36,7 +45,12 @@ data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false
                 var p = Perf.from(perf)
                 // Saved by 0.16 to 0.20: the arps were the controller's.
                 if (Perf.arpsInController(perf)) Controllers.byId(o.getString("controller")).legacyArps(settings)?.let { p = p.withArps(it) }
-                return Preset(o.getString("name"), p, controller = o.getString("controller"), settings = settings?.toString())
+                val at = o.optJSONArray("splitAt")
+                val sides = o.optJSONArray("sides")
+                return Preset(o.getString("name"), p, controller = o.getString("controller"), settings = settings?.toString(),
+                              split = o.optInt("split", 0),
+                              splitAt = if (at == null) emptyList() else List(at.length()) { at.optDouble(it, 0.5) },
+                              more = if (sides == null) emptyList() else List(sides.length()) { PresetSide.from(sides.getJSONObject(it)) })
             }
             // Before 0.16: a touch pad preset, the pads (if it had them) beside the performance.
             val pad = o.optJSONObject("pad")
@@ -72,13 +86,49 @@ object AppState {
     var userPresets by mutableStateOf<List<Preset>>(emptyList())
         private set
 
-    /** The controller in use: its options are on the rail and its surface is what you play. */
-    var controller by mutableStateOf<Controller>(ExternalMidi)
+    // ---- the sides of the screen (a split: Splits) ----
+    // Each side has its own controller (its own instance, with its own settings) and its own parts.
+    // The rail changes one, [activeSide]: [controller] is its controller, and [perf] holds its parts
+    // (with the tempo and effects all the sides share); the other sides' parts are in [sides].
+
+    /** How the screen is split (a Splits index; 0 the whole screen). */
+    var split by mutableStateOf(0)
         private set
+    /** Where its dividers are, 0..1: across (left to right), then down (top to bottom). */
+    var splitAt by mutableStateOf<List<Double>>(emptyList())
+        private set
+    /** The side the rail changes. */
+    var activeSide by mutableStateOf(0)
+        private set
+    /** Every side, four (those past the split's are kept, not shown). [partsOf] has a side's parts now. */
+    var sides by mutableStateOf(List(Controllers.SIDES) { Side(ExternalMidi, Perf.DEFAULT_PARTS) })
+        private set
+    /** How many sides the screen has now. */
+    val count get() = Splits.of(split).sides
+    /** Side [k]'s name ("Left", "Top right"; "Whole"). */
+    fun sideName(k: Int) = Splits.of(split).side.getOrElse(k) { "" }
+    fun sideController(k: Int) = sides[k].controller
+    /** Side [k]'s parts now (the side the rail changes: [perf]'s). */
+    fun partsOf(k: Int): List<Part> = if (k == activeSide) perf.parts else sides[k].parts
+    /** Side [k]'s part [j]'s instrument. */
+    fun instrumentOf(k: Int, j: Int) = partsOf(k).getOrElse(j) { Perf.DEFAULT_PARTS[j.coerceIn(0, PARTS - 1)] }.let { find(it.instrument, it.version) }
+    /** How many parts side [k] plays: its controller's split's, or one; the whole screen, as [partCount]. */
+    fun sidePartCount(k: Int): Int {
+        if (count == 1) return perf.partCount(shape)
+        val s = sides[k].controller.shape
+        return if (s.split) s.parts.coerceIn(2, PARTS) else 1
+    }
+    /** The engine part of side [k]'s first sound: the sides' parts one after another (at most PARTS in all). */
+    fun partBase(k: Int): Int = (0 until k).sumOf { sidePartCount(it) }.coerceAtMost(PARTS - 1)
+
+    /** The controller the rail changes: its options are on the rail and its surface is what you play. */
+    val controller: Controller get() = sides[activeSide].controller
     /** What the controller sets in the engine beside the sound; the app's arps play if it lets them. */
     val shape get() = controller.shape.let { it.copy(appArp = it.appArp && controller.arpUse == ArpUse.App) }
-    /** How many parts sound: 1, a split's sections (2 to 4), or 2 layered. */
-    val partCount get() = perf.partCount(shape)
+    /** How many parts sound: 1, a split's sections (2 to 4), or 2 layered; split, the active side's. */
+    val partCount get() = if (count == 1) perf.partCount(shape) else sidePartCount(activeSide)
+    /** Every note plays two sounds (the whole screen only). */
+    val layeredNow get() = count == 1 && perf.layout(shape) == 2
     /** More than one part sounds: split by the controller, or layered. */
     val twoParts get() = partCount > 1
     /** Which part (sound) the rail is changing: 0, or another (a section of a split, the layer). */
@@ -131,18 +181,29 @@ object AppState {
         loopSnap = prefs.getBoolean("loopSnap", true)
         if (!prefs.contains("ctl.${LegacyTouchPad.ID}")) migrateToControllers(perfJson)
         Controllers.packaged = com.patrickreynolds.mpeinstruments.controllers.PackageController.builtIn(appContext)
-        for (c in Controllers.all) runCatching {
-            val saved = prefs.getString("ctl.${c.id}", null)
-                ?: Controllers.formerIds(c.id).firstNotNullOfOrNull { prefs.getString("ctl.$it", null) }
+        for (c in Controllers.every) runCatching {
+            val saved = prefs.getString(key(c), null)
+                ?: (if (slotOf(c) == 0) Controllers.formerIds(c.id).firstNotNullOfOrNull { prefs.getString("ctl.$it", null) } else null)
             c.load(saved?.let { JSONObject(it) })
         }
-        controller = Controllers.byId(prefs.getString("controller", LegacyTouchPad.ID))
+        // The sides: the first's controller and parts as before splits; the others' kept beside them.
+        val first = Controllers.byId(prefs.getString("controller", LegacyTouchPad.ID))
+        val kept = runCatching { JSONArray(prefs.getString("sides", "[]")) }.getOrDefault(JSONArray())
+        sides = List(Controllers.SIDES) { k ->
+            if (k == 0) Side(first, perf.parts)
+            else kept.optJSONObject(k - 1)?.let { o -> Side(Controllers.byId(o.optString("controller"), k), partsFrom(o.optJSONArray("parts"))) }
+                ?: Side(Controllers.byId(if (first is ExternalMidi) LegacyTouchPad.PACKAGE else first.id, k), newSideParts(k))
+        }
+        split = prefs.getInt("split", 0).coerceIn(Splits.all.indices)
+        if (count > 1 && first === ExternalMidi) sides = sides.mapIndexed { k, s -> if (k == 0) s.copy(controller = Controllers.byId(LegacyTouchPad.PACKAGE)) else s }
+        splitAt = Splits.dividers(split, runCatching { JSONArray(prefs.getString("splitAt", "[]")).let { a -> List(a.length()) { a.optDouble(it, 0.5) } } }.getOrDefault(emptyList()))
         // From 0.16 to 0.20 the arps were each controller's: the one in use brings its own into the sound.
         if (Perf.arpsInController(perfJson)) {
-            val saved = runCatching { prefs.getString("ctl.${controller.id}", null)?.let { JSONObject(it) } }.getOrNull()
-            controller.legacyArps(saved)?.let { perf = perf.withArps(it) }
+            val saved = runCatching { prefs.getString("ctl.${sides[0].controller.id}", null)?.let { JSONObject(it) } }.getOrNull()
+            sides[0].controller.legacyArps(saved)?.let { perf = perf.withArps(it) }
             prefs.edit().putString("perf", perf.json().toString()).apply()
         }
+        showSide(prefs.getInt("activeSide", 0).coerceIn(0, count - 1))
         railHidden = prefs.getBoolean("railHidden", false)
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
@@ -177,8 +238,8 @@ object AppState {
     /** Send everything to the engine (at start, and after the audio engine was rebuilt). */
     fun applyAll() {
         Native.nativeSetVolume(volume)
-        built.fill(false)
-        applyEngine(null)
+        built.fill(-1)
+        applyEngine()
         PhoneControl.apply(appContext, mods)
         Looper.snap(loopSnap)
     }
@@ -204,29 +265,50 @@ object AppState {
         updatePart(k) { it.copy(version = if (version == newest) "" else version) }
     }
 
-    /** Parts after the first are only built when a split or layer needs them: 15 more copies of an instrument each. */
-    private val built = BooleanArray(PARTS)
+    /** The instrument each engine part has (-1: none yet). Parts after the first are only built when a
+     *  split or layer needs them: 15 more copies of an instrument each. */
+    private val built = IntArray(PARTS) { -1 }
 
-    /** The sound and the controller's shape to the engine; instruments only where they changed. */
-    private fun applyEngine(old: Perf?) {
-        val s = shape
+    /**
+     * What the engine plays: the whole screen, the sound and the controller's shape as they are; split,
+     * each side's parts one after another (at most PARTS), each with its arp if its controller lets the
+     * app's play, and nothing else of a controller's shape (only External MIDI has one, and it plays
+     * the whole screen).
+     */
+    private fun engine(): Pair<Perf, EngineShape> {
+        if (count == 1) return perf to shape
+        val parts = mutableListOf<Part>()
+        for (k in 0 until count) {
+            val c = sides[k].controller
+            for (j in 0 until sidePartCount(k)) if (parts.size < PARTS) {
+                val p = partsOf(k).getOrElse(j) { Perf.DEFAULT_PARTS[j] }
+                val arp = when { c.arpUse != ArpUse.App -> Arp(); !c.shape.arpLatch -> p.arp.copy(latch = false); else -> p.arp }
+                parts += p.copy(arp = arp)
+            }
+        }
+        return perf.copy(layered = false, parts = parts) to EngineShape(split = parts.size > 1, parts = parts.size.coerceIn(2, PARTS))
+    }
+
+    /** The sound and the controllers' shape to the engine (instruments only where they changed), and
+     *  each side's notes to its own parts and MIDI channels, as odo for computers' route(). */
+    private fun applyEngine() {
+        val (p, s) = engine()
         Native.nativeSetTranspose(s.transpose)
         Native.nativeSetBendRange(s.bendRange)
-        fun changed(k: Int) = old == null || old.part(k).instrument != perf.part(k).instrument || old.part(k).version != perf.part(k).version
-        if (changed(0)) Native.nativeSetPartInstrument(0, index(perf.part(0)))
-        for (k in 1 until partCount)
-            if (!built[k] || changed(k)) {
-                Native.nativeSetPartInstrument(k, index(perf.part(k)))
-                built[k] = true
-            }
-        Native.nativeSetPerformance(perf.toArray(s))
+        for (k in 0 until p.partCount(s)) {
+            val i = index(p.part(k))
+            if (built[k] != i) { Native.nativeSetPartInstrument(k, i); built[k] = i }
+        }
+        Native.nativeSetPerformance(p.toArray(s))
+        val per = 15 / count
+        for (k in 0 until count) Native.nativeCtlRoute(k, if (count == 1) 0 else partBase(k), 1 + k * per, per)
     }
 
     fun update(change: (Perf) -> Perf) {
         val old = perf
         perf = change(perf)
         if (perf == old) return
-        applyEngine(old)
+        applyEngine()
         touched()
         save()
     }
@@ -241,7 +323,8 @@ object AppState {
         val d = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(id)
         update { p ->
             val q = p.withPart(k) { d.applyTo(it, id).let { r -> if (keepVersion) r else r.copy(version = "") } }   // a sound picked: its newest
-            if (twoParts && k >= 1) q else q.copy(reverbSize = d.reverbSize, reverbDamp = d.reverbDamp)
+            // The room is shared: the first side's first sound's.
+            if ((twoParts && k >= 1) || activeSide > 0) q else q.copy(reverbSize = d.reverbSize, reverbDamp = d.reverbDamp)
         }
     }
 
@@ -278,29 +361,97 @@ object AppState {
      */
     fun controllerChanged(c: Controller, engine: Boolean = true) {
         if (!started) return
-        if (c === controller && engine && !loading) applyEngine(perf)
+        val shown = (0 until count).any { sides[it].controller === c }
+        if (shown && engine && !loading) applyEngine()
         pendingSave += c
         saver.removeCallbacks(saveControllers)
         saver.postDelayed(saveControllers, 400)
-        if (c === controller) touched()
+        if (shown) touched()
     }
     private val pendingSave = mutableSetOf<Controller>()
     private val saveControllers = Runnable {
         val e = prefs.edit()
-        for (c in pendingSave) e.putString("ctl.${c.id}", c.save().toString())
+        for (c in pendingSave) e.putString(key(c), c.save().toString())
         pendingSave.clear()
         e.apply()
     }
+    /** The side a controller is for (its own of a package; External MIDI is the first side's). */
+    private fun slotOf(c: Controller) = (c as? com.patrickreynolds.mpeinstruments.controllers.PackageController)?.slot ?: 0
+    /** Where a controller's settings are kept: the first side's as before splits, the others' beside them. */
+    private fun key(c: Controller) = slotOf(c).let { if (it == 0) "ctl.${c.id}" else "ctl@$it.${c.id}" }
 
-    /** Play with another controller: the sound stays; its own settings come back as you left them. */
+    /** Play with another controller on the side the rail changes: the sound stays; its own settings
+     *  come back as you left them. */
     fun switchController(c: Controller) {
         if (c === controller) return
+        if (count > 1 && c === ExternalMidi) return            // a split's sides are played on the screen
         controller.stop()
-        controller = c
+        sides = sides.mapIndexed { k, s -> if (k == activeSide) s.copy(controller = c) else s }
         side = 0
-        prefs.edit().putString("controller", c.id).apply()
-        applyEngine(perf)
+        if (activeSide == 0) prefs.edit().putString("controller", c.id).apply()
+        save()
+        applyEngine()
         touched()
+    }
+
+    // ---- splits -----------------------------------------------------------------------------
+
+    /** The sounds a new side starts with: the default parts, from its own (side 2: the soprano, ...). */
+    private fun newSideParts(k: Int): List<Part> = List(PARTS) { j ->
+        val id = Perf.DEFAULT_PARTS[(k + j) % PARTS].instrument
+        com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(id).applyTo(Part(), id)
+    }
+
+    /** Side [k] is the one the rail changes: [perf] takes its parts, the side it was on keeps its own. */
+    private fun showSide(k: Int) {
+        if (k == activeSide) return
+        sides = sides.mapIndexed { i, s -> if (i == activeSide) s.copy(parts = perf.parts) else s }
+        activeSide = k
+        perf = perf.copy(parts = fullParts(sides[k].parts))
+    }
+
+    /** Change side [k] (tapped under CHANGING): the rail's tiles and groups are now its. */
+    fun setActive(k: Int) {
+        val n = k.coerceIn(0, count - 1)
+        if (n == activeSide) return
+        showSide(n)
+        side = 0
+        save()
+    }
+
+    /**
+     * Split the screen as split [n] says. [fresh]: chosen now (not a preset's): each new side takes its
+     * controller's own look for that side (its manifest's "sideThemes"), so the sides stand apart.
+     * A side no longer shown lets go of its notes; what it had is kept, for when it comes back.
+     */
+    fun setSplit(n: Int, fresh: Boolean = true) {
+        val m = n.coerceIn(Splits.all.indices)
+        if (m == split) return
+        val before = count
+        val now = Splits.of(m).sides
+        if (activeSide >= now) { showSide(0); side = 0 }
+        for (k in now until before) sides[k].controller.stop()
+        split = m
+        splitAt = Splits.dividers(m, emptyList())
+        // External MIDI plays the whole screen: split, the first side is the touch pad.
+        if (now > 1 && sides[0].controller === ExternalMidi) {
+            val pad = Controllers.byId(LegacyTouchPad.PACKAGE)
+            sides = sides.mapIndexed { k, s -> if (k == 0) s.copy(controller = pad) else s }
+            prefs.edit().putString("controller", pad.id).apply()
+            if (activeSide == 0) side = 0
+        }
+        if (fresh) for (k in before until now) (sides[k].controller as? com.patrickreynolds.mpeinstruments.controllers.PackageController)?.takeSideTheme(k)
+        save()
+        applyEngine()
+        touched()
+    }
+
+    /** Divider [i] dragged to (fx, fy), fractions of the play area: more of one side shows, less of
+     *  another; no controller is laid out again. [done]: let go, so it is kept. */
+    fun dragDivider(i: Int, fx: Float, fy: Float, done: Boolean = false) {
+        if (count < 2) return
+        if (!done) splitAt = Splits.dragged(split, splitAt, i, fx, fy)
+        else { save(); touched() }
     }
 
     // ---- the loops ---------------------------------------------------------------------------
@@ -325,8 +476,13 @@ object AppState {
     val activePreset get() = userPresets.firstOrNull { it.name == presetName }
     private var loading = false
 
-    /** What is playing now, as a preset of yours. */
-    private fun current(name: String) = Preset(name, perf, controller = controller.id, settings = controller.save().toString())
+    /** The tempo and effects, with side [k]'s parts. */
+    private fun perfOf(k: Int) = if (k == activeSide) perf else perf.copy(parts = fullParts(sides[k].parts))
+
+    /** What is playing now, as a preset of yours: every side, the split and where its dividers are. */
+    private fun current(name: String) = Preset(name, perfOf(0), controller = sides[0].controller.id,
+        settings = sides[0].controller.save().toString(), split = split, splitAt = if (count > 1) splitAt else emptyList(),
+        more = (1 until count).map { k -> PresetSide(sides[k].controller.id, sides[k].controller.save().toString(), fullParts(partsOf(k))) })
 
     /** Something changed: the preset on view is now changed since it was saved (yours) or loaded (a
      *  built-in one). It is not kept in it: Save changes does that. */
@@ -348,18 +504,37 @@ object AppState {
      *  view (a take's settings, which are not one of yours). */
     fun load(p: Preset, onView: Boolean = true) {
         loading = true
-        val c = p.controller?.let { Controllers.byId(it) } ?: controller
-        if (c !== controller) { controller.stop(); controller = c; side = 0; prefs.edit().putString("controller", c.id).apply() }
-        val s = p.settings?.let { runCatching { JSONObject(it) }.getOrNull() }
-        if (s != null) c.loadPreset(s) else c.clearForPreset()
-        val old = perf
-        perf = p.perf
-        applyEngine(old)
+        // The rail goes back to the first side; a side the preset has not lets go of its notes.
+        showSide(0)
+        side = 0
+        val m = p.split.coerceIn(Splits.all.indices)
+        val now = Splits.of(m).sides
+        for (k in now until count) sides[k].controller.stop()
+        val loaded = mutableListOf<Controller>()
+        var next = sides
+        for (k in 0 until now) {
+            val ps = if (k == 0) PresetSide(p.controller ?: sides[0].controller.id, p.settings, p.perf.parts) else p.more.getOrNull(k - 1)
+            // A side the preset has not (a file with fewer than its split): it keeps what it has.
+            if (ps == null) continue
+            var c = if (k == 0 && p.controller == null) sides[0].controller else Controllers.byId(ps.controller, k)
+            if (now > 1 && c === ExternalMidi) c = Controllers.byId(LegacyTouchPad.PACKAGE)   // a split is played on the screen
+            if (c !== next[k].controller) next[k].controller.stop()
+            val s = ps.settings?.let { runCatching { JSONObject(it) }.getOrNull() }
+            if (s != null) c.loadPreset(s) else c.clearForPreset()
+            next = next.mapIndexed { i, sd -> if (i == k) Side(c, fullParts(ps.parts)) else sd }
+            loaded += c
+        }
+        sides = next
+        split = m
+        splitAt = Splits.dividers(m, p.splitAt)
+        perf = p.perf.copy(parts = fullParts(sides[0].parts))
+        prefs.edit().putString("controller", sides[0].controller.id).apply()
+        applyEngine()
         save()
         presetName = if (onView) p.name else ""
         presetEdited = false
         prefs.edit().putString("preset", presetName).apply()
-        controllerChanged(c, engine = false)        // saved as the controller's; loading, so not into a preset
+        for (c in loaded) controllerChanged(c, engine = false)   // saved as the controllers'; loading, so not into a preset
         loading = false
     }
 
@@ -411,7 +586,7 @@ object AppState {
 
     /** A copy of yours: a built-in one gets the rest of its controller's settings from how they are now. */
     fun duplicate(p: Preset) {
-        val c = p.controller?.let { Controllers.byId(it) } ?: controller
+        val c = p.controller?.let { Controllers.byId(it) } ?: sides[0].controller
         val full = c.save()
         // A package keeps its settings "byId": a preset's own (the Kotlin touch pad's format, say) go in there.
         val byId = full.optJSONObject("byId")
@@ -461,31 +636,38 @@ object AppState {
         // A Float as the number it reads as ("0.6", not 0.6000000238418579, its exact double).
         fun d(f: Float) = f.toString().toDouble()
         val pf = p.perf
-        val s = p.settings?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val settings = s?.optJSONObject("byId") ?: s ?: JSONObject()
-        val parts = JSONArray()
-        for (part in pf.parts) parts.put(JSONObject().put("sound", part.instrument)
-            .put("version", find(part.instrument, part.version)?.version ?: "").put("transpose", part.transpose)
-            .put("volume", d(part.volume)).put("brightness", d(part.brightness)).put("drive", d(part.drive))
-            .put("pressureCurve", d(part.pressureCurve)).put("reverb", d(part.reverb))
-            .put("delay", d(part.delay)).put("release", d(part.release)).put("width", d(part.width))
-            .put("arp", JSONObject().put("on", part.arp.on).put("order", part.arp.order).put("rate", d(part.arp.rate))
-                .put("gate", d(part.arp.gate)).put("octaves", part.arp.octaves).put("latch", part.arp.latch)))
+        // Each side: its controller, its settings by id, its parts.
+        fun side(controller: String, settingsText: String?, ps: List<Part>): JSONObject {
+            val s = settingsText?.let { runCatching { JSONObject(it) }.getOrNull() }
+            val settings = s?.optJSONObject("byId") ?: s ?: JSONObject()
+            val parts = JSONArray()
+            for (part in ps) parts.put(JSONObject().put("sound", part.instrument)
+                .put("version", find(part.instrument, part.version)?.version ?: "").put("transpose", part.transpose)
+                .put("volume", d(part.volume)).put("brightness", d(part.brightness)).put("drive", d(part.drive))
+                .put("pressureCurve", d(part.pressureCurve)).put("reverb", d(part.reverb))
+                .put("delay", d(part.delay)).put("release", d(part.release)).put("width", d(part.width))
+                .put("arp", JSONObject().put("on", part.arp.on).put("order", part.arp.order).put("rate", d(part.arp.rate))
+                    .put("gate", d(part.arp.gate)).put("octaves", part.arp.octaves).put("latch", part.arp.latch)))
+            return JSONObject().put("controller", controller).put("settings", settings).put("parts", parts)
+        }
+        val sides = JSONArray().put(side(p.controller ?: "", p.settings, pf.parts))
+        if (p.split != 0) for (s in p.more) sides.put(side(s.controller, s.settings, s.parts))
         val o = JSONObject().put("format", "odo-preset/1").put("name", p.name)
-            .put("madeBy", "odo ${BuildConfig.VERSION_NAME} (Android)").put("split", 0).put("layered", pf.layered)
+            .put("madeBy", "odo ${BuildConfig.VERSION_NAME} (Android)").put("split", p.split).put("layered", pf.layered)
             .put("effects", JSONObject().put("bpm", d(pf.bpm)).put("reverbSize", d(pf.reverbSize))
                 .put("reverbDamp", d(pf.reverbDamp)).put("delayBeats", d(pf.delayBeats))
                 .put("delayFeedback", d(pf.delayFeedback)).put("delayPingPong", pf.delayPingPong))
-            .put("sides", JSONArray().put(JSONObject().put("controller", p.controller ?: "").put("settings", settings).put("parts", parts)))
+            .put("sides", sides)
+        if (p.split != 0 && p.splitAt.isNotEmpty()) o.put("splitAt", JSONArray().apply { for (v in p.splitAt) put(v) })
         return String(Native.nativePresetWrite(o.toString().toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
     }
 
     fun presetFileName(p: Preset) = String(Native.nativePresetFileName(p.name.toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
 
     /**
-     * A preset file's [text] as a new preset of yours, after the rest, and on view. Its first side
-     * only: a computer's split is its sides, which odo on Android has not. A controller or sound
-     * this phone has not: what plays now plays instead. What happened, in a sentence or two.
+     * A preset file's [text] as a new preset of yours, after the rest, and on view: every side of
+     * its split. A controller or sound this phone has not: what that side plays now plays instead.
+     * What happened, in a sentence or two.
      */
     fun openPresetFile(text: String): String = presetFromFile(text, keep = true, said = "Opened")
 
@@ -501,52 +683,72 @@ object AppState {
         val out = String(Native.nativePresetRead(text.toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
         if (out.startsWith("!")) return out.drop(1)
         val f = runCatching { JSONObject(out) }.getOrNull() ?: return "This file is not an odo preset."
-        val sides = f.optJSONArray("sides") ?: return "This preset has nothing in it to play."
-        val side = sides.optJSONObject(0) ?: return "This preset has nothing in it to play."
+        val fileSides = f.optJSONArray("sides") ?: return "This preset has nothing in it to play."
+        if (fileSides.optJSONObject(0) == null) return "This preset has nothing in it to play."
         val notes = mutableListOf<String>()
+        val split = f.optInt("split", 0).coerceIn(Splits.all.indices)
+        val sidesNow = Splits.of(split).sides             // a split's sides; a file may give more
 
-        var ctl: String? = side.optString("controller").ifEmpty { null }
-        var settings = side.optJSONObject("settings")
-        if (ctl != null && Controllers.all.none { it.id == ctl }) {
-            notes += "Its controller isn't on this phone: the one in use plays it"
-            ctl = controller.id; settings = null
-        }
-        val c = ctl?.let { Controllers.byId(it) }
-        val s = settings?.let { if (c is com.patrickreynolds.mpeinstruments.controllers.PackageController) JSONObject().put("byId", it) else it }
-
+        var missingCtl = 0
         var missing = 0
         var olderMissing = 0
-        val a = side.optJSONArray("parts") ?: JSONArray()
-        val parts = (0 until minOf(a.length(), PARTS)).mapNotNull { k -> a.optJSONObject(k) }.mapIndexed { k, q ->
-            val id = q.optString("sound")
-            val known = instruments.any { it.id == id }
-            if (!known && k < 2) missing++
-            val sound = if (known) id else perf.part(k).instrument
-            // The version the file names, if this phone has it; the newest plays as "".
-            val want = if (known) q.optString("version") else ""
-            val has = want.isNotEmpty() && allInstruments.any { it.id == sound && it.version == want }
-            if (want.isNotEmpty() && !has && k < 2) olderMissing++
-            val version = if (has && instruments.none { it.id == sound && it.version == want }) want else ""
-            // The file's arp says "on"; the app's own JSON (Arp.json) "arp".
-            val arp = q.optJSONObject("arp")?.let { JSONObject(it.toString()).put("arp", it.optBoolean("on")) } ?: Arp().json()
-            if (q.has("volume")) Part.from(q.put("instrument", sound).put("version", version).put("arpeggio", arp))
-            else com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(sound).applyTo(perf.part(k), sound).copy(version = version)
-        }.ifEmpty { perf.parts }
+        // Side k of the file: its controller (or what that side plays now), settings and parts.
+        fun side(k: Int): PresetSide? {
+            val side = fileSides.optJSONObject(k) ?: return null
+            val here = if (k < count) sides[k] else sides[0]
+            var ctl = side.optString("controller")
+            var settings = side.optJSONObject("settings")
+            if (ctl.isEmpty() || Controllers.forSide(k).none { it.id == ctl }) {
+                if (ctl.isNotEmpty()) missingCtl++
+                ctl = here.controller.id; settings = null
+            }
+            val c = Controllers.byId(ctl, k)
+            val s = settings?.let { if (c is com.patrickreynolds.mpeinstruments.controllers.PackageController) JSONObject().put("byId", it) else it }
+            val was = partsOf(if (k < count) k else 0)
+            val a = side.optJSONArray("parts") ?: JSONArray()
+            val parts = (0 until minOf(a.length(), PARTS)).mapNotNull { j -> a.optJSONObject(j) }.mapIndexed { j, q ->
+                val id = q.optString("sound")
+                val known = instruments.any { it.id == id }
+                if (!known && j < 2) missing++
+                val sound = if (known) id else was.getOrElse(j) { Perf.DEFAULT_PARTS[j] }.instrument
+                // The version the file names, if this phone has it; the newest plays as "".
+                val want = if (known) q.optString("version") else ""
+                val has = want.isNotEmpty() && allInstruments.any { it.id == sound && it.version == want }
+                if (want.isNotEmpty() && !has && j < 2) olderMissing++
+                val version = if (has && instruments.none { it.id == sound && it.version == want }) want else ""
+                // The file's arp says "on"; the app's own JSON (Arp.json) "arp".
+                val arp = q.optJSONObject("arp")?.let { JSONObject(it.toString()).put("arp", it.optBoolean("on")) } ?: Arp().json()
+                if (q.has("volume")) Part.from(q.put("instrument", sound).put("version", version).put("arpeggio", arp))
+                else com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(sound).applyTo(was.getOrElse(j) { Perf.DEFAULT_PARTS[j] }, sound).copy(version = version)
+            }.ifEmpty { was }
+            return PresetSide(c.id, s?.toString(), fullParts(parts))
+        }
+        val first = side(0)!!
+        // The sides after the first; one the file has not keeps what it plays now.
+        val more = (1 until sidesNow).map { k ->
+            side(k) ?: PresetSide(sides[k].controller.id, sides[k].controller.save().toString(), fullParts(partsOf(k)))
+        }
+        if (missingCtl > 0) notes += if (missingCtl == 1) "Its controller isn't on this phone: the one in use plays it"
+                                     else "Its controllers aren't on this phone: the ones in use play it"
         if (missing > 0) notes += "$missing ${if (missing == 1) "sound isn't" else "sounds aren't"} here: what was playing plays instead"
         if (olderMissing > 0) notes += "$olderMissing ${if (olderMissing == 1) "sound's version isn't" else "sounds' versions aren't"} here: the newest plays instead"
+        if (fileSides.length() > sidesNow)
+            notes += "Its sides after the " + listOf("first", "second", "third", "fourth")[sidesNow - 1] + " are left out"
 
         val fx = f.optJSONObject("effects")
-        val room = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(parts[0].instrument)
-        val made = Perf(layered = f.optBoolean("layered"), parts = parts,
+        val room = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(first.parts[0].instrument)
+        val made = Perf(layered = f.optBoolean("layered"), parts = first.parts,
             bpm = fx?.optDouble("bpm")?.toFloat() ?: perf.bpm,
             reverbSize = fx?.optDouble("reverbSize")?.toFloat() ?: room.reverbSize,
             reverbDamp = fx?.optDouble("reverbDamp")?.toFloat() ?: room.reverbDamp,
             delayBeats = fx?.optDouble("delayBeats")?.toFloat() ?: perf.delayBeats,
             delayFeedback = fx?.optDouble("delayFeedback")?.toFloat() ?: perf.delayFeedback,
             delayPingPong = fx?.optBoolean("delayPingPong") ?: perf.delayPingPong)
-        if (sides.length() > 1) notes += "It splits the screen into ${sides.length()} sides, which odo on a phone doesn't: here is the first"
-
-        val p = Preset(if (keep) freeName(f.optString("name")) else f.optString("name"), made, controller = ctl, settings = s?.toString())
+        val at = f.optJSONArray("splitAt")
+        val p = Preset(if (keep) freeName(f.optString("name")) else f.optString("name"), made, controller = first.controller,
+                       settings = first.settings, split = split,
+                       splitAt = if (split == 0) emptyList() else Splits.dividers(split, if (at == null) emptyList() else List(at.length()) { at.optDouble(it, 0.5) }),
+                       more = more)
         if (keep) {
             userPresets = userPresets + p
             savePresets()
@@ -590,7 +792,15 @@ object AppState {
 
     // A slider drag changes the performance many times a second: save once it settles.
     private val saver = android.os.Handler(android.os.Looper.getMainLooper())
-    private val saveNow = Runnable { prefs.edit().putString("perf", perf.json().toString()).putString("preset", presetName).apply() }
+    // The first side's parts in "perf" and its controller in "controller", as before splits; the other
+    // sides beside them in "sides" (each its controller and parts; their settings are each controller's own).
+    private val saveNow = Runnable {
+        val more = JSONArray()
+        for (k in 1 until Controllers.SIDES) more.put(JSONObject().put("controller", sides[k].controller.id).put("parts", partsJson(partsOf(k))))
+        prefs.edit().putString("perf", perfOf(0).json().toString()).putString("preset", presetName)
+            .putString("sides", more.toString()).putInt("split", split)
+            .putString("splitAt", JSONArray().apply { for (d in splitAt) put(d) }.toString()).putInt("activeSide", activeSide).apply()
+    }
     private fun save() { saver.removeCallbacks(saveNow); saver.postDelayed(saveNow, 400) }
 }
 

@@ -80,6 +80,17 @@ val Fg get() = palette.text
 val TextDim get() = palette.textDim
 /** Part 0 (main, left of a split), part 1 (layer, right of a split), and a grid's third and fourth sections. */
 val PartColors get() = palette.parts
+/**
+ * Side [k]'s colour: its controller's look's (its manifest's "themeColours"), else the side's part
+ * colour, as odo for computers' sideColourOf. E-ink: black.
+ */
+fun sideColour(k: Int): Color {
+    if (Eink) return PartColors[0]
+    val c = com.patrickreynolds.mpeinstruments.AppState.sideController(k) as? com.patrickreynolds.mpeinstruments.controllers.PackageController
+    return c?.themeColour() ?: PartColors[k % PartColors.size]
+}
+/** The app's accent (the rail's): split, the colour of the side it changes, so which one shows at a glance. */
+val Accent: Color get() = com.patrickreynolds.mpeinstruments.AppState.let { if (it.count < 2) PartColors[0] else sideColour(it.activeSide) }
 val Warn get() = palette.warn
 val Danger get() = palette.danger
 val Eink get() = palette.eink
@@ -142,7 +153,7 @@ fun SectionCard(title: String, accent: Color? = null, trailing: (@Composable () 
 
 @Composable
 fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String,
-                  accent: Color = PartColors[0], steps: Int = 0, onChange: (Float) -> Unit) {
+                  accent: Color = Accent, steps: Int = 0, onChange: (Float) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row {
             Text(label, modifier = Modifier.weight(1f), fontSize = 14.sp)
@@ -162,7 +173,7 @@ fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<F
  * thumb. Tap or drag anywhere on it; [onChange] gets the place, 0 to 1.
  */
 @Composable
-fun OdoSlider(fraction: Float, accent: Color = PartColors[0], onChange: (Float) -> Unit) {
+fun OdoSlider(fraction: Float, accent: Color = Accent, onChange: (Float) -> Unit) {
     val track = if (Eink) Color(0xFFBBBBBB) else Line
     val ink = if (Eink) Color.Black else accent
     val change by rememberUpdatedState(onChange)
@@ -193,7 +204,7 @@ fun OdoSlider(fraction: Float, accent: Color = PartColors[0], onChange: (Float) 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Segmented(options: List<String>, selected: Int, accent: Color = PartColors[0], onSelect: (Int) -> Unit) {
+fun Segmented(options: List<String>, selected: Int, accent: Color = Accent, onSelect: (Int) -> Unit) {
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         options.forEachIndexed { i, label ->
             SegmentedButton(
@@ -214,7 +225,7 @@ fun Segmented(options: List<String>, selected: Int, accent: Color = PartColors[0
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun Chips(options: List<String>, selected: Int, accent: Color = PartColors[0], onSelect: (Int) -> Unit) {
+fun Chips(options: List<String>, selected: Int, accent: Color = Accent, onSelect: (Int) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEachIndexed { i, label ->
             FilterChip(
@@ -230,7 +241,7 @@ fun Chips(options: List<String>, selected: Int, accent: Color = PartColors[0], o
 }
 
 @Composable
-fun SwitchRow(label: String, checked: Boolean, detail: String? = null, accent: Color = PartColors[0], onChange: (Boolean) -> Unit) {
+fun SwitchRow(label: String, checked: Boolean, detail: String? = null, accent: Color = Accent, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 14.sp)
@@ -243,7 +254,7 @@ fun SwitchRow(label: String, checked: Boolean, detail: String? = null, accent: C
 
 /** A switch as odo for computers draws one: a small track, the accent when on, a round knob. Its row flips it. */
 @Composable
-fun OdoSwitch(on: Boolean, accent: Color = PartColors[0]) {
+fun OdoSwitch(on: Boolean, accent: Color = Accent) {
     val shape = RoundedCornerShape(10.dp)
     Box(Modifier.size(36.dp, 20.dp).clip(shape).background(when { on && Eink -> Color.Black; on -> accent; else -> Line })
             .then(if (Eink) Modifier.border(1.5.dp, Color.Black, shape) else Modifier),

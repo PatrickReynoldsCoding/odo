@@ -61,7 +61,7 @@ fun ArpControls(p: Arp, c: Color, latch: Boolean = true, change: ((Arp) -> Arp) 
 
 /** The tempo, for the loops, the arp and the delay: a slider and tap tempo. */
 @Composable
-fun TempoControls(accent: Color = PartColors[0]) {
+fun TempoControls(accent: Color = Accent) {
     val perf = AppState.perf
     val taps = remember { mutableStateListOf<Long>() }
     LabeledSlider("Tempo", perf.bpm, 40f..220f, "${perf.bpm.roundToInt()} bpm", accent = accent) { v ->
@@ -85,7 +85,7 @@ fun TempoControls(accent: Color = PartColors[0]) {
 @Composable
 fun SoundControls(k: Int, c: Color) {
     val perf = AppState.perf
-    val split = AppState.shape.split
+    val split = AppState.shape.split || AppState.count > 1   // split screen: each side its own sounds, no layer
     if (!split) {
         SwitchRow("Layer a second sound", perf.layered, "Every note plays both sounds: pick each below", accent = c) { v ->
             AppState.update { it.copy(layered = v) }

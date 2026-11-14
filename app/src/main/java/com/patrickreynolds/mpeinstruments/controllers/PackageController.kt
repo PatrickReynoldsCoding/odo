@@ -16,10 +16,15 @@ import java.util.zip.ZipInputStream
 /**
  * A controller package (.odoc): its WebAssembly runs in the engine (Native.nativeCtl*), the same
  * file a computer MESH plays (docs/formats/CONTROLLER_FORMAT.md). Its settings come from its manifest and are
- * shown on the rail like any controller's. One runs at a time: the one in use.
+ * shown on the rail like any controller's. Each side of the screen ([slot], 0..3: a split's) has its own
+ * of each package, with its own settings, run in its own host in the engine.
  */
 class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
-                        manifestText: ByteArray = manifest.toString().encodeToByteArray()) : Controller {
+                        private val manifestText: ByteArray = manifest.toString().encodeToByteArray(),
+                        val slot: Int = 0) : Controller {
+    /** The same package for side [side]: its own settings, its own host. */
+    fun forSide(side: Int) = PackageController(bytes, manifest, manifestText, side)
+
     override val id: String = "pkg:" + manifest.optString("id")
     override val name: String get() = Controllers.nameFor(manifest.optString("name", id))
     override val description: String = manifest.optString("description") + " · from a controller package (.odoc)"
@@ -61,7 +66,7 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
         var k = 0
         while (k + 1 < set.length()) {
             val i = set.optInt(k); val v = set.optDouble(k + 1)
-            if (i in next.indices) { next[i] = v; if (loaded) Native.nativeCtlSetting(i, v) }
+            if (i in next.indices) { next[i] = v; if (loaded) Native.nativeCtlSetting(slot, i, v) }
             k += 2
         }
         values = next
@@ -82,7 +87,7 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     /** The engine follows when the parts in use change; the rail goes back to the first if its part went. */
     private fun changed(index: Int) {
         val engine = index in partsFrom
-        if (engine && AppState.side >= inUse) AppState.side = 0
+        if (engine && this === AppState.controller && AppState.side >= inUse) AppState.side = 0
         AppState.controllerChanged(this, engine)
     }
 
@@ -91,14 +96,17 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
         else -> s.optDouble("default", 0.0)
     }
 
-    /** True while its WebAssembly is the one loaded in the engine. */
+    /** True while its WebAssembly is the one loaded in its side's host. */
     private var loaded = false
 
-    /** Load it into the engine (when its surface opens): false if it can't run. */
+    /** Load it into its side's host (when its surface opens): false if it can't run. Another of the
+     *  side's controllers loaded there goes. */
     fun start(): Boolean {
         if (!loaded) {
-            loaded = Native.nativeCtlLoad(bytes)
-            if (loaded) values.forEachIndexed { k, v -> Native.nativeCtlSetting(k, v) }
+            inSlot[slot]?.let { if (it !== this) it.loaded = false }
+            loaded = Native.nativeCtlLoad(slot, bytes)
+            inSlot[slot] = if (loaded) this else null
+            if (loaded) values.forEachIndexed { k, v -> Native.nativeCtlSetting(slot, k, v) }
         }
         return loaded
     }
@@ -113,7 +121,7 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     fun change(index: Int, value: Double) {
         if (values.getOrNull(index) == value) return
         values = values.mapIndexed { k, v -> if (k == index) value else v }
-        if (loaded) Native.nativeCtlSetting(index, value)
+        if (loaded) Native.nativeCtlSetting(slot, index, value)
         changed(index)
     }
 
@@ -151,7 +159,7 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
                 else -> base.getOrElse(k) { default(s) }
             }
         }
-        if (loaded) values.forEachIndexed { k, v -> Native.nativeCtlSetting(k, v) }
+        if (loaded) values.forEachIndexed { k, v -> Native.nativeCtlSetting(slot, k, v) }
     }
 
     /** Until 0.21 the Kotlin touch pad's pads each had an arp. */
@@ -174,8 +182,27 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     }
 
     override fun stop() {
-        if (loaded) Native.nativeCtlUnload()
+        if (loaded) Native.nativeCtlUnload(slot)
         loaded = false
+        if (inSlot[slot] === this) inSlot[slot] = null
+    }
+
+    /** Its look's colour (its manifest's "themeColours", one for each value of its "theme" setting), or null. */
+    fun themeColour(): androidx.compose.ui.graphics.Color? {
+        val i = settings.indexOfFirst { it.optString("id") == "theme" }
+        if (i < 0) return null
+        val hex = manifest.optJSONArray("themeColours")?.optString(values[i].toInt().coerceAtLeast(0)) ?: return null
+        val rgb = if (hex.length == 6) hex.toIntOrNull(16) else null
+        return rgb?.let { androidx.compose.ui.graphics.Color(0xFF000000.toInt() or it) }
+    }
+
+    /** A new side of a split: this controller in that side's own look (its manifest's "sideThemes": the
+     *  value of its "theme" setting for each side), so the sides stand apart. */
+    fun takeSideTheme(side: Int) {
+        val looks = manifest.optJSONArray("sideThemes") ?: return
+        if (looks.length() == 0) return
+        val i = settings.indexOfFirst { it.optString("id") == "theme" }
+        if (i >= 0) change(i, looks.optDouble(side % looks.length(), 0.0))
     }
 
     /** Its settings are on the rail by group, from [railGroups] (PlayHost), not as options. */
@@ -186,6 +213,9 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject,
     override fun Surface(part: Int) = PackageSurface(this)
 
     companion object {
+        /** Which controller is loaded in each side's host. */
+        private val inSlot = arrayOfNulls<PackageController>(4)
+
         /** The controller packages that come with the app: assets/controllers/<name>.odoc. */
         fun builtIn(context: Context): List<PackageController> =
             (runCatching { context.assets.list("controllers") }.getOrNull() ?: emptyArray())

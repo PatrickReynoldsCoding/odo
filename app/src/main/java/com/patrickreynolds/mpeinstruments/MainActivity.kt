@@ -146,8 +146,8 @@ class MainActivity : ComponentActivity() {
         val bars = WindowCompat.getInsetsController(window, window.decorView)
         if (open) {
             requestedOrientation = when {
-                AppState.controller.landscape -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                AppState.controller.upright -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                AppState.sideController(0).landscape -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                AppState.sideController(0).upright -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
             bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -178,8 +178,8 @@ class MainActivity : ComponentActivity() {
             // Gyro on: keep the pad the way up it is, or a firm turn would flip the screen mid-note.
             val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
                 android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            val wantsSide = AppState.controller.landscape
-            val upright = AppState.controller.upright
+            val wantsSide = AppState.sideController(0).landscape
+            val upright = AppState.sideController(0).upright
             LaunchedEffect(AppState.mods.gyroOn, landscape, wantsSide, upright) {
                 requestedOrientation = when {
                     // The Grid's squares never turn: only the rail's labels follow the phone (PlayHost).

@@ -172,13 +172,28 @@ FN(jboolean, nativeCaptureSave)(JNIEnv* env, jobject, jstring path) {
 }
 
 // ---- controller packages (.odoc) -------------------------------------------------------------
-// One at a time: the one on screen. Its notes go in as the touch pad's do. UI thread only.
+// One for each side of the screen (a split's: mpe/split.h), each its own host, its notes going in
+// as the touch pad's do, on its own MIDI channels and parts. UI thread only.
 #include "mpe/controller.h"
+#include "mpe/split.h"
 
-static std::unique_ptr<mpe::ControllerHost>& ctl() { static std::unique_ptr<mpe::ControllerHost> h; return h; }
+static constexpr int kSides = mpe::split::kMaxSides;
+static std::unique_ptr<mpe::ControllerHost>& ctl(int side = 0) {
+    static std::unique_ptr<mpe::ControllerHost> h[kSides];
+    return h[std::clamp(side, 0, kSides - 1)];
+}
 static std::string& ctlError() { static std::string e; return e; }
+// Where each side's notes go: its first part, and its MIDI channels (as odo for computers' route()).
+struct CtlRoute { int part = 0, first = 1, count = 15; };
+static CtlRoute& ctlRoute(int side) { static CtlRoute r[kSides]; return r[std::clamp(side, 0, kSides - 1)]; }
+static void applyRoute(int side) {
+    if (!ctl(side)) return;
+    const CtlRoute& r = ctlRoute(side);
+    ctl(side)->setPart(r.part);
+    ctl(side)->setChannels(r.first, r.count);
+}
 
-// A take recording from it, or playing into it (the takes, at the end of this file).
+// A take recording from side 0's controller, or playing into it (the takes, at the end of this file).
 #include <chrono>
 #include "mpe/take.h"
 static mpe::take::Recorder& recorder() { static mpe::take::Recorder r; return r; }
@@ -201,37 +216,50 @@ static void fitGhosts(const std::vector<double>& v, float w, float h, const floa
     if (mpe::take::relayout(t, ctl()->package(), v, w, h, centers)) player().retouch(std::move(t.touches));
 }
 
-FN(jboolean, nativeCtlLoad)(JNIEnv* env, jobject, jbyteArray bytes) {
+FN(jboolean, nativeCtlLoad)(JNIEnv* env, jobject, jint side, jbyteArray bytes) {
     jsize n = env->GetArrayLength(bytes);
     std::string data(size_t(n), '\0');
     env->GetByteArrayRegion(bytes, 0, n, reinterpret_cast<jbyte*>(&data[0]));
-    player().stop(nullptr);
-    if (ctl()) ctl()->stop();
-    ctl().reset();
+    if (side == 0) player().stop(nullptr);
+    if (ctl(side)) ctl(side)->stop();
+    ctl(side).reset();
     auto pkg = mpe::Package::fromBytes(data.data(), data.size(), &ctlError());
     if (!pkg) return false;
     auto host = std::make_unique<mpe::ControllerHost>([](const uint8_t* m, int len) {
         synth().touchMidi(m[0], len > 1 ? m[1] : 0, len > 2 ? m[2] : 0);
     });
     if (!host->load(*pkg, &ctlError())) return false;
-    ctl() = std::move(host);
+    ctl(side) = std::move(host);
+    applyRoute(side);
     return true;
 }
-FN(jstring, nativeCtlError)(JNIEnv* env, jobject) {
-    return env->NewStringUTF((ctl() && !ctl()->lastError().empty() ? ctl()->lastError() : ctlError()).c_str());
+FN(jstring, nativeCtlError)(JNIEnv* env, jobject, jint side) {
+    return env->NewStringUTF((ctl(side) && !ctl(side)->lastError().empty() ? ctl(side)->lastError() : ctlError()).c_str());
 }
-FN(void, nativeCtlUnload)(JNIEnv*, jobject) { player().stop(nullptr); if (ctl()) ctl()->stop(); ctl().reset(); }
-FN(void, nativeCtlInit)(JNIEnv*, jobject, jfloat w, jfloat h, jint flags) { if (ctl()) ctl()->init(w, h, flags); }
-FN(void, nativeCtlInstrument)(JNIEnv*, jobject, jint part, jfloat center) { if (ctl()) ctl()->instrument(part, center); }
-FN(void, nativeCtlTouch)(JNIEnv*, jobject, jint id, jint phase, jfloat x, jfloat y, jfloat size, jfloat force) {
-    if (ctl()) ctl()->touch(id, mpe::ControllerHost::Phase(phase), x, y, size, force);
+FN(void, nativeCtlUnload)(JNIEnv*, jobject, jint side) {
+    if (side == 0) player().stop(nullptr);
+    if (ctl(side)) ctl(side)->stop();
+    ctl(side).reset();
 }
-FN(void, nativeCtlSetting)(JNIEnv*, jobject, jint index, jdouble value) { if (ctl()) ctl()->setting(index, value); }
-FN(void, nativeCtlStop)(JNIEnv*, jobject) { if (ctl()) ctl()->stop(); }
+FN(void, nativeCtlInit)(JNIEnv*, jobject, jint side, jfloat w, jfloat h, jint flags) { if (ctl(side)) ctl(side)->init(w, h, flags); }
+FN(void, nativeCtlInstrument)(JNIEnv*, jobject, jint side, jint part, jfloat center) { if (ctl(side)) ctl(side)->instrument(part, center); }
+FN(void, nativeCtlTouch)(JNIEnv*, jobject, jint side, jint id, jint phase, jfloat x, jfloat y, jfloat size, jfloat force) {
+    if (ctl(side)) ctl(side)->touch(id, mpe::ControllerHost::Phase(phase), x, y, size, force);
+}
+FN(void, nativeCtlSetting)(JNIEnv*, jobject, jint side, jint index, jdouble value) { if (ctl(side)) ctl(side)->setting(index, value); }
+FN(void, nativeCtlStop)(JNIEnv*, jobject, jint side) { if (ctl(side)) ctl(side)->stop(); }
+// Where side `side`'s notes go: its first part (the sides' parts one after another) and its MIDI
+// channels, first .. first + count - 1. Changed, its notes stop (they were on the old channels).
+FN(void, nativeCtlRoute)(JNIEnv*, jobject, jint side, jint part, jint first, jint count) {
+    CtlRoute& r = ctlRoute(side);
+    if (r.part == part && r.first == first && r.count == count) return;
+    r = CtlRoute{part, first, count};
+    applyRoute(side);
+}
 // Settings it changed itself since the last call, as index, value pairs; null if none.
-FN(jdoubleArray, nativeCtlTakeSettings)(JNIEnv* env, jobject) {
-    if (!ctl()) return nullptr;
-    auto changes = ctl()->takeSettingChanges();
+FN(jdoubleArray, nativeCtlTakeSettings)(JNIEnv* env, jobject, jint side) {
+    if (!ctl(side)) return nullptr;
+    auto changes = ctl(side)->takeSettingChanges();
     if (changes.empty()) return nullptr;
     std::vector<double> flat;
     for (const auto& c : changes) { flat.push_back(c.index); flat.push_back(c.value); }
@@ -240,14 +268,63 @@ FN(jdoubleArray, nativeCtlTakeSettings)(JNIEnv* env, jobject) {
     return out;
 }
 // A frame: time moves on; the draw list if it changed, else null.
-FN(jbyteArray, nativeCtlTick)(JNIEnv* env, jobject) {
-    if (!ctl()) return nullptr;
-    ctl()->tick();
-    if (!ctl()->takeDirty()) return nullptr;
-    const auto& d = ctl()->drawList();
+FN(jbyteArray, nativeCtlTick)(JNIEnv* env, jobject, jint side) {
+    if (!ctl(side)) return nullptr;
+    ctl(side)->tick();
+    if (!ctl(side)->takeDirty()) return nullptr;
+    const auto& d = ctl(side)->drawList();
     jbyteArray out = env->NewByteArray(jsize(d.size()));
     env->SetByteArrayRegion(out, 0, jsize(d.size()), reinterpret_cast<const jbyte*>(d.data()));
     return out;
+}
+
+// ---- splits (mpe/split.h): the same as odo for computers' --------------------------------------
+
+static std::vector<double> doublesIn(JNIEnv* env, jdoubleArray a) {
+    std::vector<double> v(size_t(a ? env->GetArrayLength(a) : 0));
+    if (!v.empty()) env->GetDoubleArrayRegion(a, 0, jsize(v.size()), v.data());
+    return v;
+}
+static jdoubleArray doublesOut(JNIEnv* env, const std::vector<double>& v) {
+    jdoubleArray out = env->NewDoubleArray(jsize(v.size()));
+    if (!v.empty()) env->SetDoubleArrayRegion(out, 0, jsize(v.size()), v.data());
+    return out;
+}
+// The splits, as UTF-8 JSON: [{"name", "sides", "cols", "side": [each side's name]}].
+FN(jbyteArray, nativeSplits)(JNIEnv* env, jobject) {
+    std::string o = "[";
+    for (int n = 0; n < mpe::split::kCount; n++) {
+        const mpe::split::Split& s = mpe::split::kSplits[n];
+        o += std::string(n ? "," : "") + "{\"name\":\"" + s.name + "\",\"sides\":" + std::to_string(s.sides) +
+             ",\"cols\":" + std::to_string(s.cols) + ",\"side\":[";
+        for (int k = 0; k < s.sides; k++) o += std::string(k ? "," : "") + "\"" + s.side[k] + "\"";
+        o += "]}";
+    }
+    o += "]";
+    jbyteArray a = env->NewByteArray(jsize(o.size()));
+    env->SetByteArrayRegion(a, 0, jsize(o.size()), reinterpret_cast<const jbyte*>(o.data()));
+    return a;
+}
+// Split n's dividers from `at` (evenly if it has not as many), kept in order and apart.
+FN(jdoubleArray, nativeSplitDividers)(JNIEnv* env, jobject, jint n, jdoubleArray at) {
+    return doublesOut(env, mpe::split::dividers(n, doublesIn(env, at)));
+}
+// Each side's region, fractions of the play area: x, y, w, h for each side in turn.
+FN(jdoubleArray, nativeSplitRegions)(JNIEnv* env, jobject, jint n, jdoubleArray at) {
+    std::vector<double> d = doublesIn(env, at), out;
+    for (int k = 0; k < mpe::split::kSplits[mpe::split::clampSplit(n)].sides; k++) {
+        mpe::split::Region g = mpe::split::region(n, d, k);
+        out.insert(out.end(), {g.x, g.y, g.w, g.h});
+    }
+    return doublesOut(env, out);
+}
+// The divider within `grab` of (x, y) in a w x h play area (dp), or -1.
+FN(jint, nativeSplitDividerAt)(JNIEnv* env, jobject, jint n, jdoubleArray at, jdouble x, jdouble y, jdouble w, jdouble h, jdouble grab) {
+    return mpe::split::dividerAt(n, doublesIn(env, at), x, y, w, h, grab);
+}
+// Divider i dragged to (x, y), fractions of the play area: the dividers then.
+FN(jdoubleArray, nativeSplitDragged)(JNIEnv* env, jobject, jint n, jdoubleArray at, jint i, jdouble x, jdouble y) {
+    return doublesOut(env, mpe::split::dragged(n, doublesIn(env, at), i, x, y));
 }
 
 // ---- the rail's settings model (mpe/rail.h) --------------------------------------------------
