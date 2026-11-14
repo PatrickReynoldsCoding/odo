@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -299,10 +300,10 @@ private fun SidesMap(pick: (Int) -> Unit) {
                 val colour = sideColour(k)
                 val ctl = AppState.sideController(k)
                 val what = ctl.name + (AppState.instrumentOf(k, 0)?.let { " · " + it.name } ?: "")
-                Column(Modifier.weight(1f).height(38.dp).clip(cell)
+                Column(Modifier.weight(1f).heightIn(min = 44.dp).clip(cell)
                            .background(if (on) (if (Eink) Fg else colour.copy(alpha = 0x38 / 255f)) else Ink)
                            .border(if (on) 2.dp else 1.dp, if (on) (if (Eink) Fg else colour) else Line, cell)
-                           .clickable { pick(k) }.padding(horizontal = 8.dp, vertical = 3.dp),
+                           .clickable { pick(k) }.padding(horizontal = 8.dp, vertical = 5.dp),
                        verticalArrangement = Arrangement.Center) {
                     Text(sp.side[k], color = if (on && Eink) Ink else Fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1,
                          overflow = TextOverflow.Ellipsis)

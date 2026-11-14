@@ -344,7 +344,8 @@ private fun PresetsPanel() {
     PNote(when {
         current.isEmpty() -> "Not a preset yet: keep what is playing as one of yours."
         on?.builtIn == true -> "A starting point: what you change is not kept in it. Keep it as one of yours."
-        else -> "Yours: what you change is kept in it as you play."
+        AppState.presetEdited -> "Yours, changed since saved: Save changes keeps them, or loading it goes back."
+        else -> "Yours, as saved: what you change is not kept in it until you save the changes."
     })
 }
 
