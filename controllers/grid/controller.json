@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "name": "Grid",
   "description": "Square keys, played landscape: notes climb up the columns, or along each row on its own, or any square any note. In a square, a finger's height is its loudness and its place across its tone; slide out past its edge to bend or change the tone; wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -60,7 +60,8 @@
       "name": "Second grid on the right",
       "type": "switch",
       "default": false,
-      "group": "Second grid"
+      "group": "Second grid",
+      "retired": true
     },
     {
       "id": "splitSize",
@@ -73,7 +74,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topWay",
@@ -87,7 +89,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topNotes",
@@ -102,7 +105,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topScale",
@@ -124,7 +128,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topKey",
@@ -149,7 +154,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topOctave",
@@ -162,7 +168,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "squareSize",
@@ -1114,7 +1121,8 @@
       "group": "Second grid",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "thirdOctave",
@@ -1127,7 +1135,8 @@
       "group": "Second grid",
       "showIf": {
         "third": true
-      }
+      },
+      "retired": true
     }
   ],
   "sideThemes": [

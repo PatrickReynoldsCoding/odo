@@ -11,7 +11,11 @@
  * note: by how near the finger is to the keys before and after it along its row (on the turned
  * keyboard, above and below), exactly that key's note at its middle and half way on the line between
  * (C to D: C♯ on their line), snapped to so many points between keys if Snap is on. Once sliding, one
- * finger plays it, and the other is free for another key. No vibrato, no Slide between notes.
+ * finger plays it, and the other is free for another key. No vibrato. Slide between notes (the Grid's:
+ * a finger plays the key under it, with a glide if you like) can be turned on; then two fingers do
+ * not pair. Whole screen (small screens, slide off): where a finger lands in a key does not matter,
+ * every note starts the same, and from there up and down the screen is its dynamics, left and right
+ * its tone (below, "the whole screen").
  *
  * Laid out as the Grid is: upright, rows of keys across, each row half a key to the right of the one
  * below (on an even row: rows are counted from 0, the bottom one unscrolled), drawn a quarter turned
@@ -37,10 +41,12 @@
    on the screen); the Move button's side, and its own moved place. */
 #define KEYS_EXTRA_SETTINGS S_HEX_LAYOUT, S_TUNING, S_STEP_E, S_STEP_NE, S_PRESS, S_SCALA, S_SCALA1, \
                             S_SCALA_LAST = S_SCALA1 + SCALA_MAX - 1, S_SNAP, S_SNAP_POINTS, \
-                            S_MOVE_KEYS, S_VIEW_RESET, S_VIEW_X, S_VIEW_Y, S_VIEW_SCALE, S_VIEW_TURN, S_SIDE_MOVE, S_PLACE9,
+                            S_MOVE_KEYS, S_VIEW_RESET, S_VIEW_X, S_VIEW_Y, S_VIEW_SCALE, S_VIEW_TURN, S_SIDE_MOVE, S_PLACE9, \
+                            S_WHOLE,
 /* Two fingers to slide: a finger's second (its id, 0: none, and where it is), and its slide: 0 none,
-   1 two fingers in its key, 2 sliding (the two have left the key; one finger plays it on). */
-#define KEYS_FINGER_EXTRA int mate, slide; float mx, my, held;
+   1 two fingers in its key, 2 sliding (the two have left the key; one finger plays it on);
+   wx0, wy0, wx, wy: where it came down and is on the surface (the whole screen's dynamics and tone). */
+#define KEYS_FINGER_EXTRA int mate, slide; float mx, my, held, wx0, wy0, wx, wy;
 /* A Scala file's tuning is built again when its settings (or the tuning) change. */
 static int scala_dirty = 1;
 static int view_back;           /* Put the keyboard back: asked, done in tick() (outside the host's call) */
@@ -543,7 +549,28 @@ static int in_key(const Finger* f, float x, float y) {
     return dx <= w / 2 && dy <= R - dx / 1.7320508f;
 }
 
-static void pair_init(Finger* f) { f->mate = 0; f->slide = 0; f->mx = f->x; f->my = f->y; f->held = 0; }
+static void pair_init(Finger* f) {
+    f->mate = 0; f->slide = 0; f->mx = f->x; f->my = f->y; f->held = 0;
+    f->wx0 = f->wx = touch_sx; f->wy0 = f->wy = touch_sy;
+}
+
+/* ---- the whole screen (small screens) ------------------------------------------------------------ */
+/* A key is small on a phone: hard to land on its top or bottom as you mean to. So (slide off) where a
+   finger lands in it does not matter: every note starts half way between the loudness at the bottom
+   and the top of a key, and the tone in the middle. From there the whole screen is the key, as the
+   touch pad is: up the screen louder, down softer, a third of its height to either end; left and
+   right the tone, a third of its width to either end. The finger keeps its note wherever it goes. */
+static int whole_screen(void) { return set_[S_WHOLE] != 0 && !sliding(); }
+static float screen_level(const Finger* f) {
+    float lo = dyn_low(), hi = dyn_high();
+    if (set_[S_IN_DYN] == 0 || !inside_on()) return hi;
+    float up = (f->wy0 - f->wy) / (SH / 3 > 1 ? SH / 3 : 1);
+    return clampf((lo + hi) / 2 + (hi - lo) / 2 * up, lo, hi);
+}
+static float screen_tone(const Finger* f) {
+    if (set_[S_IN_TONE] == 0 || !inside_on()) return 0.5f;
+    return clampf(0.5f + 0.5f * (f->wx - f->wx0) / (SW / 3 > 1 ? SW / 3 : 1), 0, 1);
+}
 
 /* A finger down on a key another finger holds, alone: the two are one, ready to slide. */
 static int pair_down(int id, int h, int n, float x, float y) {
@@ -569,7 +596,7 @@ static void slide_check(Finger* f) {
     f->mate = 0;
     /* Sliding, it keeps the dynamics it had in the key: the slide bends, it does not change how
        loud (pressing harder still does). */
-    f->held = level_at(f, f->rx + clampf(down_of(f, f->sx), 0, 1) * f->rs, 0);
+    f->held = whole_screen() ? screen_level(f) : level_at(f, f->rx + clampf(down_of(f, f->sx), 0, 1) * f->rs, 0);
     f->slide = 2;
 }
 
@@ -580,7 +607,7 @@ static int pair_move(int id, float x, float y) {
         Finger* f = &fingers[k];
         if (!f->used || f->n == DEMO_N) continue;
         if (f->mate == id) { f->mx = x; f->my = y; slide_check(f); send(f); return 1; }
-        if (f->id == id) { f->x = x; f->y = y; f->press = touch_press; slide_check(f); send(f); return 1; }
+        if (f->id == id) { f->x = x; f->y = y; f->wx = touch_sx; f->wy = touch_sy; f->press = touch_press; slide_check(f); send(f); return 1; }
     }
     return 0;
 }
@@ -655,7 +682,7 @@ static void draw_slides(const Theme* th) {
 }
 
 /* ---- the Touch panel: its keys, inside them, the slide ------------------------------------------ */
-enum { K_SNAP = 60, K_POINTS };
+enum { K_SNAP = 60, K_POINTS, K_WHOLE };
 static int ed_points;          /* dragging the snap points' slider */
 
 /* The snap points' slider: 1 to 24. */
@@ -774,6 +801,16 @@ static void ed_draw(const Theme* th) {
             chip(x + hw + 6, y, hw, 30, tone ? "Left/right: tone" : "Left/right: off", tone, th, K_INSIDE, 1);
             y += 38;
             if (dyn) y = range_slider(x, y, cw, th);
+            if (!sliding()) {
+                int ws = set_[S_WHOLE] != 0;
+                chip(x, y, cw, 30, ws ? "Whole screen for dynamics: on" : "Whole screen for dynamics: off", ws, th, K_WHOLE, 0);
+                y += 38;
+                mesh_text(x, y + 10, 11, dim, 0, ws ? "Every note starts the same, wherever it lands in its key;"
+                                                    : "For small screens: where a finger lands in a key won't");
+                mesh_text(x, y + 26, 11, dim, 0, ws ? "then up/down the screen is loudness, left/right tone."
+                                                    : "matter, and the whole screen is up/down and left/right.");
+                y += 40;
+            }
         }
         if (set_[S_DYN] < 0.99) {
             char dd[64];
@@ -781,6 +818,13 @@ static void ed_draw(const Theme* th) {
             chip(x, y, cw, 30, dd, 0, th, K_DYN_FULL, 0);
             y += 38;
         }
+    }
+    if (sliding()) {
+        y = section(x, y, "SLIDING BETWEEN NOTES", th);
+        mesh_text(x, y + 10, 11, dim, 0, "Slide between notes is on (Touch on the rail): a finger");
+        mesh_text(x, y + 26, 11, dim, 0, "plays the key under it, gliding if Glide is up. Two");
+        mesh_text(x, y + 42, 11, dim, 0, "fingers in a key don't bend while it is on.");
+        y += 56;
     }
     y = section(x, y, "SLIDING: TWO FINGERS", th);
     mesh_text(x, y + 10, 11, dim, 0, "Put two fingers in a key, then slide both out of it:");
@@ -834,6 +878,7 @@ static void ed_touch(int id, int phase, float x, float y) {
         case K_RANGE: ed_thumb = -1; range_to(x); break;
         case K_DYN_FULL: keep(S_DYN, 1); resend_all(); break;
         case K_SNAP: keep(S_SNAP, set_[S_SNAP] != 0 ? 0 : 1); break;
+        case K_WHOLE: keep(S_WHOLE, set_[S_WHOLE] != 0 ? 0 : 1); break;
         case K_POINTS: ed_points = 1; points_to(x); break;
         default: break;
         }

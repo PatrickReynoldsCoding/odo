@@ -42,6 +42,13 @@ int main() {
     CHECK(qa.arp.on && qa.arp.order == 2 && near(qa.arp.rate, 8) && qa.arp.octaves == 2, "part 0's arp");
     CHECK(near(q.sides[0].parts[1].volume, 0.7), "part 1's volume");
     CHECK(write(q) == text, "written again, the same file");
+    CHECK(near(q.sides[0].level, 1) && text.find("\"level\"") == std::string::npos, "a side at full level: no level written");
+
+    // A side's level: kept, and clamped.
+    p.sides[0].level = 0.55;
+    CHECK(parse(write(p), q, &err) && near(q.sides[0].level, 0.55), "a side's level reads back");
+    CHECK(parse(R"({"format": "odo-preset/1.1", "name": "x", "sides": [{"level": 9, "parts": []}, {"level": "loud"}]})", q, &err)
+          && near(q.sides[0].level, 1.5) && near(q.sides[1].level, 1), "a level too high is clamped; not a number, full");
 
     // A computer's: two sides, only sounds, no effects.
     const char* desk = R"({"format": "odo-preset/1", "name": "Keys over drums", "split": 2,

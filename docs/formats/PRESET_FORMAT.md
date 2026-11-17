@@ -53,6 +53,7 @@ UTF-8 JSON, at most 1 MB. MIME type `application/vnd.odo.preset+json`.
 | `layered` | One side: every note plays its first two parts. |
 | `effects` | The room and clock the parts share. Left out: the app keeps its own. |
 | `sides[]` | 1 to 4. Each: the `controller`, its `settings` and its `parts`. |
+| `sides[].level` | The side's level over its sounds' own, 0 to 1.5 (the Split panel's LEVELS, to level the sides of a split against each other). Left out: 1. |
 | `sides[].controller` | The controller package's id, `midi` for External MIDI, or `""` for any controller (the one in use). |
 | `sides[].settings` | Setting id to value: numbers, or `true`/`false` for a switch. Settings a controller doesn't have are left out; those the file doesn't name stay as they are. |
 | `sides[].parts[]` | 0 to 4. A split controller's second part (the Grid's second grid) is its second. |

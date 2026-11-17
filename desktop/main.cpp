@@ -234,6 +234,9 @@ struct App {
         // How its parts play, as the preset (or take) on gave them (each part's level, effects,
         // arp): a part plays so while its sound is the one named; otherwise with its sound's own.
         std::vector<mpe::preset::Part> parts;
+        // Its level over its sounds' own, 0 to 1.5 (the Split panel's LEVELS): to level the sides of
+        // a split against each other. Kept in presets (a file's sides[].level).
+        double level = 1;
     };
     // The shared effects (reverb room, delay, tempo) and layering the preset on gave; hasEffects
     // false: each sound's own room.
@@ -273,6 +276,7 @@ struct App {
             for (int j = 1; j < 4; j++)            // "sound2" .. "sound4": a split controller's further parts
                 if (std::string key = "sound" + std::to_string(j + 1); !s[k][key.c_str()].str().empty()) savedMore[k][j - 1] = s[k][key.c_str()].str();
             for (size_t j = 0; j < s[k]["parts"].size(); j++) sides[k].parts.push_back(mpe::preset::partFrom(s[k]["parts"][j]));
+            sides[k].level = std::clamp(s[k]["level"].num(1), 0.0, 1.5);
         }
         layered = j["layered"].boolean();
         if (j["effects"].type == mpe::Json::Object) { hasEffects = true; effects = mpe::preset::effectsFrom(j["effects"]); }
@@ -298,6 +302,7 @@ struct App {
                 PresetSide s{sd[k]["controller"].str(), sd[k]["sound"].str(), {sd[k]["sound2"].str(), sd[k]["sound3"].str(), sd[k]["sound4"].str()}, {}, {}};
                 for (const auto& kv : sd[k]["settings"].o) s.settings[kv.first] = kv.second.num();
                 for (size_t j = 0; j < sd[k]["parts"].size(); j++) s.parts.push_back(mpe::preset::partFrom(sd[k]["parts"][j]));
+                s.level = std::clamp(sd[k]["level"].num(1), 0.0, 1.5);
                 p.sides.push_back(std::move(s));
             }
             p.layered = ps[i]["layered"].boolean();
@@ -346,7 +351,7 @@ std::string quoted(const std::string& v) {
         for (int k = 0; k < kSides; k++) {
             f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k))
               << ", \"sound2\": " << quoted(moreId(k, 1)) << ", \"sound3\": " << quoted(moreId(k, 2))
-              << ", \"sound4\": " << quoted(moreId(k, 3));
+              << ", \"sound4\": " << quoted(moreId(k, 3)) << ", \"level\": " << sides[k].level;
             if (!sides[k].parts.empty()) {
                 f << ", \"parts\": [";
                 for (size_t j = 0; j < sides[k].parts.size(); j++) f << (j ? ", " : "") << mpe::preset::toJson(mpe::preset::partJson(sides[k].parts[j]));
@@ -384,7 +389,7 @@ std::string quoted(const std::string& v) {
                   << ", \"sound4\": " << quoted(s.more[2]) << ", \"settings\": {";
                 bool f2 = true;
                 for (const auto& sv : s.settings) { f << (f2 ? "" : ", ") << quoted(sv.first) << ": " << sv.second; f2 = false; }
-                f << "}";
+                f << "}, \"level\": " << s.level;
                 if (!s.parts.empty()) {
                     f << ", \"parts\": [";
                     for (size_t j = 0; j < s.parts.size(); j++) f << (j ? ", " : "") << mpe::preset::toJson(mpe::preset::partJson(s.parts[j]));
@@ -442,7 +447,7 @@ std::string quoted(const std::string& v) {
     // part's own settings (its volume, effects, arp), layering and the shared effects, as odo on
     // Android has them. They are kept, and given back when the preset is shared, while its sounds stay.
     struct PresetSide { std::string controller, sound; std::array<std::string, 3> more; std::map<std::string, double> settings;
-                        std::vector<mpe::preset::Part> parts; };
+                        std::vector<mpe::preset::Part> parts; double level = 1; };
     struct Preset { std::string name; int split = 0; std::vector<double> splitAt; std::vector<PresetSide> sides; bool builtIn = false;
                     bool layered = false, hasEffects = false; mpe::preset::Effects effects; };
     std::vector<Preset> userPresets;
@@ -512,7 +517,7 @@ std::string quoted(const std::string& v) {
         for (int k = 0; k < count(); k++) {
             std::vector<mpe::preset::Part> parts;
             for (int j = 0; j < partsOf(k) && !lib.instruments.empty(); j++) parts.push_back(partNow(k, j));
-            PresetSide s{controllerId(k), soundId(k), {moreId(k, 1), moreId(k, 2), moreId(k, 3)}, {}, parts};
+            PresetSide s{controllerId(k), soundId(k), {moreId(k, 1), moreId(k, 2), moreId(k, 3)}, {}, parts, count() > 1 ? sides[k].level : 1};
             if (sides[k].host) {
                 const mpe::Json& st = sides[k].host->manifest()["settings"];
                 for (size_t i = 0; i < st.size() && i < sides[k].settings.size(); i++) s.settings[st[i]["id"].str()] = sides[k].settings[i];
@@ -533,6 +538,7 @@ std::string quoted(const std::string& v) {
             const PresetSide& s = p.sides[size_t(k)];
             if (s.controller != controllerId(k) || s.sound != soundId(k) || s.more[0] != moreId(k, 1) || s.more[1] != moreId(k, 2) ||
                 s.more[2] != moreId(k, 3)) return false;
+            if (count() > 1 && std::fabs(s.level - sides[k].level) > 1e-6) return false;
             for (size_t j = 0; j < s.parts.size() && int(j) < partsOf(k); j++)
                 if (s.parts[j].full && !samePart(s.parts[j], partNow(k, int(j)))) return false;
             if (!sides[k].host) continue;
@@ -586,6 +592,7 @@ std::string quoted(const std::string& v) {
             const PresetSide& s = p.sides[k];
             Side& sd = sides[k];
             sd.parts = s.parts;
+            sd.level = s.level;
             if (int c = controllerIndex(s.controller); c >= 0) sd.controller = c;
             if (int n = soundIndex(s.sound); n >= 0) sd.sound = n;
             for (int j = 0; j < 3; j++) sd.more[j] = s.more[size_t(j)].empty() ? -1 : soundIndex(s.more[size_t(j)]);
@@ -683,6 +690,7 @@ std::string quoted(const std::string& v) {
                 fs.settings.o.emplace_back(kv.first, v);
             }
             fs.parts = s.parts;
+            fs.level = p.split > 0 ? s.level : 1;
             // The sound, and its version: in a file, always (a preset plays the version it was made with).
             auto put = [&](size_t j, const std::string& ref) {
                 if (fs.parts.size() <= j) fs.parts.resize(j + 1);
@@ -730,6 +738,7 @@ std::string quoted(const std::string& v) {
                 s.controller = controllerId(ki);
             }
             s.parts = fs.parts;
+            s.level = p.split > 0 ? fs.level : 1;
             // The sounds by their ids here; the version the file names, if this computer has it, else
             // the newest (and the note says so).
             std::vector<int> found(s.parts.size(), -1);
@@ -1075,6 +1084,7 @@ std::string quoted(const std::string& v) {
                 c.octaves = q.arp.octaves;
                 c.latch = q.arp.latch;
             }
+            if (count() > 1) c.volume *= float(sides[k].level);   // the side's level over its sounds'
             if (part == 0) {                     // the room is shared: the first side's
                 p.reverbSize = float(s["reverbSize"].num(0.5));
                 p.reverbDamp = float(s["reverbDamp"].num(0.4));
@@ -1763,7 +1773,7 @@ std::string quoted(const std::string& v) {
 
     enum Act { aNone, aPanic, aSoundFilter, aLoadPreset, aNewPreset, aSaveChanges, aShare, aOpenFile, aRename, aRenameOk, aDelete, aSplit, aController, aSound, aLook, aGestures, aFlip, aChip, aFold, aSlide, aVolume, aVersion,
                aRecord, aTake, aListen, aAlong, aSpeed, aFingers, aLoop, aFx, aFxReset, aDelayTime, aPingPong, aTakeDelete, aTakeOpen, aTakeShare, aScalaOpen,
-               aTakeUse, aTakeKeep };
+               aTakeUse, aTakeKeep, aLevel };
     struct PItem {
         enum Kind { Heading, Sub, Note, Row, Tile, Chip, Switch, Fold, Label, Slider, Field } kind;
         std::string text, sub;
@@ -1882,6 +1892,17 @@ std::string quoted(const std::string& v) {
                 p.items.push_back(it);
             }
             y += float((n + 1) / 2) * 104;
+            // Split: each side's level over its sounds' own, to level the sides against each other.
+            if (isSplit && count() > 1) {
+                heading("LEVELS");
+                for (int k = 0; k < count(); k++) {
+                    p.items.push_back({PItem::Label, kSplits[split].side[k], std::to_string(int(std::lround(sides[k].level * 100))) + "%", x, y, in, 40}); y += 40;
+                    PItem s{PItem::Slider, "", "", x + 9, y, in - 18, 30};
+                    s.act = aLevel; s.arg = k; s.frac = std::clamp(sides[k].level / 1.5, 0.0, 1.0); s.colour = sideColourOf(k);
+                    p.items.push_back(s); y += 40;
+                }
+                note("Each side louder or softer against the others, over its sounds' own levels.");
+            }
         } else if (panelKey == kSoundKey || panelKey == kSound2Key) {
             if (lib.instruments.empty() || (panelKey == kSound2Key && partsOf(active) < panelPart + 1)) { panelKey = kNone; return Panel(); }
             bool two = partsOf(active) > 1;
@@ -2185,10 +2206,11 @@ std::string quoted(const std::string& v) {
     }
 
     // A slider in the panel under x: its setting at that place.
-    struct Slide { int setting = -1; float x = 0, w = 0; bool master = false; int fx = -1; } slide;
+    struct Slide { int setting = -1; float x = 0, w = 0; bool master = false; int fx = -1; int level = -1; } slide;
     void panelSlide(float x, bool save) {
-        if ((slide.setting < 0 && !slide.master && slide.fx < 0) || slide.w <= 0) return;
+        if ((slide.setting < 0 && !slide.master && slide.fx < 0 && slide.level < 0) || slide.w <= 0) return;
         double t = std::clamp(double(x - slide.x) / double(slide.w), 0.0, 1.0);
+        if (slide.level >= 0) { sides[slide.level].level = std::round(t * 1.5 * 20) / 20; applySounds(); return; }   // 5% steps
         if (slide.fx >= 0) { setFx(slide.fx, t); return; }
         if (slide.master) { setMasterVolume(float(std::round(t * 40) / 20), save); return; }   // 5% steps
         setSetting(size_t(slide.setting), mpe::rail::fromFraction(settingOf(size_t(slide.setting)), t), save);
@@ -2260,7 +2282,8 @@ std::string quoted(const std::string& v) {
                 for (const PItem& it : p.items) {
                     float iy = p.top + it.y - panelScroll;
                     if (it.kind != PItem::Slider || x < it.x - 10 || x >= it.x + it.w + 10 || y < iy - 6 || y >= iy + it.h + 6) continue;
-                    slide = it.act == aFx ? Slide{-1, it.x, it.w, false, it.arg} : Slide{it.arg, it.x, it.w, it.act == aVolume};
+                    slide = it.act == aFx ? Slide{-1, it.x, it.w, false, it.arg}
+                          : it.act == aLevel ? Slide{-1, it.x, it.w, false, -1, it.arg} : Slide{it.arg, it.x, it.w, it.act == aVolume};
                     press.sliding = press.dragged = true;
                     panelSlide(x, false);
                     break;
@@ -2690,9 +2713,10 @@ std::string quoted(const std::string& v) {
                     break;
                 case PItem::Slider: {
                     float ty = y + it.h / 2, fx = it.x + float(it.frac) * it.w;
+                    draw::Color ink = it.colour && !p.eink ? rgba(it.colour) : accent;   // a side's level: its colour
                     draw::fillRect(renderer, it.x, ty - 2, it.w, 4, p.eink ? rgba(0xBBBBBBFF) : line, 2);
-                    draw::fillRect(renderer, it.x, ty - 2, fx - it.x, 4, accent, 2);
-                    draw::circle(renderer, fx, ty, 9, accent, accent, 0);
+                    draw::fillRect(renderer, it.x, ty - 2, fx - it.x, 4, ink, 2);
+                    draw::circle(renderer, fx, ty, 9, ink, ink, 0);
                     break;
                 }
                 case PItem::Field: {

@@ -1,9 +1,9 @@
 {
   "format": 1,
   "id": "patrickreynolds/hex",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "name": "Hex",
-  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, bend the note toward the keys either way (snapped to points if you like); press harder for pressure. Move the keyboard with two fingers: drag it, size it, turn it",
+  "description": "Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or just intonation, or a Scala file's tuning. Dynamics and tone inside a key, or across the whole screen; two fingers in a key, slid out of it, bend the note toward the keys either way (snapped to points if you like), or slide between notes; press harder for pressure. Move the keyboard with two fingers: drag it, size it, turn it",
   "author": "Patrick Reynolds",
   "licence": "MIT",
   "needs": {
@@ -79,7 +79,8 @@
       "name": "Second keyboard on the right",
       "type": "switch",
       "default": false,
-      "group": "Second keyboard"
+      "group": "Second keyboard",
+      "retired": true
     },
     {
       "id": "splitSize",
@@ -92,7 +93,8 @@
       "group": "Second keyboard",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topWay",
@@ -106,7 +108,8 @@
       "group": "Second keyboard",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topNotes",
@@ -122,6 +125,7 @@
       "showIf": {
         "split": true
       },
+      "retired": true,
       "hidden": true
     },
     {
@@ -144,7 +148,8 @@
       "group": "Second keyboard",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topKey",
@@ -169,7 +174,8 @@
       "group": "Second keyboard",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "topOctave",
@@ -182,7 +188,8 @@
       "group": "Second keyboard",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "squareSize",
@@ -634,8 +641,7 @@
       "name": "Slide between notes",
       "type": "switch",
       "default": false,
-      "group": "Touch",
-      "hidden": true
+      "group": "Touch"
     },
     {
       "id": "noteEdit",
@@ -938,8 +944,7 @@
       "group": "Touch",
       "showIf": {
         "slide": true
-      },
-      "hidden": true
+      }
     },
     {
       "id": "glideLR",
@@ -949,8 +954,7 @@
       "group": "Touch",
       "showIf": {
         "slide": true
-      },
-      "hidden": true
+      }
     },
     {
       "id": "glideUD",
@@ -960,8 +964,7 @@
       "group": "Touch",
       "showIf": {
         "slide": true
-      },
-      "hidden": true
+      }
     },
     {
       "id": "flip90",
@@ -1152,7 +1155,8 @@
       "group": "Second keyboard",
       "showIf": {
         "split": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "thirdOctave",
@@ -1165,7 +1169,8 @@
       "group": "Second keyboard",
       "showIf": {
         "third": true
-      }
+      },
+      "retired": true
     },
     {
       "id": "hexLayout",
@@ -2500,6 +2505,16 @@
       "default": 0,
       "hidden": true,
       "group": "Controls"
+    },
+    {
+      "id": "wholeScreen",
+      "name": "Whole screen for dynamics (small screens)",
+      "type": "switch",
+      "default": false,
+      "group": "Touch",
+      "showIf": {
+        "slide": false
+      }
     }
   ]
 }

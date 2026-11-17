@@ -231,6 +231,25 @@ with the engine's `mpe::scala` and gives it to the keyboard as settings (CONTROL
 - Checked without a touch screen only: engine tests (every key of nine layout and tuning pairs
   played through the MESH), and desktop screenshots. Not by hand, not on Android.
 
+## Slide between notes and the whole screen (Hex 2.3.0)
+
+- **Slide between notes** (Touch) is on the rail again, as the Grid's: a finger plays the key under
+  it, with **Glide** (and Glide left/right, up/down) if you like. While it is on, two fingers in a key
+  are two notes (they do not pair to bend). Off (the default), the two-finger slide as above.
+- **Whole screen for dynamics (small screens)** (Touch, shown while Slide between notes is off; also
+  in the Touch panel): where a finger lands in a key no longer matters. Every note starts half way
+  between the loudness at the bottom and the top of a key, the tone in the middle. From there the
+  whole screen is the key, as on the touch pad: up the screen louder, down softer (a third of its
+  height to either end); left and right the tone (a third of its width). The finger keeps its note.
+  Two fingers still slide.
+
+## Splits are the apps' (Grid 2.10.0, Hex 2.3.0, touch pad 1.4.0)
+
+The apps split the screen themselves (Split), so a controller's own split is retired: the Grid's and
+Hex's second and third keyboards, and the touch pad's two pads, are off the rail (`"retired"`,
+CONTROLLER_FORMAT.md). A preset or take that has one on still plays it, and the rail shows its group
+while it is on, to turn it off. Each side of a split has a level (Split → LEVELS, `sides[].level`).
+
 ## A third keyboard (Hex 2.2.0, Grid 2.9.0)
 
 Second keyboard → **Third keyboard, right of the second** (with a second on): three keyboards side

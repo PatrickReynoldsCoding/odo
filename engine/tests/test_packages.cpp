@@ -438,6 +438,49 @@ static void hexPackage() {
     CHECK(std::fabs(ch[lastCh].pitch() - 60) < 0.01, "put back: C4 in the middle again (%.2f)", ch[lastCh].pitch());
     host.touch(id++, ControllerHost::Up, 251, my, 0, 0);
 
+    // Slide between notes (Hex 2.3.0): one finger slid onto D plays D, a new note; two fingers in a
+    // key are two notes (they do not pair).
+    host.setting(at("slide"), 1);
+    before = ons;
+    host.touch(id, ControllerHost::Down, 251, my, 0, 0);
+    host.touch(id, ControllerHost::Move, 351, my, 0, 0);
+    CHECK(ons == before + 2 && std::fabs(ch[lastCh].pitch() - 62) < 0.01, "Slide between notes: onto D, D (%.2f, %d notes)", ch[lastCh].pitch(), ons - before);
+    host.touch(id++, ControllerHost::Up, 351, my, 0, 0);
+    a = id++; b = id++;
+    before = ons;
+    host.touch(a, ControllerHost::Down, 245, my, 0, 0);
+    host.touch(b, ControllerHost::Down, 257, my, 0, 0);
+    CHECK(ons == before + 2, "sliding between notes: two fingers in a key, two notes (%d)", ons - before);
+    host.touch(a, ControllerHost::Up, 245, my, 0, 0);
+    host.touch(b, ControllerHost::Up, 257, my, 0, 0);
+    host.setting(at("slide"), 0);
+
+    // The whole screen (small screens): where a finger lands in its key does not matter; then up the
+    // screen is louder, down softer, and it keeps its note.
+    host.touch(id, ControllerHost::Down, 221, my, 0, 0);
+    int velFoot = vel;
+    host.touch(id++, ControllerHost::Up, 221, my, 0, 0);
+    host.touch(id, ControllerHost::Down, 281, my, 0, 0);
+    int velTop = vel;
+    host.touch(id++, ControllerHost::Up, 281, my, 0, 0);
+    CHECK(velFoot != velTop, "in a key: where it lands sets how loud (%d, %d)", velFoot, velTop);
+    host.setting(at("wholeScreen"), 1);
+    host.touch(id, ControllerHost::Down, 221, my, 0, 0);
+    velFoot = vel;
+    host.touch(id++, ControllerHost::Up, 221, my, 0, 0);
+    host.touch(id, ControllerHost::Down, 281, my, 0, 0);
+    velTop = vel;
+    CHECK(velFoot == velTop, "whole screen: every note starts the same (%d, %d)", velFoot, velTop);
+    pressures.clear();
+    host.touch(id, ControllerHost::Move, 281, my - 140, 0, 0);
+    int up = pressures.empty() ? -1 : pressures.back();
+    host.touch(id, ControllerHost::Move, 281, my + 140, 0, 0);
+    int down = pressures.empty() ? -1 : pressures.back();
+    CHECK(up > 100 && down >= 0 && down < 50 && std::fabs(ch[lastCh].pitch() - 60) < 0.01,
+          "whole screen: up the screen loud (%d), down soft (%d), still C4 (%.2f)", up, down, ch[lastCh].pitch());
+    host.touch(id++, ControllerHost::Up, 281, my + 140, 0, 0);
+    host.setting(at("wholeScreen"), 0);
+
     host.stop();
     CHECK(host.lastError().empty(), "no errors from the WebAssembly (%s)", host.lastError().c_str());
     (void)offs; (void)vel;

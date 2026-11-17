@@ -23,11 +23,15 @@ import org.json.JSONObject
  * [settings] is kept as JSON text, so two presets compare by value.
  *
  * Those are its first side's. Split ([split], a Splits index; 0 the whole screen), [more] has each
- * further side's controller, settings and sounds, and [splitAt] where the dividers are (empty: evenly).
+ * further side's controller, settings and sounds, [splitAt] where the dividers are (empty: evenly), and
+ * [levels] each side's level over its sounds' own (empty, or one not given: full).
  */
 data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false,
                   val controller: String? = LegacyTouchPad.ID, val settings: String? = null,
-                  val split: Int = 0, val splitAt: List<Double> = emptyList(), val more: List<PresetSide> = emptyList()) {
+                  val split: Int = 0, val splitAt: List<Double> = emptyList(), val more: List<PresetSide> = emptyList(),
+                  val levels: List<Float> = emptyList()) {
+    /** Side [k]'s level: 1 if not given. */
+    fun level(k: Int) = levels.getOrElse(k) { 1f }
     fun json(): JSONObject = JSONObject().put("name", name).put("perf", perf.json()).apply {
         controller?.let { put("controller", it) }
         settings?.let { put("settings", JSONObject(it)) }
@@ -35,6 +39,7 @@ data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false
             put("split", split)
             put("splitAt", JSONArray().apply { for (d in splitAt) put(d) })
             put("sides", JSONArray().apply { for (s in more) put(s.json()) })
+            if (levels.any { it != 1f }) put("levels", JSONArray().apply { for (v in levels) put(v.toDouble()) })
         }
     }
     companion object {
@@ -47,10 +52,12 @@ data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false
                 if (Perf.arpsInController(perf)) Controllers.byId(o.getString("controller")).legacyArps(settings)?.let { p = p.withArps(it) }
                 val at = o.optJSONArray("splitAt")
                 val sides = o.optJSONArray("sides")
+                val lv = o.optJSONArray("levels")
                 return Preset(o.getString("name"), p, controller = o.getString("controller"), settings = settings?.toString(),
                               split = o.optInt("split", 0),
                               splitAt = if (at == null) emptyList() else List(at.length()) { at.optDouble(it, 0.5) },
-                              more = if (sides == null) emptyList() else List(sides.length()) { PresetSide.from(sides.getJSONObject(it)) })
+                              more = if (sides == null) emptyList() else List(sides.length()) { PresetSide.from(sides.getJSONObject(it)) },
+                              levels = if (lv == null) emptyList() else List(lv.length()) { lv.optDouble(it, 1.0).toFloat().coerceIn(0f, LEVEL_MAX) })
             }
             // Before 0.16: a touch pad preset, the pads (if it had them) beside the performance.
             val pad = o.optJSONObject("pad")
@@ -102,6 +109,10 @@ object AppState {
         private set
     /** Every side, four (those past the split's are kept, not shown). [partsOf] has a side's parts now. */
     var sides by mutableStateOf(List(Controllers.SIDES) { Side(ExternalMidi, Perf.DEFAULT_PARTS) })
+        private set
+    /** Each side's level over its sounds' own (0 to [LEVEL_MAX]; 1 as they are), to level the sides
+     *  of a split against each other. Kept in presets (a file's `sides[].level`). Whole: not used. */
+    var levels by mutableStateOf(List(Controllers.SIDES) { 1f })
         private set
     /** How many sides the screen has now. */
     val count get() = Splits.of(split).sides
@@ -197,6 +208,8 @@ object AppState {
         split = prefs.getInt("split", 0).coerceIn(Splits.all.indices)
         if (count > 1 && first === ExternalMidi) sides = sides.mapIndexed { k, s -> if (k == 0) s.copy(controller = Controllers.byId(LegacyTouchPad.PACKAGE)) else s }
         splitAt = Splits.dividers(split, runCatching { JSONArray(prefs.getString("splitAt", "[]")).let { a -> List(a.length()) { a.optDouble(it, 0.5) } } }.getOrDefault(emptyList()))
+        levels = runCatching { JSONArray(prefs.getString("levels", "[]")).let { a -> List(Controllers.SIDES) { a.optDouble(it, 1.0).toFloat().coerceIn(0f, LEVEL_MAX) } } }
+            .getOrDefault(List(Controllers.SIDES) { 1f })
         // From 0.16 to 0.20 the arps were each controller's: the one in use brings its own into the sound.
         if (Perf.arpsInController(perfJson)) {
             val saved = runCatching { prefs.getString("ctl.${sides[0].controller.id}", null)?.let { JSONObject(it) } }.getOrNull()
@@ -283,7 +296,7 @@ object AppState {
             for (j in 0 until sidePartCount(k)) if (parts.size < PARTS) {
                 val p = partsOf(k).getOrElse(j) { Perf.DEFAULT_PARTS[j] }
                 val arp = when { c.arpUse != ArpUse.App -> Arp(); !c.shape.arpLatch -> p.arp.copy(latch = false); else -> p.arp }
-                parts += p.copy(arp = arp)
+                parts += p.copy(arp = arp, volume = p.volume * levels[k])   // the side's level over its sounds'
             }
         }
         return perf.copy(layered = false, parts = parts) to EngineShape(split = parts.size > 1, parts = parts.size.coerceIn(2, PARTS))
@@ -446,6 +459,16 @@ object AppState {
         touched()
     }
 
+    /** Side [k]'s level (the Split panel's LEVELS): its sounds louder or softer against the other sides'. */
+    fun setLevel(k: Int, v: Float) {
+        val n = v.coerceIn(0f, LEVEL_MAX)
+        if (levels[k] == n) return
+        levels = levels.mapIndexed { i, l -> if (i == k) n else l }
+        applyEngine()
+        save()
+        touched()
+    }
+
     /** Divider [i] dragged to (fx, fy), fractions of the play area: more of one side shows, less of
      *  another; no controller is laid out again. [done]: let go, so it is kept. */
     fun dragDivider(i: Int, fx: Float, fy: Float, done: Boolean = false) {
@@ -482,7 +505,8 @@ object AppState {
     /** What is playing now, as a preset of yours: every side, the split and where its dividers are. */
     private fun current(name: String) = Preset(name, perfOf(0), controller = sides[0].controller.id,
         settings = sides[0].controller.save().toString(), split = split, splitAt = if (count > 1) splitAt else emptyList(),
-        more = (1 until count).map { k -> PresetSide(sides[k].controller.id, sides[k].controller.save().toString(), fullParts(partsOf(k))) })
+        more = (1 until count).map { k -> PresetSide(sides[k].controller.id, sides[k].controller.save().toString(), fullParts(partsOf(k))) },
+        levels = if (count > 1 && (0 until count).any { levels[it] != 1f }) levels.take(count) else emptyList())
 
     /** Something changed: the preset on view is now changed since it was saved (yours) or loaded (a
      *  built-in one). It is not kept in it: Save changes does that. */
@@ -527,6 +551,7 @@ object AppState {
         sides = next
         split = m
         splitAt = Splits.dividers(m, p.splitAt)
+        levels = List(Controllers.SIDES) { k -> if (k < now) p.level(k) else levels[k] }
         perf = p.perf.copy(parts = fullParts(sides[0].parts))
         prefs.edit().putString("controller", sides[0].controller.id).apply()
         applyEngine()
@@ -637,7 +662,7 @@ object AppState {
         fun d(f: Float) = f.toString().toDouble()
         val pf = p.perf
         // Each side: its controller, its settings by id, its parts.
-        fun side(controller: String, settingsText: String?, ps: List<Part>): JSONObject {
+        fun side(controller: String, settingsText: String?, ps: List<Part>, level: Float): JSONObject {
             val s = settingsText?.let { runCatching { JSONObject(it) }.getOrNull() }
             val settings = s?.optJSONObject("byId") ?: s ?: JSONObject()
             val parts = JSONArray()
@@ -649,9 +674,10 @@ object AppState {
                 .put("arp", JSONObject().put("on", part.arp.on).put("order", part.arp.order).put("rate", d(part.arp.rate))
                     .put("gate", d(part.arp.gate)).put("octaves", part.arp.octaves).put("latch", part.arp.latch)))
             return JSONObject().put("controller", controller).put("settings", settings).put("parts", parts)
+                .apply { if (level != 1f) put("level", d(level)) }
         }
-        val sides = JSONArray().put(side(p.controller ?: "", p.settings, pf.parts))
-        if (p.split != 0) for (s in p.more) sides.put(side(s.controller, s.settings, s.parts))
+        val sides = JSONArray().put(side(p.controller ?: "", p.settings, pf.parts, if (p.split != 0) p.level(0) else 1f))
+        if (p.split != 0) p.more.forEachIndexed { i, s -> sides.put(side(s.controller, s.settings, s.parts, p.level(i + 1))) }
         val o = JSONObject().put("format", "odo-preset/1").put("name", p.name)
             .put("madeBy", "odo ${BuildConfig.VERSION_NAME} (Android)").put("split", p.split).put("layered", pf.layered)
             .put("effects", JSONObject().put("bpm", d(pf.bpm)).put("reverbSize", d(pf.reverbSize))
@@ -745,10 +771,11 @@ object AppState {
             delayFeedback = fx?.optDouble("delayFeedback")?.toFloat() ?: perf.delayFeedback,
             delayPingPong = fx?.optBoolean("delayPingPong") ?: perf.delayPingPong)
         val at = f.optJSONArray("splitAt")
+        val lv = (0 until sidesNow).map { k -> (fileSides.optJSONObject(k)?.optDouble("level", 1.0) ?: 1.0).toFloat().coerceIn(0f, LEVEL_MAX) }
         val p = Preset(if (keep) freeName(f.optString("name")) else f.optString("name"), made, controller = first.controller,
                        settings = first.settings, split = split,
                        splitAt = if (split == 0) emptyList() else Splits.dividers(split, if (at == null) emptyList() else List(at.length()) { at.optDouble(it, 0.5) }),
-                       more = more)
+                       more = more, levels = if (split == 0 || lv.all { it == 1f }) emptyList() else lv)
         if (keep) {
             userPresets = userPresets + p
             savePresets()
@@ -799,10 +826,14 @@ object AppState {
         for (k in 1 until Controllers.SIDES) more.put(JSONObject().put("controller", sides[k].controller.id).put("parts", partsJson(partsOf(k))))
         prefs.edit().putString("perf", perfOf(0).json().toString()).putString("preset", presetName)
             .putString("sides", more.toString()).putInt("split", split)
-            .putString("splitAt", JSONArray().apply { for (d in splitAt) put(d) }.toString()).putInt("activeSide", activeSide).apply()
+            .putString("splitAt", JSONArray().apply { for (d in splitAt) put(d) }.toString()).putInt("activeSide", activeSide)
+            .putString("levels", JSONArray().apply { for (v in levels) put(v.toDouble()) }.toString()).apply()
     }
     private fun save() { saver.removeCallbacks(saveNow); saver.postDelayed(saveNow, 400) }
 }
+
+/** The most a side's level goes to: 150%, as a sound's Level. */
+const val LEVEL_MAX = 1.5f
 
 /** A built-in preset for any controller: the sound only. */
 private fun preset(name: String, perf: Perf) = Preset(name, perf, builtIn = true, controller = null)

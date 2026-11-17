@@ -180,6 +180,7 @@ bool parse(const std::string& text, Preset& out, std::string* error) {
         if (s.type != Json::Object) continue;
         Side side;
         side.controller = s["controller"].str();
+        side.level = finite(s["level"], 1, 0, 1.5);
         side.settings.type = Json::Object;
         for (const auto& kv : s["settings"].o)
             if (kv.second.type == Json::Number && std::isfinite(kv.second.n)) side.settings.o.push_back(kv);
@@ -215,6 +216,7 @@ std::string write(const Preset& p) {
     for (const Side& s : p.sides) {
         w.item(); w.open('{');
         w.key("controller"); quote(w.o, s.controller);
+        if (std::fabs(s.level - 1) > 1e-9) { w.key("level"); num(w.o, s.level); }
         w.key("settings"); w.o += s.settings.type == Json::Object ? toJson(s.settings) : "{}";
         w.key("parts"); w.open('[');
         for (const Part& q : s.parts) { w.item(); w.o += toJson(partJson(q)); }

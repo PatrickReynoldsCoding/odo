@@ -550,6 +550,8 @@ typedef struct {
 #define DEMO_N (-99999)           /* the square in the Touch panel, not one of the grid's */
 /* The touch now being handled: its size, or its force when the MESH has that (0: neither). */
 static float touch_press;
+/* And where it is on the surface, as the MESH gives it (the Hex keyboard's whole screen). */
+static float touch_sx, touch_sy;
 
 /* The keys' shape, again: the note a bend aims at, sliding out of finger f's key across (1) or up
    and down (0), toward dir (1: right or up, upright); and with Slide between notes' glide, how far
@@ -707,6 +709,9 @@ static int pair_down(int id, int h, int n, float x, float y);
 static int pair_move(int id, float x, float y);
 static int pair_up(int id);
 static void pair_init(Finger* f);
+static int whole_screen(void);
+static float screen_level(const Finger* f);
+static float screen_tone(const Finger* f);
 #endif
 /* A finger's notes are its own half's. */
 static Expr expression(const Finger* f) {
@@ -724,6 +729,8 @@ static Expr expression_in(const Finger* f) {
        once it is out; full volume (or Volume's 0.7). */
     Expr e = {0, level_at(f, f->rx + clampf(down_of(f, f->sx), 0, 1) * f->rs, 0), tone_at(f, f->sy), 1};
 #ifdef KEYS_HEX
+    /* The whole screen (small screens): dynamics and tone from how far it has moved on the screen. */
+    if (whole_screen() && f->n != DEMO_N) { e.pressure = screen_level(f); e.slide = screen_tone(f); }
     if (f->slide == 2) e.pressure = f->held;   /* sliding: the dynamics it had in its key (hex.c) */
 #endif
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
@@ -833,7 +840,8 @@ static void down_in(int id, float x, float y, int h) {
     int n = square_at(x, y);
     if (n == NO_KEY || note_of(n) < 0) return;
 #ifdef KEYS_HEX
-    if (pair_down(id, h, n, x, y)) return;      /* a second finger on a held key: no note of its own */
+    /* A second finger on a held key: no note of its own (sliding between notes: it plays its own). */
+    if (!sliding() && pair_down(id, h, n, x, y)) return;
 #endif
     if (latch_on && set_[S_LATCHMODE] == LATCH_TAP) {
         /* Tap a held square to let it go. */
@@ -854,10 +862,11 @@ static void down_in(int id, float x, float y, int h) {
     f->ux = 1; f->uy = 0; f->glide = 0;
     f->press0 = f->press = touch_press;
     f->strike = level_at(f, x, y);
-    press_strike(f);
 #ifdef KEYS_HEX
     pair_init(f);
+    if (whole_screen()) f->strike = screen_level(f);   /* the whole screen: every note starts the same */
 #endif
+    press_strike(f);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n && ring[r].half == h) ring[r].glow = 0;
     Expr e = expression(f);
     if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
@@ -2132,6 +2141,7 @@ MESH_EXPORT(setting) void setting(int index, double value) {
 
 MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, float force, double t) {
     touch_press = force > 0 ? force : size > 0 ? size : 0;
+    touch_sx = x; touch_sy = y;
     now = t;
     /* The Touch panel takes every touch while it is open, on the surface as it is. */
     if (editing()) { ed_touch(id + 1, phase, x, y); dirty = 1; return; }
@@ -2176,11 +2186,14 @@ MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, f
 #ifdef KEYS_HEX
         if (view_touch(id, phase, x, y, sx, sy)) { dirty = 1; return; }
         finger_to_plane(id, &x, &y);                /* where it is on the keys as they lie */
-        if (pair_move(id, x, y)) { dirty = 1; return; }
+        if (!sliding() && pair_move(id, x, y)) { dirty = 1; return; }
 #endif
         Finger* f = find(id);
         if (!f) return;
         f->x = x; f->y = y; f->press = touch_press;
+#ifdef KEYS_HEX
+        f->wx = touch_sx; f->wy = touch_sy;
+#endif
         if (sliding() && !note_editing()) { if (set_[S_GLIDE] > 0.001) glide_to(f, x, y); else slide_to(f, x, y); }
         send(f);
     } else {

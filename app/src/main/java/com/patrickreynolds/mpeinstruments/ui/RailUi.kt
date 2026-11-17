@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
+import com.patrickreynolds.mpeinstruments.LEVEL_MAX
 import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.Preset
 import com.patrickreynolds.mpeinstruments.Splits
@@ -383,6 +384,15 @@ private fun SplitsPanel() {
             }
             if (row.size == 1) Spacer(Modifier.weight(1f))
         }
+    }
+    // Split: each side's level over its sounds' own, to level the sides against each other.
+    if (AppState.count > 1) {
+        PHeading("LEVELS")
+        for (k in 0 until AppState.count) {
+            val v = AppState.levels[k]
+            LabeledSlider(AppState.sideName(k), v, 0f..LEVEL_MAX, pct(v), accent = sideColour(k)) { t -> AppState.setLevel(k, Math.round(t * 20) / 20f) }
+        }
+        PNote("Each side louder or softer against the others, over its sounds' own levels.")
     }
 }
 

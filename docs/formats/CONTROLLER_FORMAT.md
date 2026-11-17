@@ -133,7 +133,7 @@ the rest.
 | `rowTurn` | optional, with `bend`: the id of a number setting saying how many degrees (clockwise on the screen) the keys' rows are turned from where they lie unturned (the Hex: `"viewTurn"`, its keyboard moved and turned). A take finds a key's row that way. |
 | `drumsFrom` | optional: for each of `parts`, the id of a `switch` the MESH sets on while that part's sound is a drum kit (an instrument in the `drums` group) and off otherwise, when the sound changes and when the controller opens. The touch pad lays out drums on it. Usually `hidden` |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
-| `settings` | its options: `choice`, `number`, `switch`, `scala` ([Scala tunings](#scala-tunings)), shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"group"` (optional): a short heading it is shown under |
+| `settings` | its options: `choice`, `number`, `switch`, `scala` ([Scala tunings](#scala-tunings)), shown on the MESH's rail as [Settings on the rail](#settings-on-the-rail) says. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers. `"retired": true` keeps one off the rail unless its group's retired switch (the one with no `showIf`) is on, so a preset from before that turned it on can still turn it off (the Grid's and Hex's second keyboard, the touch pad's two pads: the apps' splits do that now); it still works as set. `"group"` (optional): a short heading it is shown under |
 
 ## Settings on the rail
 

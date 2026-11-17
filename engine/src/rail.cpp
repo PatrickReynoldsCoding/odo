@@ -184,6 +184,23 @@ bool shown(const Json& manifest, const Json& s, const std::vector<double>& value
     return c.type == Json::Null || matches(manifest, c, values);
 }
 
+namespace {
+// A retired setting ("retired": true: what the apps' splits now do, as a controller's own second
+// grid) is on the rail only while its group's retired switch (one with no "showIf") is on, so a
+// preset from before can still turn it off; otherwise it is left out as a hidden one is (and not
+// counted as hidden in this mode).
+bool listed(const Json& ss, size_t i, const std::vector<double>& values) {
+    const Json& s = ss[i];
+    if (s["hidden"].boolean()) return false;
+    if (!s["retired"].boolean()) return true;
+    const std::string g = s["group"].str();
+    for (size_t k = 0; k < ss.size(); k++)
+        if (ss[k]["retired"].boolean() && ss[k]["group"].str() == g && ss[k]["showIf"].type == Json::Null &&
+            valueOf(ss[k], k, values) != 0) return true;
+    return false;
+}
+}  // namespace
+
 std::vector<Group> groups(const Json& manifest, const std::vector<double>& values) {
     std::vector<Group> out;
     const Json& ss = manifest["settings"];
@@ -197,12 +214,12 @@ std::vector<Group> groups(const Json& manifest, const std::vector<double>& value
     }
     for (const std::string& g : order) {
         bool any = false;
-        for (size_t i = 0; i < ss.size() && !any; i++) any = ss[i]["group"].str() == g && !ss[i]["hidden"].boolean();
+        for (size_t i = 0; i < ss.size() && !any; i++) any = ss[i]["group"].str() == g && listed(ss, i, values);
         if (any) out.push_back({g, {}, 0});
     }
     for (size_t i = 0; i < ss.size(); i++) {
         const Json& s = ss[i];
-        if (s["hidden"].boolean()) continue;
+        if (!listed(ss, i, values)) continue;
         std::string g = s["group"].str();
         auto it = std::find_if(out.begin(), out.end(), [&](const Group& x) { return x.name == g; });
         if (it == out.end()) { out.push_back({g, {}, 0}); it = out.end() - 1; }

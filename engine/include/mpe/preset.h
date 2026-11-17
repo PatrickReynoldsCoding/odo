@@ -44,6 +44,7 @@ struct Side {
                                // External MIDI, or "": any controller, the one in use
     Json settings;             // an object: setting id -> its value (a number or true/false)
     std::vector<Part> parts;   // 0 to kMaxParts
+    double level = 1;          // the side's level over its parts' own, 0 to 1.5: to level the sides of a split
 };
 
 // The room and the clock all parts share.

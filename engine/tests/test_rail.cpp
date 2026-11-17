@@ -158,6 +158,15 @@ static void grouping() {
     CHECK(back.type == Json::Array && back.size() == 3 && back[size_t(0)]["rows"][size_t(1)]["index"].num() == 4 &&
           back[size_t(0)]["rows"][size_t(0)]["widget"].str() == "switch" && back[size_t(0)]["rows"][size_t(0)]["display"].str() == "On",
           "toJson() reads back (%zu bytes)", j.size());
+    // Retired: on the rail only while its group's retired switch is on; not counted as hidden.
+    Json r = js(R"j({"settings":[
+        {"id":"x","type":"switch","group":"Two","retired":true},
+        {"id":"y","type":"number","min":0,"max":9,"step":1,"group":"Two","retired":true,"showIf":{"x":true}},
+        {"id":"z","type":"switch","group":"Other"}]})j");
+    auto rg = rail::groups(r, {0, 0, 0});
+    CHECK(rg.size() == 1 && rg[0].name == "Other" && rg[0].hiddenNow == 0, "retired, off: its group is left out (%zu groups)", rg.size());
+    rg = rail::groups(r, {1, 0, 0});
+    CHECK(rg.size() == 2 && rg[0].name == "Two" && rg[0].rows.size() == 2, "retired, on: its group shows, to turn it off");
     Json q = js(R"j({"settings":[{"id":"q","name":"Say \"hi\"","type":"choice","options":["a\\b"]}]})j");
     Json qb = Json::parse(rail::toJson(rail::groups(q, {})));
     CHECK(qb[size_t(0)]["rows"][size_t(0)]["label"].str() == "Say \"hi\"" && qb[size_t(0)]["rows"][size_t(0)]["choices"][size_t(0)].str() == "a\\b",
@@ -176,7 +185,7 @@ static void grid() {
     auto gs = rail::groups(m, v);
     std::string names;
     for (auto& g : gs) names += (names.empty() ? "" : ", ") + g.name;
-    CHECK(names == "Layout, Second grid, Notes, Touch, Look, Playing, Controls", "the Grid's groups: %s", names.c_str());
+    CHECK(names == "Layout, Notes, Touch, Look, Playing, Controls", "the Grid's groups (its second grid retired: the apps' splits): %s", names.c_str());
     bool grouped = true, noHidden = true;
     const Json& ss = m["settings"];
     for (size_t i = 0; i < ss.size(); i++) if (ss[i]["group"].str().empty()) grouped = false;
@@ -185,11 +194,11 @@ static void grid() {
     CHECK(grouped, "every Grid setting has a group");
     CHECK(noHidden && !find(rs, "notes0") && !find(rs, "bendSnap") && !find(rs, "dynamics"), "no hidden setting is on the rail");
     size_t shown = 0, ruledOut = 0;
-    for (size_t i = 0; i < ss.size(); i++) if (!ss[i]["hidden"].boolean()) { shown++; ruledOut += !rail::shown(m, ss[i], v); }
-    CHECK(rs.size() == shown - ruledOut && ruledOut == 16, "every other one is, but the 16 its mode rules out (the third grid and its octave, with no second) (%zu shown)", rs.size());
+    for (size_t i = 0; i < ss.size(); i++) if (!ss[i]["hidden"].boolean() && !ss[i]["retired"].boolean()) { shown++; ruledOut += !rail::shown(m, ss[i], v); }
+    CHECK(rs.size() == shown - ruledOut && ruledOut == 8, "every other one is, but the 8 its mode rules out (%zu shown)", rs.size());
     int counted = 0;
     for (auto& g : gs) counted += g.hiddenNow;
-    CHECK(counted == 16, "the groups count what their modes hide (%d)", counted);
+    CHECK(counted == 8, "the groups count what their modes hide, not the retired second grid (%d)", counted);
     for (auto& r : rs) if (r.id != ss[r.index]["id"].str()) { CHECK(false, "%s's index is wrong", r.id.c_str()); }
     auto cols = find(rs, "cols");
     CHECK(cols && cols->widget == Widget::Chips && cols->choices.size() == 7 && cols->chosen == 1 && cols->display == "3",
@@ -206,8 +215,10 @@ static void grid() {
     auto spacing = find(rs, "spacing");
     CHECK(spacing && spacing->widget == Widget::Slider && spacing->label == "Spacing" && spacing->display == "9%",
           "Spacing: 29 values, a slider, 9%%");
-    auto split = find(rs, "split");
-    CHECK(split && split->widget == Widget::Switch && split->display == "Off" && split->group == "Second grid", "Second grid: a switch, Off");
+    CHECK(!find(rs, "split"), "Second grid on the right, off: retired, not on the rail");
+    auto split = find(rs2, "split");
+    CHECK(split && split->widget == Widget::Switch && split->display == "On" && split->group == "Second grid",
+          "a preset from before with it on: Second grid on the right shows, On, to turn it off");
     auto key = find(rs, "key");
     CHECK(key && key->widget == Widget::Chips && key->choices.size() == 12 && key->display == "C" && key->group == "Notes", "Key: 12 chips, C");
     CHECK(rail::stepped(ss[size_t(1)], 3, 1) == 0, "Mode: on from the last (Intervals) wraps");
@@ -253,7 +264,7 @@ static void hex() {
     for (int k = 1; k <= 128; k++) own.push_back("scala" + std::to_string(k));
     own.push_back("slideSnap");
     own.push_back("snapPoints");
-    for (const char* id : {"moveKeys", "viewReset", "viewX", "viewY", "viewScale", "viewTurn", "sideMove", "place9"}) own.push_back(id);
+    for (const char* id : {"moveKeys", "viewReset", "viewX", "viewY", "viewScale", "viewTurn", "sideMove", "place9", "wholeScreen"}) own.push_back(id);
     bool same = hs.size() == gs.size() + own.size();
     for (size_t i = 0; i < gs.size() && same; i++)
         if (hs[i]["id"].str() != gs[i]["id"].str() || hs[i]["type"].str() != gs[i]["type"].str()) {
@@ -266,7 +277,7 @@ static void hex() {
     auto groups = rail::groups(m, v);
     std::string names;
     for (auto& gr : groups) names += (names.empty() ? "" : ", ") + gr.name;
-    CHECK(names == "Layout, Second keyboard, Notes, Touch, Look, Playing, Controls", "the Hex keyboard's groups, the Grid's: %s", names.c_str());
+    CHECK(names == "Layout, Notes, Touch, Look, Playing, Controls", "the Hex keyboard's groups, the Grid's: %s", names.c_str());
     auto rs = rail::rows(m, v);
     CHECK(!find(rs, "layout") && !find(rs, "chromatic") && !find(rs, "noteEdit") && !find(rs, "interval") && !find(rs, "sideLock") && !find(rs, "topNotes"),
           "none of the Grid's note modes: every key is a note of the tuning");
@@ -295,10 +306,19 @@ static void hex() {
     CHECK(m["rowTurn"].str() == "viewTurn" && m["bend"].str() == "two fingers out", "its rows turn with viewTurn (for takes)");
     auto col = find(rs, "colours");
     CHECK(col && col->choices.size() == 9 && col->display == "Sharps and flats", "Colours: the Grid's and four more, Sharps and flats");
-    // Its touch is its own: the Grid's slide, vibrato and slide-out settings are not on its rail;
+    // Its touch is its own: the Grid's vibrato and slide-out settings are not on its rail; Slide
+    // between notes is (Hex 2.3.0), its glide only with it on, and Whole screen only with it off;
     // its slide's snap is, the points only with it on.
-    for (const char* id : {"slide", "slideOnly", "sideSlide", "sideOut", "outOn", "vibrato", "slideGlide", "xTarget"})
+    for (const char* id : {"slideOnly", "sideSlide", "sideOut", "outOn", "vibrato", "slideGlide", "xTarget"})
         CHECK(!find(rs, id), "%s: not on the Hex keyboard's rail", id);
+    auto sl = find(rs, "slide"), ws = find(rs, "wholeScreen");
+    CHECK(sl && sl->group == "Touch" && sl->display == "Off" && ws && ws->group == "Touch", "Slide between notes and Whole screen: in Touch");
+    {
+        auto vs = defaults(m);
+        vs[idx(m, "slide")] = 1;
+        auto r2 = rail::rows(m, vs);
+        CHECK(find(r2, "slideGlide") && !find(r2, "wholeScreen"), "sliding: Glide shows, Whole screen does not");
+    }
     auto sn = find(rs, "slideSnap");
     CHECK(sn && sn->group == "Touch" && sn->widget == Widget::Switch && !find(rs, "snapPoints"), "Snap the slide to points: a switch in Touch, off");
     {
@@ -334,7 +354,7 @@ static void tonnetzAndTouchpad() {
     gs = rail::groups(p, defaults(p));
     names.clear();
     for (auto& g : gs) names += (names.empty() ? "" : ", ") + g.name;
-    CHECK(names == "Layout, Notes, Two pads, Chords, Touch, Playing, Look", "the touch pad's groups: %s", names.c_str());
+    CHECK(names == "Layout, Notes, Chords, Touch, Playing, Look", "the touch pad's groups (Two pads retired): %s", names.c_str());
     {
         auto pr = rail::rows(p, defaults(p));
         CHECK(!find(pr, "wheelOuter") && !find(pr, "gridRow1") && !find(pr, "rightNotes"), "A scale, one pad: no chord settings, no right pad's");

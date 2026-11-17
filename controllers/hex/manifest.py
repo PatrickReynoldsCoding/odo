@@ -9,12 +9,13 @@ g = json.load(open(root + '/controllers/grid/controller.json'), object_pairs_hoo
 m = collections.OrderedDict()
 m['format'] = 1
 m['id'] = 'patrickreynolds/hex'
-m['version'] = '2.2.0'
+m['version'] = '2.3.0'
 m['name'] = 'Hex'
 m['description'] = ("Hexagonal keys in an isomorphic layout, as on a Lumatone: every chord and scale has the same shape "
                     "in every key. Wicki-Hayden, Harmonic table or Bosanquet, in 12, 19, 22, 31, 41 or 53 equal steps or "
-                    "just intonation, or a Scala file's tuning. Dynamics and tone inside a key; two fingers in a key, slid out of it, "
-                    "bend the note toward the keys either way (snapped to points if you like); press harder for pressure. "
+                    "just intonation, or a Scala file's tuning. Dynamics and tone inside a key, or across the whole screen; two fingers in a key, "
+                    "slid out of it, bend the note toward the keys either way (snapped to points if you like), or slide between notes; "
+                    "press harder for pressure. "
                     "Move the keyboard with two fingers: drag it, size it, turn it")
 for k in ('author', 'licence'):
     m[k] = g[k]
@@ -60,10 +61,10 @@ words = {
     'noteEdit': dict(hidden=True),
     'interval': dict(hidden=True),
     # Its touch past the inside of a key is its own (two fingers to slide): the Grid's ways out of a
-    # square, vibrato and Slide between notes are not used.
+    # square and vibrato are not used. Slide between notes is (a finger plays the key under it, gliding
+    # if you like); while it is on, two fingers do not slide.
     'xTarget': dict(hidden=True), 'yTarget': dict(hidden=True), 'bendRange': dict(hidden=True),
-    'vibrato': dict(hidden=True, default=0), 'slide': dict(hidden=True, default=False),
-    'slideGlide': dict(hidden=True), 'glideLR': dict(hidden=True), 'glideUD': dict(hidden=True),
+    'vibrato': dict(hidden=True, default=0), 'slide': dict(default=False),
     'slideOnly': dict(hidden=True, default=False), 'sideSlide': dict(hidden=True, default=0),
     'outOn': dict(hidden=True), 'sideOut': dict(hidden=True, default=0),
 }
@@ -79,7 +80,7 @@ for s in g['settings']:
 
 def S(**kw):
     o = collections.OrderedDict()
-    for k in ('id', 'name', 'type', 'options', 'min', 'max', 'step', 'default', 'hidden', 'group', 'showIf'):
+    for k in ('id', 'name', 'type', 'options', 'min', 'max', 'step', 'default', 'hidden', 'retired', 'group', 'showIf'):
         if k in kw:
             o[k] = kw[k]
     return o
@@ -118,6 +119,12 @@ settings += [
     S(id='viewTurn', name='Keyboard turned (degrees)', type='number', min=0, max=360, step=0, default=0, hidden=True, group='Layout'),
     S(id='sideMove', name='Move button', type='choice', options=['Off', 'Top', 'Bottom'], default=1, group='Controls'),
     S(id='place9', name='Moved control 10', type='number', min=0, max=9007199254740991, step=1, default=0, hidden=True, group='Controls'),
+]
+# The whole screen (for small screens, hex.c S_WHOLE): where a finger lands in a key does not matter,
+# every note starts the same; then up and down the screen is its dynamics, left and right its tone.
+settings += [
+    S(id='wholeScreen', name='Whole screen for dynamics (small screens)', type='switch', default=False, group='Touch',
+      showIf={'slide': False}),
 ]
 m['settings'] = settings
 out = json.dumps(m, ensure_ascii=False, indent=2)
